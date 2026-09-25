@@ -59,6 +59,8 @@ def main():
 
             def request(path, authenticated=False):
                 headers = {'Accept': 'text/plain' if authenticated and path == '/actuator/prometheus' else 'application/json'}
+                if path == '/preview':
+                    headers['Accept'] = 'text/html'
                 if authenticated:
                     headers['Authorization'] = f'Basic {basic}'
                 req = urllib.request.Request(base_url + path, headers=headers)

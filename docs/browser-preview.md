@@ -77,3 +77,30 @@ npm run test:browser
 来源：[Keycloakify 入口](https://github.com/keycloakify/keycloakify-starter/blob/main/src/main.tsx)、
 [登录表单](https://github.com/keycloakify/keycloakify/blob/main/src/login/pages/Login.tsx)、
 [Vite 构建](https://vite.dev/guide/build)。
+
+## 2026-09-25 本地验证结果
+
+本轮应用代码为 `dcf634d`，随后修正 smoke 对 HTML 入口的 Accept 请求头。
+使用固定 GraalVM Java 25.0.2 镜像，构建限制 4 CPU / 8 GiB；原生应用采用默认 O2。
+
+| 检查 | 结果 |
+|---|---|
+| 前端 TypeScript / Vite、bootJar | 通过 |
+| JVM test / testAot / nativeTest | 各 6 项，0 失败、0 跳过 |
+| Native 应用 smoke | liveness UP；匿名应用及指标 401；认证指标 200；健康请求计数增加 3 |
+| 默认关闭 / 显式开启预览 | HTML 请求分别 404 / 200，在同一 Native 构建上实测 |
+| Native 上的 Chromium 测试 | 3 项通过，包含整页原生 POST、无 fetch/XHR、缓存、转义与移动端 |
+| ELF 文件大小 | 126,291,016 bytes，约 120.44 MiB，不是容器镜像大小 |
+| 启动到 liveness 可响应 | 单次 0.351 秒 |
+| smoke 请求后 RSS | 148,996 KiB，约 145.50 MiB |
+| 模拟限速下的首屏 | 从导航开始到 React 提交 DOM：1,702 ms |
+| 模拟限速下的缓存后切换 | Playwright 点击开始到下一页标题可见：560 ms |
+
+浏览器计时条件为 60ms 网络延迟、1.5Mbps 下载、0.75Mbps 上传及四倍 CPU slowdown。
+这是单次、本机、模拟网络测量，不是生产 SLA，两个计时区间也不同；不据此声称 Native
+比 JVM 快多少。原型没有启用 HTTP 压缩，首屏实际下载约 223KB JS；构建日志中的约 70KB
+是 gzip 估算，不是本轮实际传输大小。后续页面的 JS `transferSize=0`，确认命中浏览器缓存。
+
+本轮没有新增反射补丁。Native 测试日志以及 smoke 的启动、请求、关闭阶段未发现 Native
+反射或资源注册错误。生成目录中的配套 `.so` 文件应随 Native 产物保留；这里不承诺单文件
+静态链接交付。AD、真实 MFA、Hydra 和人类验收不在这些结果范围内。
