@@ -67,7 +67,7 @@ Docker 开发使用 `scripts/gradle-in-docker`，默认持久挂载 Gradle 缓�
 JVM、AOT、Native 测试及原生应用 HTTP 检查已通过，实测范围与资源数据见
 [本地验证结果](docs/bootstrap.md#2026-09-25-本地验证结果)。
 新增 AD 路径本轮按维护者要求只进行 JVM 验证，不沿用基线的 Native 验收结论。
-真实目录密码和组结果需人类验收；MFA 与 Hydra 链路仍待实现。
+真实目录密码与属性/直接所属组读取已通过维护者浏览器验收；MFA 与 Hydra 链路仍待实现。
 
 ## 浏览器流程预览
 

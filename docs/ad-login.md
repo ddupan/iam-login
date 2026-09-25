@@ -100,6 +100,7 @@ AD 根范围查询可能返回 DomainDnsZones/ForestDnsZones 等分区 referral�
 浏览器已检查登录表单渲染、真实 CSRF 原生 POST 和失败后清空密码；只使用在访问 AD 前
 即拒绝的合成外域用户名，不尝试猜测人类密码。浏览器回归共 1 项通过，包含移动端布局。
 复现：`IAM_AD_URL=https://验收域名:端口 npm --prefix frontend run test:browser -- ad-login.spec.ts`。
-实际人类密码与组结果仍需维护者
-在 HTTPS 页面输入凭据验收，不在聊天、命令行或日志中传递人类密码。
+维护者已在 HTTPS 页面完成真实密码验证，成功到达待 MFA 页面，并反馈目录标识、邮箱与
+六个直接所属组的查询结果。该验收覆盖 Samba AD 第一因素与属性读取，不表示 MFA、
+嵌套组/主组等价性或 Hydra 登录已完成。不在聊天、命令行或日志中传递人类密码。
 新增 AD 路径尚未进行 Native 测试，不能复用旧 UI 原型的 Native 结论。
