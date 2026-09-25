@@ -68,6 +68,8 @@ java -Djavax.net.ssl.trustStore=/run/iam/truststore \
 
 这里 truststore 仅含公开信任锚，口令不是目录密码。保留所需公共根证书；不得禁用
 LDAP endpoint identification 或用信任所有证书的 socket factory。连接/读取超时为 3/5 秒。
+AD 根范围查询可能返回 DomainDnsZones/ForestDnsZones 等分区 referral；配置为 ignore，
+由 Spring AD provider 忽略 partial result，不使用 throw 打断用户查询，也不 follow 转发用户凭据。
 
 浏览器入口只接受 HTTPS；明文请求返回 426。默认不信任转发头。若以后由代理终结 TLS，
 必须配合仅受信代理可达的后端网络和转发头配置，不能公开一个信任任意 forwarded header

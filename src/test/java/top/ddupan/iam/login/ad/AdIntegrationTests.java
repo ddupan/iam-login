@@ -4,6 +4,8 @@ import com.unboundid.ldap.listener.InMemoryDirectoryServer;
 import com.unboundid.ldap.listener.InMemoryDirectoryServerConfig;
 import com.unboundid.ldap.listener.InMemoryListenerConfig;
 import com.unboundid.ldap.listener.interceptor.InMemoryInterceptedSimpleBindRequest;
+import com.unboundid.ldap.listener.interceptor.InMemoryInterceptedSearchResult;
+import com.unboundid.ldap.sdk.SearchResultReference;
 import com.unboundid.ldap.listener.interceptor.InMemoryOperationInterceptor;
 import com.unboundid.ldap.sdk.Entry;
 import com.unboundid.ldap.sdk.LDAPException;
@@ -75,6 +77,16 @@ class AdIntegrationTests {
                 InetAddress.getByName("127.0.0.1"), 0, ssl.getServerSocketFactory(), ssl.getSocketFactory()));
             config.addInMemoryOperationInterceptor(new InMemoryOperationInterceptor() {
                 @Override
+                public void processSearchResult(InMemoryInterceptedSearchResult result) {
+                    try {
+                        // Like Samba AD's DomainDnsZones/ForestDnsZones continuation references.
+                        // A client following this reference would fail instead of returning the user.
+                        result.sendSearchReference(new SearchResultReference(
+                            new String[]{"ldap://127.0.0.1:1/DC=other,DC=test"}, null));
+                    } catch (LDAPException ex) { throw new IllegalStateException(ex); }
+                }
+
+                @Override
                 public void processSimpleBindRequest(InMemoryInterceptedSimpleBindRequest request) throws LDAPException {
                     String name = request.getRequest().getBindDN();
                     String subcode = switch (name) {
@@ -123,7 +135,7 @@ class AdIntegrationTests {
     @Autowired MockMvc mvc;
 
     @Test
-    void passwordReadsGuidAndExactGroupsOverTls() {
+    void passwordReadsGuidAndExactGroupsOverTlsDespitePartitionReferrals() {
         var identity = verifier.verify("alice", "fixture-password");
         assertThat(identity.objectGuid()).isEqualTo("00112233-4455-6677-8899-aabbccddeeff");
         assertThat(identity.groups()).containsExactly("MixedCase", "gitea-admins");

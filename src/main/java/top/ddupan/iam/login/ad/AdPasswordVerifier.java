@@ -48,11 +48,13 @@ public class AdPasswordVerifier {
         provider.setConvertSubErrorCodesToExceptions(true);
         provider.setUseAuthenticationRequestCredentials(false);
         provider.setSearchFilter("(&(objectClass=user)(!(objectClass=computer))(userPrincipalName={0}))");
+        // AD domain searches include other naming-context references. Ignore them (never follow
+        // with user credentials); Spring's AD provider already ignores partial-result exceptions.
         provider.setContextEnvironmentProperties(Map.of(
             "com.sun.jndi.ldap.connect.timeout", "3000",
             "com.sun.jndi.ldap.read.timeout", "5000",
             "java.naming.ldap.attributes.binary", "objectGUID",
-            "java.naming.referral", "throw"));
+            "java.naming.referral", "ignore"));
         // Directory groups are mapped independently; do not confuse FACTOR_PASSWORD with a group.
         provider.setAuthoritiesPopulator((entry, username) -> List.of());
         provider.setUserDetailsContextMapper(new IdentityMapper());
