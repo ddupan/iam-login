@@ -1,15 +1,51 @@
 package top.ddupan.iam.login;
 
+import io.micrometer.core.instrument.MeterRegistry;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.boot.micrometer.metrics.test.autoconfigure.AutoConfigureMetrics;
+import org.springframework.boot.micrometer.tracing.test.autoconfigure.AutoConfigureTracing;
+import org.springframework.boot.opentelemetry.autoconfigure.logging.otlp.OtlpLoggingConnectionDetails;
+import org.springframework.boot.opentelemetry.autoconfigure.logging.otlp.Transport;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.context.annotation.Import;
+import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.testcontainers.grafana.LgtmStackContainer;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.utility.DockerImageName;
 
-@Import(TestcontainersConfiguration.class)
+import static org.assertj.core.api.Assertions.assertThat;
+
 @SpringBootTest
+@AutoConfigureMetrics
+@AutoConfigureTracing
+@Testcontainers
 class IamLoginApplicationTests {
 
+	// Field-based service connections are recreated by the test context in AOT mode.
+	@Container
+	@ServiceConnection
+	static final LgtmStackContainer grafanaLgtm = new LgtmStackContainer(
+			DockerImageName.parse(TestcontainersConfiguration.LGTM_IMAGE));
+
+	@Autowired
+	OtlpLoggingConnectionDetails loggingConnectionDetails;
+
+	@Autowired
+	@Qualifier("prometheusMeterRegistry")
+	MeterRegistry prometheus;
+
 	@Test
-	void contextLoads() {
+	void processCpuTimeCanBeRead() {
+		assertThat(prometheus.get("process.cpu.time").functionCounter().count()).isFinite().isNotNegative();
+	}
+
+	@Test
+	void loggingConnectionUsesRunningContainer() {
+		assertThat(grafanaLgtm.isRunning()).isTrue();
+		assertThat(loggingConnectionDetails.getUrl(Transport.HTTP))
+				.isEqualTo(grafanaLgtm.getOtlpHttpUrl() + "/v1/logs");
 	}
 
 }
