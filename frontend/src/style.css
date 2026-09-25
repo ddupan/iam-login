@@ -1,0 +1,240 @@
+:root {
+  font-family: Inter, "Noto Sans SC", system-ui, sans-serif;
+  color: #182826;
+  background: #f3f5f1;
+  font-synthesis: none;
+  font-size: 16px;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+}
+main {
+  max-width: 520px;
+  margin: 0 auto;
+  padding: 40px 20px 28px;
+}
+header {
+  margin-bottom: 40px;
+}
+.brand {
+  font-size: 32px;
+  font-weight: 750;
+  letter-spacing: -2px;
+  color: #285448;
+  text-decoration: none;
+}
+.brand > span:first-child {
+  font-weight: 400;
+}
+.badge {
+  font-size: 11px;
+  letter-spacing: 1px;
+  vertical-align: middle;
+  margin-left: 14px;
+  padding: 5px 8px;
+  border: 1px solid #b7c9be;
+  border-radius: 5px;
+}
+.card {
+  background: #fff;
+  border: 1px solid #dce4dd;
+  border-radius: 18px;
+  padding: 36px;
+  box-shadow: 0 12px 40px #173f2510;
+}
+.eyebrow {
+  font-size: 12px;
+  color: #60746a;
+  letter-spacing: 2px;
+}
+.steps {
+  display: flex;
+  justify-content: space-between;
+  padding: 0;
+  list-style: none;
+  margin: 25px 0 32px;
+  gap: 8px;
+}
+.steps li {
+  font-size: 12px;
+  color: #718078;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.steps li span {
+  display: inline-grid;
+  place-items: center;
+  width: 23px;
+  height: 23px;
+  border: 1px solid #ccd7ce;
+  border-radius: 50%;
+  font-size: 11px;
+}
+.steps [aria-current] {
+  color: #215542;
+  font-weight: 650;
+}
+.steps [aria-current] span {
+  background: #215542;
+  color: white;
+  border-color: #215542;
+}
+h1 {
+  font-size: 27px;
+  letter-spacing: -0.5px;
+  line-height: 1.35;
+  margin: 0 0 12px;
+  overflow-wrap: anywhere;
+}
+.intro {
+  font-size: 14px;
+  color: #60716a;
+  line-height: 1.8;
+  margin: 0 0 25px;
+}
+label {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+}
+input:not([type="hidden"]) {
+  display: block;
+  width: 100%;
+  border: 1px solid #bdccc1;
+  border-radius: 8px;
+  padding: 13px 14px;
+  margin: 9px 0 22px;
+  font: inherit;
+  color: inherit;
+  background: #fff;
+}
+input:focus {
+  outline: 3px solid #a9cbbc;
+  outline-offset: 2px;
+}
+button {
+  font: inherit;
+  cursor: pointer;
+}
+.primary {
+  width: 100%;
+  border: 0;
+  background: #245b47;
+  color: #fff;
+  font-weight: 600;
+  border-radius: 8px;
+  padding: 13px;
+}
+.primary:hover {
+  background: #194734;
+}
+.primary:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+.error {
+  color: #9e302b;
+  background: #fff0ed;
+  padding: 12px;
+  border-radius: 8px;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.back {
+  display: block;
+  text-align: center;
+  font-size: 13px;
+  margin-top: 18px;
+  color: #476a58;
+}
+.help {
+  border-top: 1px solid #e5ebe6;
+  margin-top: 28px;
+  padding-top: 20px;
+}
+.link {
+  background: none;
+  border: 0;
+  color: #5b7064;
+  padding: 0;
+  font-size: 13px;
+}
+.help p {
+  font-size: 13px;
+  line-height: 1.8;
+  color: #6a756e;
+  margin-bottom: 0;
+}
+footer {
+  text-align: center;
+  color: #7c887e;
+  font-size: 12px;
+  margin-top: 28px;
+}
+.success {
+  color: #245b47;
+  font-size: 30px;
+  margin-bottom: 12px;
+}
+a:focus-visible,
+button:focus-visible {
+  outline: 3px solid #a9cbbc;
+  outline-offset: 3px;
+}
+@media (max-width: 480px) {
+  main {
+    padding-top: 24px;
+  }
+  header {
+    margin-bottom: 24px;
+  }
+  .card {
+    padding: 26px 22px;
+  }
+  .steps {
+    gap: 5px;
+  }
+  .steps li {
+    font-size: 11px;
+  }
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    background: #14221c;
+    color: #edf4ee;
+  }
+  .card {
+    background: #1e3027;
+    border-color: #344b3d;
+  }
+  .brand,
+  .steps [aria-current],
+  .success {
+    color: #b9ddc8;
+  }
+  .intro,
+  .eyebrow,
+  .help p,
+  .link,
+  .back {
+    color: #acbfb2;
+  }
+  .steps li {
+    color: #98aa9e;
+  }
+  input:not([type="hidden"]) {
+    background: #18271f;
+    border-color: #526657;
+  }
+  .help {
+    border-color: #3a4d40;
+  }
+  .error {
+    background: #492b29;
+    color: #ffc3b9;
+  }
+}

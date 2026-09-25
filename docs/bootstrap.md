@@ -126,3 +126,6 @@ Prometheus 注册器中的 CPU 时间计数器并断言数值有效，避免后�
 这是一次本地 smoke 测量，启动耗时含检查器轮询，RSS 不是峰值或负载预算，ELF 大小不等于
 运行镜像大小。未验证 AD、MFA、Hydra、目录就绪或 OTLP 后端数据查询，也尚未接入 CI。
 运行报告生成在 `build/reports/native-smoke/result.json`，不提交运行日志或构建产物。
+
+手写 Native 补丁位于 `META-INF/native-image/top.ddupan.iam/iam-login-manual/`，
+与 Spring AOT 生成的 `iam-login/` 目录分开，避免 `bootJar` 中同名元数据冲突。

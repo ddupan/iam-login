@@ -46,12 +46,14 @@ Native 构建与原生二进制上的认证测试是交付要求；JVM 测试通
 [项目初始化](docs/bootstrap.md)。使用 JDK 25 执行：
 
 ```sh
+npm --prefix frontend ci
+npm --prefix frontend run build
 ./gradlew test testAot
 ./gradlew bootRun
 ```
 
 测试需要可用的 Docker，生成器配置了 Grafana LGTM Testcontainer。
-当前只有默认应用和上下文测试，默认 Spring Security 登录页不是可用的 IAM 登录流程。
+当前有隔离的浏览器交互原型与上下文测试，默认 Spring Security 登录页不是可用的 IAM 登录流程。
 使用 GraalVM 25 验证原生测试与编译：
 
 ```sh
@@ -64,3 +66,9 @@ Docker 开发使用 `scripts/gradle-in-docker`，默认持久挂载 Gradle 缓�
 JVM、AOT、Native 测试及原生应用 HTTP 检查已通过，实测范围与资源数据见
 [本地验证结果](docs/bootstrap.md#2026-09-25-本地验证结果)。
 AD、MFA 与 Hydra 认证链路仍待实现与验收。
+
+## 浏览器流程预览
+
+人类登录界面采用 React + Vite，参考 Keycloakify 的内联上下文与原生表单提交方式。
+原型默认关闭，仅测试页面切换与局部交互，不执行真实认证。启动、浏览器测试和边界见
+[浏览器流程原型](docs/browser-preview.md)。

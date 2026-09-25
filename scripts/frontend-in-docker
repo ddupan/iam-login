@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -euo pipefail
+repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+cache_dir=${IAM_NPM_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/iam-login/npm}
+mkdir -p -- "$cache_dir"
+cache_dir=$(cd -- "$cache_dir" && pwd)
+docker_cmd=(docker)
+if [[ ${IAM_DOCKER_USE_SUDO:-0} == 1 ]]; then
+  docker_cmd=(sudo -n docker)
+fi
+exec "${docker_cmd[@]}" run --rm --network host \
+  --cpus 2 --memory 1g --user "$(id -u):$(id -g)" \
+  -e HOME=/npm -e npm_config_cache=/npm \
+  -v "$cache_dir:/npm" -v "$repo_root:/workspace" \
+  -w /workspace/frontend node@sha256:d8e448a56fc63242f70026718378bd4b00f8c82e78d20eefb199224a4d8e33d8 \
+  sh -c 'npm ci --no-audit --no-fund && npm run build'

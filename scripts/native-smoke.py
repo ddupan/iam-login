@@ -78,6 +78,7 @@ def main():
             ready_seconds = time.monotonic() - started
             assert request('/actuator/prometheus')[0] == 401, 'Anonymous metrics must be rejected'
             assert request('/')[0] == 401, 'Anonymous application access must be rejected'
+            assert request('/preview')[0] == 404, 'UI preview must be disabled by default'
             status, before = request('/actuator/prometheus', authenticated=True)
             assert status == 200, 'Authenticated Prometheus scrape failed'
             for _ in range(3):
