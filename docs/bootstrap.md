@@ -88,11 +88,11 @@ Docker Desktop 的网络方式需按平台调整。首次本地验证使用 `/tm
 参考 [Spring Boot Testcontainers](https://docs.spring.io/spring-boot/reference/testing/testcontainers.html)
 与 [Native Build Tools Gradle 配置](https://graalvm.github.io/native-build-tools/latest/gradle-plugin.html)。
 
-## Protobuf Native 元数据
+## Native 反射元数据
 
 Micrometer OTLP 使用的 Protobuf 4.35.1 通过反射调用 `ExtensionRegistry` 的
 `getEmptyRegistry()` 与 `newInstance()`。实际原生应用启动曾因前一个方法缺少注册而失败，
-项目的 `reachability-metadata.json` 只补充这两个工厂方法。升级依赖时应重新验证能否移除。
+项目的 `reachability-metadata.json` 中对 Protobuf 只补充这两个工厂方法。升级依赖时应重新验证能否移除。
 
 上下文测试显式启用 `@AutoConfigureMetrics` 与 `@AutoConfigureTracing`，初始化真实导出器，
 避免 Spring 测试默认关闭导出导致 Native 问题漏测。它验证初始化及容器连接信息，完整的
@@ -102,3 +102,27 @@ Micrometer 1.17.1 自带的反射声明已覆盖 CPU 使用率和文件描述符
 `OperatingSystemMXBean.getProcessCpuTime()`。项目只补这一项；回归测试直接读取
 Prometheus 注册器中的 CPU 时间计数器并断言数值有效，避免后台导出异常被误报为测试通过。
 其他 JVM 指标在 Native 中的语义仍需分别验证，不能保证 HotSpot 仪表盘完全适用。
+
+## 2026-09-25 本地验证结果
+
+代码版本 `4c7be4c`，Java/GraalVM 25.0.2、Gradle 9.7.1，Linux amd64，Native 目标
+`x86-64-v3`。构建容器限制 4 CPU、8 GiB；应用使用默认 O2 优化，测试镜像使用 quickBuild。
+
+| 验证 | 结果 |
+|---|---|
+| JVM `test` | 2 成功，0 失败，0 跳过 |
+| JVM AOT `testAot` | 2 成功，0 失败，0 跳过 |
+| `nativeTest` | 2 成功，0 失败，0 跳过；包含真实导出器初始化及 CPU 时间读取 |
+| `nativeCompile` | 成功；生成独立 ELF，动态链接 libc、libz |
+| 原生应用 liveness | UP |
+| 匿名应用／指标请求 | 401 |
+| 带临时测试凭据的 Prometheus 请求 | 200 |
+| 额外 3 次 liveness 请求 | HTTP 计数器增加 3 |
+| 运行及关闭阶段 Native 注册错误 | 未发现 |
+| 启动至首次 liveness 响应 | 0.582 秒 |
+| 请求后进程 RSS | 144.56 MiB |
+| ELF 文件大小 | 119.88 MiB |
+
+这是一次本地 smoke 测量，启动耗时含检查器轮询，RSS 不是峰值或负载预算，ELF 大小不等于
+运行镜像大小。未验证 AD、MFA、Hydra、目录就绪或 OTLP 后端数据查询，也尚未接入 CI。
+运行报告生成在 `build/reports/native-smoke/result.json`，不提交运行日志或构建产物。

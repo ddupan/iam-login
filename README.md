@@ -61,4 +61,6 @@ Native 构建与原生二进制上的认证测试是交付要求；JVM 测试通
 
 Docker 开发使用 `scripts/gradle-in-docker`，默认持久挂载 Gradle 缓存。
 原生应用可用 `python3 scripts/native-smoke.py` 检查启动、默认访问控制和 HTTP 指标。
-这些检查不代表完整认证链路已通过 Native 验收。
+JVM、AOT、Native 测试及原生应用 HTTP 检查已通过，实测范围与资源数据见
+[本地验证结果](docs/bootstrap.md#2026-09-25-本地验证结果)。
+AD、MFA 与 Hydra 认证链路仍待实现与验收。
