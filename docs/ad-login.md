@@ -96,7 +96,8 @@ LDAP endpoint identification 或用信任所有证书的 socket factory。连接
 2026-09-25：JVM 测试共 12 项通过（原有 6 项、新增 AD 6 项），`bootJar` 构建通过。
 实际 JVM 使用受信 CA 完成 Samba AD RootDSE 查询，HTTPS 页面返回 200。
 浏览器已检查登录表单渲染、真实 CSRF 原生 POST 和失败后清空密码；只使用在访问 AD 前
-即拒绝的合成外域用户名，不尝试猜测人类密码。
+即拒绝的合成外域用户名，不尝试猜测人类密码。浏览器回归共 1 项通过，包含移动端布局。
+复现：`IAM_AD_URL=https://验收域名:端口 npm --prefix frontend run test:browser -- ad-login.spec.ts`。
 实际人类密码与组结果仍需维护者
 在 HTTPS 页面输入凭据验收，不在聊天、命令行或日志中传递人类密码。
 新增 AD 路径尚未进行 Native 测试，不能复用旧 UI 原型的 Native 结论。
