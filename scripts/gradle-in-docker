@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+cache_dir=${IAM_GRADLE_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/iam-login/gradle}
+mkdir -p -- "$cache_dir"
+cache_dir=$(cd -- "$cache_dir" && pwd)
+docker_cmd=(docker)
+if [[ ${IAM_DOCKER_USE_SUDO:-0} == 1 ]]; then
+  docker_cmd=(sudo -n docker)
+fi
+if (($# == 0)); then
+  set -- test
+fi
+
+# Linux host networking is needed for Testcontainers' published ports.
+exec "${docker_cmd[@]}" run --rm --network host \
+  --cpus "${IAM_BUILD_CPUS:-4}" --memory "${IAM_BUILD_MEMORY:-8g}" \
+  --user "$(id -u):$(id -g)" \
+  --group-add "$(stat -c %g /var/run/docker.sock)" \
+  -e LANG=C.UTF-8 \
+  -e HOME=/gradle \
+  -e JAVA_TOOL_OPTIONS=-Duser.home=/gradle \
+  -e GRADLE_USER_HOME=/gradle \
+  -e TESTCONTAINERS_HOST_OVERRIDE=127.0.0.1 \
+  -v "$cache_dir:/gradle" \
+  -v "$repo_root:/workspace" \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -w /workspace --entrypoint /workspace/gradlew \
+  ghcr.io/graalvm/native-image-community@sha256:0d936f32bb8acb5bc60c41b33e05f064d7a6aaf36b726538296c54949bd4a3c0 \
+  --no-daemon --max-workers="${IAM_BUILD_CPUS:-4}" "$@"

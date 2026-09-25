@@ -46,7 +46,7 @@ Native 构建与原生二进制上的认证测试是交付要求；JVM 测试通
 [项目初始化](docs/bootstrap.md)。使用 JDK 25 执行：
 
 ```sh
-./gradlew test
+./gradlew test testAot
 ./gradlew bootRun
 ```
 
@@ -59,4 +59,6 @@ Native 构建与原生二进制上的认证测试是交付要求；JVM 测试通
 ./gradlew nativeCompile
 ```
 
-这些是构建入口，不代表完整认证链路已通过 Native 验收。
+Docker 开发使用 `scripts/gradle-in-docker`，默认持久挂载 Gradle 缓存。
+原生应用可用 `python3 scripts/native-smoke.py` 检查启动、默认访问控制和 HTTP 指标。
+这些检查不代表完整认证链路已通过 Native 验收。

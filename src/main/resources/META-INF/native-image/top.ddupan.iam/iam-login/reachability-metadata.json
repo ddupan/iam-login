@@ -1,0 +1,26 @@
+{
+  "reflection": [
+    {
+      "type": "com.google.protobuf.ExtensionRegistry",
+      "methods": [
+        {
+          "name": "getEmptyRegistry",
+          "parameterTypes": []
+        },
+        {
+          "name": "newInstance",
+          "parameterTypes": []
+        }
+      ]
+    },
+    {
+      "type": "com.sun.management.OperatingSystemMXBean",
+      "methods": [
+        {
+          "name": "getProcessCpuTime",
+          "parameterTypes": []
+        }
+      ]
+    }
+  ]
+}

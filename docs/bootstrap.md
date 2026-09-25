@@ -32,12 +32,10 @@ Actuator 与 Prometheus 依赖存在不等于监控端点已按生产策略开�
 构建环境为 `ghcr.io/graalvm/native-image-community:25`，固定 digest：
 `sha256:0d936f32bb8acb5bc60c41b33e05f064d7a6aaf36b726538296c54949bd4a3c0`。
 
-2026-09-25 在上述 GraalVM 容器（Java 25.0.2）中执行 `./gradlew --no-daemon --max-workers=4 test`
-通过，包含测试 AOT 处理和 1 个 JVM 上下文测试。Grafana LGTM Testcontainer 实际启动成功。
-当前 Gradle 骨架的 `nativeCompile` 与 `nativeTest` 尚未执行，不声明 Native 已通过。
-
-生成的上下文测试通过 Testcontainers 启动 Grafana LGTM，需访问 Docker。
-它不连接真实 AD 或 Hydra，也不验证 MFA。Native 骨架测试不代替完整认证链路验收。
+验证分为 `test`（JVM）、`testAot`（JVM 上的 AOT 上下文）、`nativeTest`（原生测试）
+和应用二进制 HTTP 检查。JVM/AOT/Native 测试均使用真实 LGTM Testcontainer，
+显式初始化指标、追踪导出器，并验证容器连接与 CPU 时间读取。结果随 PR 记录。
+这些检查不连接真实 AD 或 Hydra，也不验证 MFA。
 
 ## Docker 开发与 Gradle 缓存
 
@@ -45,23 +43,62 @@ Linux 主机示例：将缓存保留在宿主机用户缓存目录，避免每�
 插件和依赖。项目工作目录也需要挂载，以保留 `build/` 和项目级 `.gradle/`。
 
 ```sh
-IAM_GRADLE_CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/iam-login/gradle"
-mkdir -p "$IAM_GRADLE_CACHE"
-docker run --rm --network host \
-  --user "$(id -u):$(id -g)" \
-  --group-add "$(stat -c %g /var/run/docker.sock)" \
-  -e LANG=C.UTF-8 \
-  -e GRADLE_USER_HOME=/gradle \
-  -e TESTCONTAINERS_HOST_OVERRIDE=127.0.0.1 \
-  -v "$IAM_GRADLE_CACHE:/gradle" \
-  -v "$PWD:/workspace" \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  -w /workspace --entrypoint /bin/bash \
-  ghcr.io/graalvm/native-image-community@sha256:0d936f32bb8acb5bc60c41b33e05f064d7a6aaf36b726538296c54949bd4a3c0 \
-  -c './gradlew --no-daemon --max-workers=4 test'
+scripts/gradle-in-docker test testAot
+scripts/gradle-in-docker nativeTest nativeCompile
+python3 scripts/native-smoke.py
 ```
+
+`scripts/gradle-in-docker` 默认挂载 `${XDG_CACHE_HOME:-$HOME/.cache}/iam-login/gradle` 到
+容器 `/gradle`，并设置 Gradle 缓存与构建用户目录到该目录，避免无 passwd 条目的宿主 UID
+导致 Testcontainers 向项目内的 `?/` 写配置。原生测试同时显式传入 `user.home`。可通过 `IAM_GRADLE_CACHE` 覆盖宿主路径；
+默认限制 4 CPU、8 GiB 内存，可通过 `IAM_BUILD_CPUS`、`IAM_BUILD_MEMORY` 调整。
+需要 sudo 才能访问 Docker 时设置 `IAM_DOCKER_USE_SUDO=1`；只提升 Docker 命令权限，
+容器内仍使用当前用户 UID/GID。
 
 宿主机 Docker socket 供 Testcontainers 使用，host network 让测试能访问它启动的动态端口。
 Docker Desktop 的网络方式需按平台调整。首次本地验证使用 `/tmp/iam-login-gradle` 作为
 上述缓存目录，未写入仓库；长期开发使用持久缓存目录。构建容器使用宿主 UID/GID，
 避免产物和缓存变为 root 所有。
+
+## 原生启动检查
+
+`native-smoke.py` 在 Linux 上直接启动 `build/native/nativeCompile/iam-login` ELF 文件，
+不调用 Java。需要 Python 3 标准库及编译产物依赖的系统库；监听随机 loopback 端口，
+结束时清理进程，并检查包括关闭阶段在内的 Native 注册错误；结果保存在 `build/reports/native-smoke/`。
+
+检查匿名 liveness 端点、应用与指标端点拒绝匿名访问、使用临时测试凭据读取 Prometheus，
+以及健康请求的 HTTP 计数器增长。记录二进制大小、可响应耗时和请求后 RSS；这些单次
+数据不是负载基准或资源预算。脚本不请求依赖目录的聚合健康端点，
+不验证目录就绪、MFA、Hydra 或追踪导出。
+
+应用在构建期声明 `health`、`prometheus` 暴露范围与健康探针。默认安全配置继续保护
+指标端点；liveness 使用应用可用性状态，不把尚未配置 AD 的聚合健康状态描述为正常。
+
+## AOT 测试与容器连接
+
+初始生成的 `@Bean + @ServiceConnection` 测试配置在 Boot 4.1.1 的 Native 测试中
+出现过缺少 `OtlpLoggingConnectionDetails` 的启动失败。测试改用类静态字段上的
+`@Container + @ServiceConnection`，由测试上下文在运行时重建连接信息，并断言日志
+导出 URL 指向本次运行的 LGTM 容器。JVM 开发入口仍使用原有配置类。
+
+`testAot` 使用生成的 AOT 测试上下文在 JVM 中运行，可先发现 AOT 装配错误；它不替代
+`nativeTest`。Native 测试二进制启用 `quickBuild` 降低编译成本，应用 `nativeCompile`
+保持默认优化；启动和内存数据必须来自应用二进制，不能取测试二进制的数据。
+
+参考 [Spring Boot Testcontainers](https://docs.spring.io/spring-boot/reference/testing/testcontainers.html)
+与 [Native Build Tools Gradle 配置](https://graalvm.github.io/native-build-tools/latest/gradle-plugin.html)。
+
+## Protobuf Native 元数据
+
+Micrometer OTLP 使用的 Protobuf 4.35.1 通过反射调用 `ExtensionRegistry` 的
+`getEmptyRegistry()` 与 `newInstance()`。实际原生应用启动曾因前一个方法缺少注册而失败，
+项目的 `reachability-metadata.json` 只补充这两个工厂方法。升级依赖时应重新验证能否移除。
+
+上下文测试显式启用 `@AutoConfigureMetrics` 与 `@AutoConfigureTracing`，初始化真实导出器，
+避免 Spring 测试默认关闭导出导致 Native 问题漏测。它验证初始化及容器连接信息，完整的
+OTLP 数据接收、持久化和查询验收仍属后续观测性集成测试。
+
+Micrometer 1.17.1 自带的反射声明已覆盖 CPU 使用率和文件描述符读取，但遗漏了
+`OperatingSystemMXBean.getProcessCpuTime()`。项目只补这一项；回归测试直接读取
+Prometheus 注册器中的 CPU 时间计数器并断言数值有效，避免后台导出异常被误报为测试通过。
+其他 JVM 指标在 Native 中的语义仍需分别验证，不能保证 HotSpot 仪表盘完全适用。

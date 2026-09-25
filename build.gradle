@@ -51,3 +51,23 @@ dependencies {
 tasks.named('test') {
 	useJUnitPlatform()
 }
+
+// Run generated AOT test context on the JVM before the more expensive native compile.
+tasks.register('testAot', Test) {
+	dependsOn tasks.named('aotTestClasses')
+	testClassesDirs = sourceSets.test.output.classesDirs
+	classpath = sourceSets.test.runtimeClasspath + sourceSets.aotTest.output
+	systemProperty 'spring.aot.enabled', 'true'
+	useJUnitPlatform()
+	shouldRunAfter tasks.named('test')
+}
+
+// Native tests check behavior, not throughput. Keep the application binary optimized.
+graalvmNative {
+	binaries {
+		test {
+			quickBuild = true
+			runtimeArgs.add(providers.systemProperty('user.home').map { "-Duser.home=${it}" })
+		}
+	}
+}

@@ -1,5 +1,6 @@
 # Agent Notes
 
+- 后续修改必须新建分支并提交 PR；未经维护者明确指示，不直接推 main、不自行合并。
 - 默认中文维护项目文档、commit、issue 和 PR；代码与上游 API 名称保留英文。
 - 项目使用 Java 与 Spring；Native 是交付约束，不是可选优化，不引入 Kotlin。
 - 变更需通过适用的 JVM 测试和 Native 集成测试；未执行的验证明确报告。
