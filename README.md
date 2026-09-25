@@ -1,7 +1,7 @@
 # iam-login
 
 独立 IAM 的登录与认证服务，以 Java、Spring Security 和 GraalVM Native 实现，作为
-Hydra 的 Login/Consent 应用。当前已生成 Spring Initializr 骨架，尚未实现 AD、MFA 与 Hydra 登录链路。
+Hydra 的 Login/Consent 应用。已实现 AD 密码与直接所属组查询，以及等待 MFA 的浏览器页面；MFA 与 Hydra 登录链路仍待实现。
 
 ## 职责与边界
 
@@ -34,7 +34,8 @@ Hydra 的 Login/Consent 应用。当前已生成 Spring Initializr 骨架，尚�
 4.1.1 和 Gradle；Spring Security 等库由 Boot BOM 管理，插件版本在 build.gradle 中固定。
 Native 使用 GraalVM 25。
 
-Native 构建与原生二进制上的认证测试是交付要求；JVM 测试通过或 native 编译成功都不
+日常改动先跑 JVM 测试，不要求每轮编译 Native。Native 构建与原生二进制上的认证测试
+留在阶段性验收；JVM 测试通过或 native 编译成功都不
 单独构成验收。Keycloak 可作为流程与安全边界参考，不以它采用 Quarkus 作为 native
 兼容性证据，不直接引入其服务端 SPI 和模型。
 
@@ -53,7 +54,7 @@ npm --prefix frontend run build
 ```
 
 测试需要可用的 Docker，生成器配置了 Grafana LGTM Testcontainer。
-当前有隔离的浏览器交互原型与上下文测试，默认 Spring Security 登录页不是可用的 IAM 登录流程。
+包含隔离浏览器原型和 AD 第一因素测试；默认 Spring Security 登录页不是 IAM 登录流程。
 使用 GraalVM 25 验证原生测试与编译：
 
 ```sh
@@ -65,10 +66,17 @@ Docker 开发使用 `scripts/gradle-in-docker`，默认持久挂载 Gradle 缓�
 原生应用可用 `python3 scripts/native-smoke.py` 检查启动、默认访问控制和 HTTP 指标。
 JVM、AOT、Native 测试及原生应用 HTTP 检查已通过，实测范围与资源数据见
 [本地验证结果](docs/bootstrap.md#2026-09-25-本地验证结果)。
-AD、MFA 与 Hydra 认证链路仍待实现与验收。
+新增 AD 路径本轮按维护者要求只进行 JVM 验证，不沿用基线的 Native 验收结论。
+真实目录密码和组结果需人类验收；MFA 与 Hydra 链路仍待实现。
 
 ## 浏览器流程预览
 
 人类登录界面采用 React + Vite，参考 Keycloakify 的内联上下文与原生表单提交方式。
 原型默认关闭，仅测试页面切换与局部交互，不执行真实认证。启动、浏览器测试和边界见
 [浏览器流程原型](docs/browser-preview.md)。
+
+## AD 第一因素接入
+
+真实入口为 `/signin`，默认关闭且要求 HTTPS。密码验证通过后显示 AD 身份与直接所属组，
+停在等待 MFA 状态，不建立完整登录身份或接受 Hydra challenge。
+配置、组语义、HTTPS 与验收边界见 [AD 接入](docs/ad-login.md)。

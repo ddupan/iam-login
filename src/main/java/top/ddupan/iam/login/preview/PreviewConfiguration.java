@@ -19,7 +19,7 @@ class PreviewConfiguration implements WebMvcConfigurer {
     @Bean
     SecurityFilterChain security(HttpSecurity http) throws Exception {
         return http.authorizeHttpRequests(auth -> auth
-                .requestMatchers("/error", "/preview", "/preview/**", "/assets/**", "/actuator/health/**").permitAll()
+                .requestMatchers("/error", "/signin", "/signin/**", "/preview", "/preview/**", "/assets/**", "/actuator/health/**").permitAll()
                 .anyRequest().authenticated())
             .formLogin(Customizer.withDefaults())
             .httpBasic(Customizer.withDefaults())

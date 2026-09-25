@@ -20,6 +20,9 @@ WebAuthn 集成；TOTP、恢复方式与已有 Authelia MFA 的迁移方式需�
 - Hydra admin 保持内部访问，业务日志不得包含密码、MFA secret、token 或 challenge。
 - 原生二进制与隔离 Hydra 完成授权码链路，再验证现有 Gitea 账号及权限。
 
+日常迭代以 JVM 测试为准，不要求每轮执行 Native 编译。Native 验证安排在阶段性验收
+或新增反射、JNDI、TLS 等兼容性风险时集中进行；记录尚未覆盖的新路径。
+
 ## Native 与监控
 
 - CI 构建 Native 产物并对该产物执行集成测试；测试报告区分 JVM 与 Native。

@@ -238,3 +238,7 @@ button:focus-visible {
     color: #ffc3b9;
   }
 }
+
+.directory-result { overflow-wrap: anywhere; }
+.directory-result dd { margin: 0 0 1rem; }
+.directory-result h2 { font-size: 1rem; }

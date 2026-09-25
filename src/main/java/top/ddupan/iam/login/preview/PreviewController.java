@@ -2,11 +2,8 @@ package top.ddupan.iam.login.preview;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpSession;
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.core.io.ClassPathResource;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -16,23 +13,17 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
-import tools.jackson.databind.json.JsonMapper;
 
 /** An isolated UI experiment. It never creates an authenticated SecurityContext. */
 @RestController
 class PreviewController {
     private static final String STATE = PreviewController.class.getName() + ".state";
-    private static final String SLOT = "__IAM_PAGE_CONTEXT__";
     private final boolean enabled;
-    private final String shell;
-    private final JsonMapper json = JsonMapper.builder().build();
+    private final PageRenderer renderer;
 
-    PreviewController(@Value("${iam.ui-preview.enabled:false}") boolean enabled) throws IOException {
+    PreviewController(@Value("${iam.ui-preview.enabled:false}") boolean enabled, PageRenderer renderer) {
         this.enabled = enabled;
-        this.shell = new ClassPathResource("ui/index.html").getContentAsString(StandardCharsets.UTF_8);
-        if (shell.indexOf(SLOT) < 0 || shell.indexOf(SLOT) != shell.lastIndexOf(SLOT)) {
-            throw new IllegalStateException("Expected exactly one UI context slot");
-        }
+        this.renderer = renderer;
     }
 
     @GetMapping(value = {"/preview", "/preview/verify", "/preview/complete"}, produces = MediaType.TEXT_HTML_VALUE)
@@ -54,8 +45,7 @@ class PreviewController {
                     case "verification" -> "/preview/verify";
                     default -> "/preview/restart";
                 }, "csrf", Map.of("name", csrf.getParameterName(), "value", csrf.getToken()));
-            return ResponseEntity.ok().header("Cache-Control", "no-store")
-                .contentType(MediaType.TEXT_HTML).body(shell.replace(SLOT, htmlSafeJson(context)));
+            return renderer.render(context);
         }
     }
 
@@ -129,13 +119,6 @@ class PreviewController {
     private static ResponseEntity<String> redirect(String path) {
         return ResponseEntity.status(HttpStatus.SEE_OTHER).header("Location", path)
             .header("Cache-Control", "no-store").build();
-    }
-
-    String htmlSafeJson(Object value) {
-        // JSON in a script data block still participates in HTML parsing.
-        return json.writeValueAsString(value).replace("<", "\\u003c")
-            .replace(">", "\\u003e").replace("&", "\\u0026")
-            .replace("\u2028", "\\u2028").replace("\u2029", "\\u2029");
     }
 
     private static class State {
