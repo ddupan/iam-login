@@ -1,6 +1,7 @@
 package top.ddupan.iam.login.authentication.interfaces.web;
 
 import java.util.Map;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -13,6 +14,7 @@ import top.ddupan.iam.login.authentication.infrastructure.security.DirectoryPrin
 
 /** Renders Spring Security's login pages; form processing belongs to the security filters. */
 @RestController
+@ConditionalOnProperty(prefix = "iam.ad", name = "enabled", havingValue = "true")
 public class SignInController {
     private final PageRenderer renderer;
 

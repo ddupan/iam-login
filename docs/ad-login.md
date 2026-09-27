@@ -29,6 +29,9 @@ try-with-resources 管理已认证用户仓储会话；基础设施的 `AdUserRe
 
 ## 启用
 
+`iam.ad.enabled=true` 时才装配登录 Controller 与浏览器安全链（含 formLogin）。
+未启用时入口由兜底安全链拒绝，匿名 GET 返回 401；不注册密码处理端点。
+
 正常 JVM 构建：
 
 ```sh
@@ -77,7 +80,8 @@ LDAP endpoint identification 或用信任所有证书的 socket factory。连接
 AD 根范围查询可能返回 DomainDnsZones/ForestDnsZones 等分区 referral；配置为 ignore，
 由仓储的 LdapTemplate 忽略 partial result，不使用 throw 打断用户查询，也不 follow 转发用户凭据。
 
-浏览器入口只接受 HTTPS；明文请求返回 426。默认不信任转发头。若以后由代理终结 TLS，
+浏览器安全链通过 Spring Security `redirectToHttps` 将明文请求重定向至 HTTPS，
+重定向前不执行密码验证或退出。默认不信任转发头。若以后由代理终结 TLS，
 必须配合仅受信代理可达的后端网络和转发头配置，不能公开一个信任任意 forwarded header
 的 HTTP 端口。当前开发验收由应用直接终结 TLS。
 

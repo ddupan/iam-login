@@ -26,6 +26,9 @@ WebAuthn 集成；TOTP、恢复方式与已有 Authelia MFA 的迁移方式需�
 ## Native 与监控
 
 - CI 构建 Native 产物并对该产物执行集成测试；测试报告区分 JVM 与 Native。
+- 登录 Controller 与安全链使用 `@ConditionalOnProperty(iam.ad.enabled)`；AOT 在构建时
+  决定 bean 是否存在。AD Native 产物必须在 AOT 阶段启用此属性，验证实际入口与兜底链，
+  不能假设运行时修改属性会重新装配 bean。本轮只验证 JVM，尚未验收该 Native 路径。
 - 最终运行镜像无需 JRE，不允许以回退 JVM 的方式令 Native 验收通过。
 - LDAP、MFA、数据库、TLS、JSON 和 Hydra HTTP 客户端全部在 Native 中执行。
 - 纳入 Actuator、Micrometer Prometheus 与 OpenTelemetry/分布式追踪；实际发起请求后

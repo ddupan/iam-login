@@ -1,6 +1,7 @@
 package top.ddupan.iam.login.configuration;
 
 import java.time.Duration;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.annotation.Order;
@@ -14,12 +15,9 @@ import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.intercept.RequestAuthorizationContext;
 import org.springframework.security.web.authentication.HttpStatusEntryPoint;
 import org.springframework.security.web.authentication.LoginUrlAuthenticationEntryPoint;
-import org.springframework.security.web.csrf.CsrfFilter;
 import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
 import top.ddupan.iam.login.authentication.application.VerifyPassword;
-import top.ddupan.iam.login.authentication.infrastructure.ad.AdProperties;
 import top.ddupan.iam.login.authentication.infrastructure.security.DirectoryAuthenticationProvider;
-import top.ddupan.iam.login.authentication.interfaces.web.SignInAvailabilityFilter;
 
 @Configuration(proxyBeanMethods = false)
 @EnableMultiFactorAuthentication(authorities = {})
@@ -42,13 +40,14 @@ class SecurityConfiguration {
 
     @Bean
     @Order(2)
-    SecurityFilterChain browser(HttpSecurity http, VerifyPassword passwords, AdProperties ad) throws Exception {
+    @ConditionalOnProperty(prefix = "iam.ad", name = "enabled", havingValue = "true")
+    SecurityFilterChain browser(HttpSecurity http, VerifyPassword passwords) throws Exception {
         var passwordFactor = AuthorizationManagerFactories.<RequestAuthorizationContext>multiFactor()
             .requireFactor(factor -> factor.passwordAuthority().validDuration(Duration.ofMinutes(10)))
             .build();
-        return http
+        return http.securityMatcher("/signin", "/signin/**", "/assets/**")
+            .redirectToHttps(Customizer.withDefaults())
             .authenticationManager(new ProviderManager(new DirectoryAuthenticationProvider(passwords)))
-            .addFilterBefore(new SignInAvailabilityFilter(ad.enabled()), CsrfFilter.class)
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/error", "/signin", "/signin/password", "/assets/**").permitAll()
                 .requestMatchers("/signin/mfa").access(passwordFactor.authenticated())
@@ -68,4 +67,18 @@ class SecurityConfiguration {
                 + "object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")))
             .build();
     }
+
+    @Bean
+    @Order(3)
+    SecurityFilterChain fallback(HttpSecurity http) throws Exception {
+        return http.authorizeHttpRequests(auth -> auth
+                .requestMatchers("/error").permitAll()
+                .anyRequest().denyAll())
+            .exceptionHandling(exceptions -> exceptions
+                .authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED)))
+            .requestCache(cache -> cache.disable())
+            .logout(logout -> logout.disable())
+            .build();
+    }
+
 }
