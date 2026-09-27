@@ -47,6 +47,9 @@ class IamLoginApplicationTests {
     @Test
     void signInIsDisabledUntilDirectoryIsConfigured() throws Exception {
         mvc.perform(get("/signin").secure(true)).andExpect(status().isNotFound());
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/signin/password")
+            .secure(true).with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf()))
+            .andExpect(status().isNotFound());
     }
 
     @Test

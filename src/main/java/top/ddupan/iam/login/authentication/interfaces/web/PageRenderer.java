@@ -27,6 +27,6 @@ public class PageRenderer {
             .replace(">", "\\u003e").replace("&", "\\u0026")
             .replace("\u2028", "\\u2028").replace("\u2029", "\\u2029");
         return ResponseEntity.ok().header("Cache-Control", "no-store")
-            .contentType(MediaType.TEXT_HTML).body(shell.replace(SLOT, safe));
+            .contentType(new MediaType(MediaType.TEXT_HTML, StandardCharsets.UTF_8)).body(shell.replace(SLOT, safe));
     }
 }

@@ -75,27 +75,30 @@ JVM、AOT、Native 测试及原生应用 HTTP 检查已通过，实测范围与�
 当前限界上下文为 `authentication`，使用 DDD 分层，依赖向领域内部收敛：
 
 ```text
-interfaces/web → application → domain
+interfaces/web → infrastructure/security（principal）+ domain
+infrastructure/security → application → domain
 infrastructure/ad → application/port + domain
 configuration → 装配上述实现
 ```
 
-- `authentication/domain`：`User`、`UserRepository`、`LoginTransaction`；稳定主体、组成员关系、
-  登录步骤与期限属于领域模型，不依赖 Spring、Servlet、LDAP 或持久化注解。
-- `authentication/application`：登录用例，编排密码认证、用户仓储查询与事务推进；
+- `authentication/domain`：`User`、`UserRepository`；稳定主体与组成员关系属于领域模型，不依赖 Spring、Servlet、LDAP 或持久化注解。
+- `authentication/application`：`VerifyPassword` 用例，编排密码认证与同连接用户仓储查询；
   `port` 描述密码认证及其用户仓储会话，不暴露 `DirContext`。
 - `authentication/infrastructure/ad`：AD bind、Spring Data LDAP 用户仓储、LDAP 实体与领域映射。
   使用同一次用户 bind 的连接，查询结束关闭，不新增服务账号，不保存用户密码。
-- `authentication/interfaces/web`：HTTP、CSRF、会话存取和页面数据转换；不定义认证状态规则。
+- `authentication/infrastructure/security`：Provider 将目录用户转换为仅含密码因素的认证结果。
+- `authentication/interfaces/web`：登录页面与上下文转换；不处理密码 POST、认证会话或退出。
 - `configuration`：Spring 组件装配、安全链、静态资源和 Native hints。
 - `frontend/src`：入口、页面、表单组件和页面数据契约分别维护，只包含真实登录流程。
 
-测试分别覆盖领域规则、应用用例、AD 仓储和 Web 行为，LDAP 夹具集中在测试 `support` 包。
+测试覆盖应用用例、AD 仓储和完整 Spring Security 过滤器链，LDAP 夹具集中在测试 `support` 包。
 界面采用 React + Vite，Spring 在 HTML 中内联当前步骤上下文，浏览器原生表单 POST，
-由服务端决定下一页。不增加前端路由器、模板引擎或 Node 运行服务。
+表单由 Spring Security `formLogin` 处理，框架维护因素、SecurityContext、会话轮换和退出。
+React 只替换默认登录 UI，不增加前端路由器、模板引擎或 Node 运行服务。
 
 ## AD 第一因素接入
 
 真实入口为 `/signin`，默认关闭且要求 HTTPS。密码验证通过后显示 AD 身份与直接所属组，
-停在等待 MFA 状态，不建立完整登录身份或接受 Hydra challenge。
+保存仅含 `FACTOR_PASSWORD` 的认证结果，停在等待 MFA 状态。待 MFA 页要求十分钟内的密码因素；
+其他应用入口暂时全部拒绝，不能凭密码因素接受 Hydra challenge。监控 Basic 认证使用独立无状态安全链。
 配置、组语义、HTTPS 与验收边界见 [AD 接入](docs/ad-login.md)。
