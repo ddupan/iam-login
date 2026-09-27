@@ -1,6 +1,8 @@
 package top.ddupan.iam.login.authentication.interfaces.web;
 
 import java.util.Map;
+import org.springframework.beans.factory.ObjectProvider;
+import top.ddupan.iam.login.authentication.infrastructure.webauthn.MfaPolicy;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -17,9 +19,11 @@ import top.ddupan.iam.login.authentication.infrastructure.security.DirectoryPrin
 @ConditionalOnProperty(prefix = "iam.ad", name = "enabled", havingValue = "true")
 public class SignInController {
     private final PageRenderer renderer;
+    private final ObjectProvider<MfaPolicy> policies;
 
-    public SignInController(PageRenderer renderer) {
+    public SignInController(PageRenderer renderer, ObjectProvider<MfaPolicy> policies) {
         this.renderer = renderer;
+        this.policies = policies;
     }
 
     @GetMapping(value = "/signin", produces = MediaType.TEXT_HTML_VALUE)
@@ -31,8 +35,19 @@ public class SignInController {
 
     @GetMapping(value = "/signin/mfa", produces = MediaType.TEXT_HTML_VALUE)
     ResponseEntity<String> pending(@AuthenticationPrincipal DirectoryPrincipal principal, CsrfToken csrf) {
+        var policy = policies.getIfAvailable();
+        return identity(principal, csrf, "mfa-pending", policy == null ? "unavailable"
+            : policy.enrolled(principal.getName()) ? "authenticate" : "register");
+    }
+
+    @GetMapping(value = "/signin/complete", produces = MediaType.TEXT_HTML_VALUE)
+    ResponseEntity<String> complete(@AuthenticationPrincipal DirectoryPrincipal principal, CsrfToken csrf) {
+        return identity(principal, csrf, "mfa-complete", "authenticate");
+    }
+
+    private ResponseEntity<String> identity(DirectoryPrincipal principal, CsrfToken csrf, String step, String passkey) {
         var user = principal.user();
-        return renderer.render(Map.of("step", "mfa-pending", "name", user.displayName(),
+        return renderer.render(Map.of("step", step, "passkey", passkey, "name", user.displayName(),
             "error", "", "action", "/signin/restart", "csrf", csrf(csrf),
             "identity", Map.of("username", user.username(), "subjectId", user.id().value(),
                 "email", user.email(),
@@ -41,6 +56,6 @@ public class SignInController {
     }
 
     private static Map<String, String> csrf(CsrfToken token) {
-        return Map.of("name", token.getParameterName(), "value", token.getToken());
+        return Map.of("name", token.getParameterName(), "value", token.getToken(), "headerName", token.getHeaderName());
     }
 }

@@ -1,6 +1,7 @@
 package top.ddupan.iam.login.configuration;
 
 import java.time.Duration;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -41,18 +42,26 @@ class SecurityConfiguration {
     @Bean
     @Order(2)
     @ConditionalOnProperty(prefix = "iam.ad", name = "enabled", havingValue = "true")
-    SecurityFilterChain browser(HttpSecurity http, VerifyPassword passwords) throws Exception {
+    SecurityFilterChain browser(HttpSecurity http, VerifyPassword passwords,
+            ObjectProvider<WebAuthnBrowserConfigurer> webAuthn) throws Exception {
         var passwordFactor = AuthorizationManagerFactories.<RequestAuthorizationContext>multiFactor()
             .requireFactor(factor -> factor.passwordAuthority().validDuration(Duration.ofMinutes(10)))
             .build();
-        return http.securityMatcher("/signin", "/signin/**", "/assets/**")
+        var mfa = webAuthn.getIfAvailable();
+        http.securityMatcher("/signin", "/signin/**", "/assets/**", "/webauthn/**", "/login/webauthn")
             .redirectToHttps(Customizer.withDefaults())
             .authenticationManager(new ProviderManager(new DirectoryAuthenticationProvider(passwords)))
-            .authorizeHttpRequests(auth -> auth
-                .requestMatchers("/error", "/signin", "/signin/password", "/assets/**").permitAll()
+            .authorizeHttpRequests(auth -> {
+                if (mfa != null) {
+                    auth.requestMatchers("/signin/complete").access(mfa.policy.complete);
+                    auth.requestMatchers(org.springframework.http.HttpMethod.POST, "/webauthn/register")
+                        .access(mfa.policy.password);
+                }
+                auth.requestMatchers("/error", "/signin", "/signin/password", "/assets/**").permitAll()
                 .requestMatchers("/signin/mfa").access(passwordFactor.authenticated())
-                // No complete MFA or Hydra acceptance exists yet. Fail closed until those are implemented.
-                .anyRequest().denyAll())
+                // Credential deletion and all unimplemented routes remain closed.
+                .anyRequest().denyAll();
+            })
             .formLogin(form -> form.loginPage("/signin").loginProcessingUrl("/signin/password")
                 .defaultSuccessUrl("/signin/mfa", true).failureUrl("/signin?error"))
             .logout(logout -> logout.logoutUrl("/signin/restart").logoutSuccessUrl("/signin"))
@@ -64,8 +73,10 @@ class SecurityConfiguration {
             .requestCache(cache -> cache.disable())
             .headers(headers -> headers.contentSecurityPolicy(csp -> csp.policyDirectives(
                 "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
-                + "object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")))
-            .build();
+                + "object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")));
+        if (mfa != null) mfa.configure(http);
+        var chain = http.build();
+        return mfa == null ? chain : mfa.finish(http, chain);
     }
 
     @Bean

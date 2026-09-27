@@ -1,7 +1,7 @@
 # iam-login
 
 独立 IAM 的登录与认证服务，以 Java、Spring Security 和 GraalVM Native 实现，作为
-Hydra 的 Login/Consent 应用。已实现 AD 密码与直接所属组查询，以及等待 MFA 的浏览器页面；MFA 与 Hydra 登录链路仍待实现。
+Hydra 的 Login/Consent 应用。已实现 AD 密码与直接所属组查询，以及 WebAuthn 第二因素浏览器流程；Hydra 登录链路仍待实现。
 
 ## 职责与边界
 
@@ -68,7 +68,7 @@ JVM、AOT、Native 测试及原生应用 HTTP 检查已通过，实测范围与�
 [本地验证结果](docs/bootstrap.md#2026-09-25-本地验证结果)。
 新增 AD 路径本轮按维护者要求只进行 JVM 验证，不沿用基线的 Native 验收结论。
 重构前的真实目录密码与属性/直接所属组读取已通过维护者浏览器验收；Spring Data LDAP
-版本已通过 JVM 和浏览器回归，真实人类复验待反馈。MFA 与 Hydra 链路仍待实现。
+版本已通过 JVM 和浏览器回归，真实人类复验待反馈。WebAuthn 实现与验证边界见 [第二因素](docs/webauthn.md)，Hydra 链路仍待实现。
 
 ## 领域与代码组织
 
@@ -87,6 +87,7 @@ configuration → 装配上述实现
 - `authentication/infrastructure/ad`：AD bind、Spring Data LDAP 用户仓储、LDAP 实体与领域映射。
   使用同一次用户 bind 的连接，查询结束关闭，不新增服务账号，不保存用户密码。
 - `authentication/infrastructure/security`：Provider 将目录用户转换为仅含密码因素的认证结果。
+- `authentication/infrastructure/webauthn`：凭据归属与注册策略、challenge 仓储扩展；密码学校验和 JDBC 存储交给 Spring Security。
 - `authentication/interfaces/web`：登录页面与上下文转换；不处理密码 POST、认证会话或退出。
 - `configuration`：Spring 组件装配、安全链、静态资源和 Native hints。
 - `frontend/src`：入口、页面、表单组件和页面数据契约分别维护，只包含真实登录流程。
