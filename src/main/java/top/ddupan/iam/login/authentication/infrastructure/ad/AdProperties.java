@@ -1,4 +1,4 @@
-package top.ddupan.iam.login.ad;
+package top.ddupan.iam.login.authentication.infrastructure.ad;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 

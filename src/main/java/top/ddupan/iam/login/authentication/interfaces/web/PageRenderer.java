@@ -1,4 +1,4 @@
-package top.ddupan.iam.login.preview;
+package top.ddupan.iam.login.authentication.interfaces.web;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;

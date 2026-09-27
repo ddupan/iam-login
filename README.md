@@ -54,7 +54,7 @@ npm --prefix frontend run build
 ```
 
 测试需要可用的 Docker，生成器配置了 Grafana LGTM Testcontainer。
-包含隔离浏览器原型和 AD 第一因素测试；默认 Spring Security 登录页不是 IAM 登录流程。
+测试覆盖 AD 第一因素、浏览器流程和监控集成。人类登录统一从 `/signin` 进入。
 使用 GraalVM 25 验证原生测试与编译：
 
 ```sh
@@ -67,13 +67,32 @@ Docker 开发使用 `scripts/gradle-in-docker`，默认持久挂载 Gradle 缓�
 JVM、AOT、Native 测试及原生应用 HTTP 检查已通过，实测范围与资源数据见
 [本地验证结果](docs/bootstrap.md#2026-09-25-本地验证结果)。
 新增 AD 路径本轮按维护者要求只进行 JVM 验证，不沿用基线的 Native 验收结论。
-真实目录密码与属性/直接所属组读取已通过维护者浏览器验收；MFA 与 Hydra 链路仍待实现。
+重构前的真实目录密码与属性/直接所属组读取已通过维护者浏览器验收；Spring Data LDAP
+版本已通过 JVM 和浏览器回归，真实人类复验待反馈。MFA 与 Hydra 链路仍待实现。
 
-## 浏览器流程预览
+## 领域与代码组织
 
-人类登录界面采用 React + Vite，参考 Keycloakify 的内联上下文与原生表单提交方式。
-原型默认关闭，仅测试页面切换与局部交互，不执行真实认证。启动、浏览器测试和边界见
-[浏览器流程原型](docs/browser-preview.md)。
+当前限界上下文为 `authentication`，使用 DDD 分层，依赖向领域内部收敛：
+
+```text
+interfaces/web → application → domain
+infrastructure/ad → application/port + domain
+configuration → 装配上述实现
+```
+
+- `authentication/domain`：`User`、`UserRepository`、`LoginTransaction`；稳定主体、组成员关系、
+  登录步骤与期限属于领域模型，不依赖 Spring、Servlet、LDAP 或持久化注解。
+- `authentication/application`：登录用例，编排密码认证、用户仓储查询与事务推进；
+  `port` 描述密码认证及其用户仓储会话，不暴露 `DirContext`。
+- `authentication/infrastructure/ad`：AD bind、Spring Data LDAP 用户仓储、LDAP 实体与领域映射。
+  使用同一次用户 bind 的连接，查询结束关闭，不新增服务账号，不保存用户密码。
+- `authentication/interfaces/web`：HTTP、CSRF、会话存取和页面数据转换；不定义认证状态规则。
+- `configuration`：Spring 组件装配、安全链、静态资源和 Native hints。
+- `frontend/src`：入口、页面、表单组件和页面数据契约分别维护，只包含真实登录流程。
+
+测试分别覆盖领域规则、应用用例、AD 仓储和 Web 行为，LDAP 夹具集中在测试 `support` 包。
+界面采用 React + Vite，Spring 在 HTML 中内联当前步骤上下文，浏览器原生表单 POST，
+由服务端决定下一页。不增加前端路由器、模板引擎或 Node 运行服务。
 
 ## AD 第一因素接入
 

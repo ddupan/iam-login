@@ -1,30 +1,30 @@
-package top.ddupan.iam.login.ad;
+package top.ddupan.iam.login.authentication.interfaces.web;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpSession;
-import java.time.Instant;
 import java.util.Map;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.web.csrf.CsrfToken;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
-import top.ddupan.iam.login.preview.PageRenderer;
+import top.ddupan.iam.login.authentication.application.SignInService;
+import top.ddupan.iam.login.authentication.domain.LoginTransaction.Step;
+import top.ddupan.iam.login.authentication.domain.User.GroupMembership;
 
-/** Human first-factor PoC. No SecurityContext, MFA acceptance, or Hydra calls. */
+/** Translates browser requests and use-case outcomes; no directory or authentication policy here. */
 @RestController
-public class AdLoginController {
-    static final String STATE = AdLoginController.class.getName() + ".state";
-    private final AdPasswordVerifier verifier;
+public class SignInController {
+    static final String STATE = SignInController.class.getName() + ".state";
+    private final SignInService signIn;
     private final PageRenderer renderer;
 
-    public AdLoginController(AdPasswordVerifier verifier, PageRenderer renderer) {
-        this.verifier = verifier;
+    public SignInController(SignInService signIn, PageRenderer renderer) {
+        this.signIn = signIn;
         this.renderer = renderer;
     }
 
@@ -34,7 +34,7 @@ public class AdLoginController {
         var session = request.getSession();
         synchronized (session) {
             var state = state(session);
-            if (state.identity != null) return redirect("/signin/mfa");
+            if (state.transaction.step() == Step.MFA_REQUIRED) return redirect("/signin/mfa");
             return renderer.render(Map.of("step", "password", "name", state.username,
                 "error", state.error, "action", "/signin/password", "csrf", csrf(csrf)));
         }
@@ -48,26 +48,22 @@ public class AdLoginController {
         var session = request.getSession(false);
         if (session == null) throw new ResponseStatusException(HttpStatus.CONFLICT);
         synchronized (session) {
-            var state = (State) session.getAttribute(STATE);
-            if (state == null || state.identity != null || state.expires.isBefore(Instant.now())) {
-                return redirect("/signin");
-            }
-            // Prevent double submissions in this transaction; perimeter rate limits belong at ingress.
-            if (state.retryAfter.isAfter(Instant.now())) throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS);
-            state.retryAfter = Instant.now().plusSeconds(2);
+            var state = (BrowserSignInState) session.getAttribute(STATE);
+            if (state == null) return redirect("/signin");
             state.username = username.length() <= 256 ? username : "";
-            try {
-                var identity = verifier.verify(username, password);
-                request.changeSessionId();
-                state.identity = identity;
-                state.error = "";
-                state.expires = Instant.now().plusSeconds(600);
-                return redirect("/signin/mfa");
-            } catch (AuthenticationException | org.springframework.dao.DataAccessException ex) {
-                // Neither directory exception details nor passwords enter HTML/session/logs.
-                state.error = "无法验证账号，请检查凭据与账号状态，或稍后重试。";
-                return redirect("/signin");
-            }
+            return switch (signIn.submitPassword(state.transaction, username, password)) {
+                case ACCEPTED -> {
+                    request.changeSessionId();
+                    state.error = "";
+                    yield redirect("/signin/mfa");
+                }
+                case REJECTED -> {
+                    state.error = "无法验证账号，请检查凭据与账号状态，或稍后重试。";
+                    yield redirect("/signin");
+                }
+                case EXPIRED, WRONG_STEP -> redirect("/signin");
+                case RETRY_LATER -> throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS);
+            };
         }
     }
 
@@ -78,12 +74,14 @@ public class AdLoginController {
         if (session == null) return redirect("/signin");
         synchronized (session) {
             var state = state(session);
-            if (state.identity == null) return redirect("/signin");
-            var identity = state.identity;
-            return renderer.render(Map.of("step", "mfa-pending", "name", identity.displayName(),
+            if (state.transaction.step() != Step.MFA_REQUIRED) return redirect("/signin");
+            var user = state.transaction.identity();
+            return renderer.render(Map.of("step", "mfa-pending", "name", user.displayName(),
                 "error", "", "action", "/signin/restart", "csrf", csrf(csrf),
-                "identity", Map.of("username", identity.username(), "objectGuid", identity.objectGuid(),
-                    "email", identity.email(), "groups", identity.groups(), "groupDns", identity.groupDns())));
+                "identity", Map.of("username", user.username(), "subjectId", user.id().value(),
+                    "email", user.email(),
+                    "groups", user.memberships().stream().map(GroupMembership::name).toList(),
+                    "groupDns", user.memberships().stream().map(GroupMembership::externalId).toList())));
         }
     }
 
@@ -96,33 +94,25 @@ public class AdLoginController {
     }
 
     private void requireAvailable(HttpServletRequest request) {
-        if (!verifier.enabled()) throw new ResponseStatusException(HttpStatus.NOT_FOUND);
+        if (!signIn.enabled()) throw new ResponseStatusException(HttpStatus.NOT_FOUND);
         if (!request.isSecure()) throw new ResponseStatusException(HttpStatus.UPGRADE_REQUIRED, "HTTPS required");
+    }
+
+    private BrowserSignInState state(HttpSession session) {
+        var state = (BrowserSignInState) session.getAttribute(STATE);
+        if (state == null || signIn.expired(state.transaction)) {
+            state = new BrowserSignInState(signIn.start());
+            session.setAttribute(STATE, state);
+        }
+        return state;
     }
 
     private static Map<String, String> csrf(CsrfToken token) {
         return Map.of("name", token.getParameterName(), "value", token.getToken());
     }
 
-    private static State state(HttpSession session) {
-        var state = (State) session.getAttribute(STATE);
-        if (state == null || state.expires.isBefore(Instant.now())) {
-            state = new State();
-            session.setAttribute(STATE, state);
-        }
-        return state;
-    }
-
     private static ResponseEntity<String> redirect(String location) {
         return ResponseEntity.status(HttpStatus.SEE_OTHER).header("Location", location)
             .header("Cache-Control", "no-store").build();
-    }
-
-    static final class State {
-        String username = "";
-        String error = "";
-        DirectoryIdentity identity;
-        Instant expires = Instant.now().plusSeconds(600);
-        Instant retryAfter = Instant.EPOCH;
     }
 }

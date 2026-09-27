@@ -1,13 +1,17 @@
 # AD 第一因素接入
 
-`/signin` 接收 AD 用户名（sAMAccountName）或本域 UPN，使用 Spring Security
-`ActiveDirectoryLdapAuthenticationProvider` 以用户身份执行 LDAPS bind 与目录查询。
+`/signin` 接收 AD 用户名（sAMAccountName）或本域 UPN，通过 Spring LDAP `ContextSource.getContext` 以用户身份执行 LDAPS bind，
+随后由 Spring Data LDAP 仓储复用这条已认证连接查询用户与组。
 不使用额外目录服务账号，不写入 AD，不复制 Authelia 的绑定密码。
+
+领域仓储接口为 `UserRepository`，`User` 与 `LoginTransaction` 为领域模型。应用层以
+try-with-resources 管理已认证用户仓储会话；基础设施的 `AdUserRepository` 通过
+`SimpleLdapRepository<AdUserEntry>`、`LdapTemplate`、ODM 实现读取与转换，关闭后不可继续查询。
+`AdUserEntry` 的 LDAP 注解不会进入领域对象。
 
 成功后重定向到 `/signin/mfa`，显示目录账号、objectGUID、邮箱、直接所属组及组 DN。
 **这是密码因素验收页面，MFA 尚未接入，不是完整登录成功。** 不创建 Spring Security
-认证上下文，不调用 Hydra，不替换现役 Go/Authelia/Gitea 登录链路。演示入口 `/preview`
-仍完全隔离，默认关闭，演示码不能推进真实认证。
+认证上下文，不调用 Hydra，不替换现役 Go/Authelia/Gitea 登录链路。
 
 ## 目录和组语义
 
@@ -17,7 +21,8 @@
   不把 Spring 的 `FACTOR_PASSWORD` 当作组。结果排序，不做应用专用组改写。
 - 此轮不展开嵌套组、不推导 primaryGroupID，也不宣称与 Authelia 的有效组集合完全一致。
   遇到 ranged memberOf 或不同 DN 同名 CN 拒绝映射，不静默丢组或合并不同主体。
-- AD bind 执行密码及账号状态检查；Spring 解析禁用、锁定、密码过期等 AD 子码。
+- AD bind 执行密码及账号状态检查；基础设施层将禁用、锁定、密码过期等 AD 子码转换为
+  应用层认证失败原因，不向领域层泄露 LDAP/Spring 异常。
   搜索排除 computer 对象，只接受唯一用户条目和合法 objectGUID/sAMAccountName。
 - 邮箱作为目录属性展示，不声称 `email_verified=true`。
 
@@ -69,7 +74,7 @@ java -Djavax.net.ssl.trustStore=/run/iam/truststore \
 这里 truststore 仅含公开信任锚，口令不是目录密码。保留所需公共根证书；不得禁用
 LDAP endpoint identification 或用信任所有证书的 socket factory。连接/读取超时为 3/5 秒。
 AD 根范围查询可能返回 DomainDnsZones/ForestDnsZones 等分区 referral；配置为 ignore，
-由 Spring AD provider 忽略 partial result，不使用 throw 打断用户查询，也不 follow 转发用户凭据。
+由仓储的 LdapTemplate 忽略 partial result，不使用 throw 打断用户查询，也不 follow 转发用户凭据。
 
 浏览器入口只接受 HTTPS；明文请求返回 426。默认不信任转发头。若以后由代理终结 TLS，
 必须配合仅受信代理可达的后端网络和转发头配置，不能公开一个信任任意 forwarded header
@@ -86,7 +91,7 @@ AD 根范围查询可能返回 DomainDnsZones/ForestDnsZones 等分区 referral�
 入口限流、审计、MFA、Hydra 事务和恢复策略。
 
 基础存活检查使用 `/actuator/health/liveness`。Boot 自动配置的 LDAP 健康项并未连接这里
-独立配置的 AD provider，不能把该项当作此认证路径的可用性验证。
+按用户 bind 创建的仓储连接，不能把该项当作此认证路径的可用性验证。
 
 ## 本轮验证边界
 
@@ -95,12 +100,14 @@ AD 根范围查询可能返回 DomainDnsZones/ForestDnsZones 等分区 referral�
 仍未完整认证。UnboundID 的 UPN bind 与 AD 子码由测试拦截器模拟，不能替代 Samba AD。
 测试证书、私钥与账号全为虚构夹具，不用于实际部署。
 
-2026-09-25：JVM 测试共 12 项通过（原有 6 项、新增 AD 6 项），`bootJar` 构建通过。
-实际 JVM 使用受信 CA 完成 Samba AD RootDSE 查询，HTTPS 页面返回 200。
+2026-09-25：DDD/Spring Data LDAP 版本通过 20 项 JVM 测试和 `bootJar` 构建，
+包含同一次 bind 连接完成仓储查询、用例结束关闭连接、领域规则及监控集成。
+开发 HTTPS 实例已更新为该版本。此前 JVM 使用受信 CA 完成 Samba AD RootDSE 查询。
 浏览器已检查登录表单渲染、真实 CSRF 原生 POST 和失败后清空密码；只使用在访问 AD 前
 即拒绝的合成外域用户名，不尝试猜测人类密码。浏览器回归共 1 项通过，包含移动端布局。
 复现：`IAM_AD_URL=https://验收域名:端口 npm --prefix frontend run test:browser -- ad-login.spec.ts`。
-维护者已在 HTTPS 页面完成真实密码验证，成功到达待 MFA 页面，并反馈目录标识、邮箱与
+重构前，维护者已在 HTTPS 页面完成真实密码验证，成功到达待 MFA 页面，并反馈目录标识、邮箱与
 六个直接所属组的查询结果。该验收覆盖 Samba AD 第一因素与属性读取，不表示 MFA、
-嵌套组/主组等价性或 Hydra 登录已完成。不在聊天、命令行或日志中传递人类密码。
+嵌套组/主组等价性或 Hydra 登录已完成。Spring Data LDAP 重构后的真实人类复验仍待反馈。
+不在聊天、命令行或日志中传递人类密码。
 新增 AD 路径尚未进行 Native 测试，不能复用旧 UI 原型的 Native 结论。
