@@ -71,3 +71,15 @@ graalvmNative {
 		}
 	}
 }
+
+// Vite owns the HTML and hashed assets; only the controller can serve the page shell.
+// Build it with `npm ci && npm run build` in frontend/ before invoking Gradle.
+tasks.named('processResources') {
+    inputs.files(fileTree('frontend/dist'))
+    doFirst {
+        if (!file('frontend/dist/index.html').exists()) {
+            throw new GradleException('Missing UI build: run npm ci && npm run build in frontend/')
+        }
+    }
+    from('frontend/dist') { into 'ui' }
+}

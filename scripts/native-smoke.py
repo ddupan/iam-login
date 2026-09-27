@@ -59,6 +59,8 @@ def main():
 
             def request(path, authenticated=False):
                 headers = {'Accept': 'text/plain' if authenticated and path == '/actuator/prometheus' else 'application/json'}
+                if path == '/signin':
+                    headers['Accept'] = 'text/html'
                 if authenticated:
                     headers['Authorization'] = f'Basic {basic}'
                 req = urllib.request.Request(base_url + path, headers=headers)
@@ -78,6 +80,7 @@ def main():
             ready_seconds = time.monotonic() - started
             assert request('/actuator/prometheus')[0] == 401, 'Anonymous metrics must be rejected'
             assert request('/')[0] == 401, 'Anonymous application access must be rejected'
+            assert request('/signin')[0] == 401, 'Sign-in must be disabled without directory configuration'
             status, before = request('/actuator/prometheus', authenticated=True)
             assert status == 200, 'Authenticated Prometheus scrape failed'
             for _ in range(3):

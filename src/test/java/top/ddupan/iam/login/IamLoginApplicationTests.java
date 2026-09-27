@@ -10,42 +10,58 @@ import org.springframework.boot.opentelemetry.autoconfigure.logging.otlp.OtlpLog
 import org.springframework.boot.opentelemetry.autoconfigure.logging.otlp.Transport;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.test.web.servlet.MockMvc;
 import org.testcontainers.grafana.LgtmStackContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @SpringBootTest
+@AutoConfigureMockMvc
 @AutoConfigureMetrics
 @AutoConfigureTracing
 @Testcontainers
 class IamLoginApplicationTests {
 
-	// Field-based service connections are recreated by the test context in AOT mode.
-	@Container
-	@ServiceConnection
-	static final LgtmStackContainer grafanaLgtm = new LgtmStackContainer(
-			DockerImageName.parse(TestcontainersConfiguration.LGTM_IMAGE));
+    // Field-based service connections are recreated by the test context in AOT mode.
+    @Container
+    @ServiceConnection
+    static final LgtmStackContainer grafanaLgtm = new LgtmStackContainer(
+            DockerImageName.parse(TestcontainersConfiguration.LGTM_IMAGE));
 
-	@Autowired
-	OtlpLoggingConnectionDetails loggingConnectionDetails;
+    @Autowired
+    OtlpLoggingConnectionDetails loggingConnectionDetails;
 
-	@Autowired
-	@Qualifier("prometheusMeterRegistry")
-	MeterRegistry prometheus;
+    @Autowired
+    @Qualifier("prometheusMeterRegistry")
+    MeterRegistry prometheus;
 
-	@Test
-	void processCpuTimeCanBeRead() {
-		assertThat(prometheus.get("process.cpu.time").functionCounter().count()).isFinite().isNotNegative();
-	}
+    @Autowired
+    MockMvc mvc;
 
-	@Test
-	void loggingConnectionUsesRunningContainer() {
-		assertThat(grafanaLgtm.isRunning()).isTrue();
-		assertThat(loggingConnectionDetails.getUrl(Transport.HTTP))
-				.isEqualTo(grafanaLgtm.getOtlpHttpUrl() + "/v1/logs");
-	}
+    @Test
+    void signInIsDisabledUntilDirectoryIsConfigured() throws Exception {
+        mvc.perform(get("/signin").secure(true)).andExpect(status().isUnauthorized());
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/signin/password")
+            .secure(true).with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf()))
+            .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void processCpuTimeCanBeRead() {
+        assertThat(prometheus.get("process.cpu.time").functionCounter().count()).isFinite().isNotNegative();
+    }
+
+    @Test
+    void loggingConnectionUsesRunningContainer() {
+        assertThat(grafanaLgtm.isRunning()).isTrue();
+        assertThat(loggingConnectionDetails.getUrl(Transport.HTTP))
+                .isEqualTo(grafanaLgtm.getOtlpHttpUrl() + "/v1/logs");
+    }
 
 }

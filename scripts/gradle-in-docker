@@ -13,6 +13,8 @@ if (($# == 0)); then
   set -- test
 fi
 
+"$repo_root/scripts/frontend-in-docker"
+
 # Linux host networking is needed for Testcontainers' published ports.
 exec "${docker_cmd[@]}" run --rm --network host \
   --cpus "${IAM_BUILD_CPUS:-4}" --memory "${IAM_BUILD_MEMORY:-8g}" \
