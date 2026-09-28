@@ -95,3 +95,11 @@ tasks.register('webauthnBrowserFixture', JavaExec) {
     classpath = sourceSets.test.runtimeClasspath
     mainClass = 'top.ddupan.iam.login.WebAuthnBrowserFixture'
 }
+
+// Adds a loopback-only Hydra issuer and fixture client to the same test-only browser application.
+tasks.register('hydraBrowserFixture', JavaExec) {
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'top.ddupan.iam.login.WebAuthnBrowserFixture'
+    systemProperty 'iam.fixture.hydra', 'true'
+}

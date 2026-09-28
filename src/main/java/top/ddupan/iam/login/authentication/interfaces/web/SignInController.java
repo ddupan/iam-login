@@ -21,7 +21,10 @@ public class SignInController {
     private final PageRenderer renderer;
     private final ObjectProvider<MfaPolicy> policies;
 
-    public SignInController(PageRenderer renderer, ObjectProvider<MfaPolicy> policies) {
+    private final ObjectProvider<top.ddupan.iam.login.authorization.application.port.LogoutGateway> logout;
+    public SignInController(PageRenderer renderer, ObjectProvider<MfaPolicy> policies,
+            ObjectProvider<top.ddupan.iam.login.authorization.application.port.LogoutGateway> logout) {
+        this.logout=logout;
         this.renderer = renderer;
         this.policies = policies;
     }
@@ -41,18 +44,28 @@ public class SignInController {
     }
 
     @GetMapping(value = "/signin/complete", produces = MediaType.TEXT_HTML_VALUE)
-    ResponseEntity<String> complete(@AuthenticationPrincipal DirectoryPrincipal principal, CsrfToken csrf) {
+    ResponseEntity<String> complete(@AuthenticationPrincipal DirectoryPrincipal principal, CsrfToken csrf,
+            jakarta.servlet.http.HttpServletRequest request) {
+        if (top.ddupan.iam.login.authorization.interfaces.web.HydraBrowserRequests.pending(request)) {
+            return ResponseEntity.status(303).header("Cache-Control", "no-store").location(java.net.URI.create("/oauth2/login")).build();
+        }
         return identity(principal, csrf, "mfa-complete", "authenticate");
     }
 
     private ResponseEntity<String> identity(DirectoryPrincipal principal, CsrfToken csrf, String step, String passkey) {
         var user = principal.user();
-        return renderer.render(Map.of("step", step, "passkey", passkey, "name", user.displayName(),
-            "error", "", "action", "/signin/restart", "csrf", csrf(csrf),
+        var page = renderer.render(Map.of("step", step, "passkey", passkey, "name", user.displayName(),
+            "error", "", "action", "/signin/restart", "logoutAction", logout.getIfAvailable()==null ? "" : "/signin/logout", "csrf", csrf(csrf),
             "identity", Map.of("username", user.username(), "subjectId", user.id().value(),
                 "email", user.email(),
                 "groups", user.memberships().stream().map(GroupMembership::name).toList(),
                 "groupDns", user.memberships().stream().map(GroupMembership::externalId).toList())));
+        var gateway = logout.getIfAvailable();
+        if (gateway == null) return page;
+        var uri = java.net.URI.create(gateway.startUrl());
+        return ResponseEntity.ok().headers(page.getHeaders()).header("Content-Security-Policy",
+            PageRenderer.CONTENT_SECURITY_POLICY.replace("form-action 'self'",
+                "form-action 'self' " + uri.getScheme() + "://" + uri.getRawAuthority())).body(page.getBody());
     }
 
     private static Map<String, String> csrf(CsrfToken token) {

@@ -11,6 +11,8 @@ import tools.jackson.databind.json.JsonMapper;
 /** Shared HTML shell; the page context is data, never executable JavaScript. */
 @Component
 public class PageRenderer {
+    public static final String CONTENT_SECURITY_POLICY = "default-src 'self'; script-src 'self'; style-src 'self'; "
+        + "img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
     private static final String SLOT = "__IAM_PAGE_CONTEXT__";
     private final String shell;
     private final JsonMapper json = JsonMapper.builder().build();

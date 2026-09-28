@@ -3,6 +3,23 @@ import { SubmitForm } from "../components/SubmitForm";
 import type { SignInContext } from "../page-context";
 
 export function SignInPage({ context }: { context: SignInContext }) {
+  if (context.step === "logout") return <main><section className="card">
+    <h1>退出统一登录</h1>
+    <p>将结束本次登录，并通知支持统一注销的应用。</p>
+    <SubmitForm action={context.action} csrf={context.csrf} label="确认退出">
+      <input type="hidden" name="binding" value={context.binding} />
+    </SubmitForm>
+  </section></main>;
+  if (context.step === "authorize") return <main><section className="card">
+    <h1>继续登录 {context.client}</h1>
+    <p>{context.name}，密码与 passkey 已验证。</p>
+    <p>本次向应用提供以下范围的信息：</p>
+    <ul>{context.scopes.map(scope => <li key={scope}>{scope}</li>)}</ul>
+    <SubmitForm action={context.action} csrf={context.csrf} label="继续至应用">
+      <input type="hidden" name="binding" value={context.binding} />
+    </SubmitForm>
+    <SubmitForm action="/signin/restart" csrf={context.csrf} label="取消并退出" />
+  </section></main>;
   return (
     <main>
       <header><a href="/signin" className="brand">i<span>am</span></a></header>
@@ -54,6 +71,8 @@ export function SignInPage({ context }: { context: SignInContext }) {
             </label>
           </>}
         </SubmitForm>
+        {context.step === "mfa-complete" && context.logoutAction &&
+          <SubmitForm action={context.logoutAction} csrf={context.csrf} label="退出所有应用" />}
       </section>
       <footer>独立 IAM · AD 接入验证</footer>
     </main>

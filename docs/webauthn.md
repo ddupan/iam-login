@@ -9,11 +9,13 @@ AD 仍为用户与组权威；凭据按目录 authority + objectGUID 关联，�
 1. `/signin` 使用原生表单 POST 验证 AD 密码，建立 `FACTOR_PASSWORD`。
 2. `/signin/mfa`：没有凭据时注册 passkey；已有凭据时验证 passkey。
 3. 注册只保存凭据，必须再次实际验证，才取得 `FACTOR_WEBAUTHN`。
-4. `/signin/complete` 要求两种因素均在 10 分钟内有效；目前仅显示验证结果，尚不接受 Hydra challenge。
+4. `/signin/complete` 要求两种因素均在 10 分钟内有效；单独访问显示验证结果；存在 Hydra 请求时继续 [Login/Consent](hydra-login.md)。
 
 首次注册信任近期 AD 密码验证。已有凭据后的新增注册同时要求密码与 WebAuthn 因素；
-本轮 UI 只提供首次注册与验证，不提供新增管理、删除或自助恢复入口。遗失所有 passkey
-尚无自助登录途径；生产上线前需要另行确定恢复和初始注册政策，不能把数据库清空作为日常恢复方式。
+本轮 UI 只提供首次注册与验证，不提供新增管理、删除或自助恢复入口。按维护者确认的
+自用范围，遗失全部 passkey 由管理员人工操作数据库恢复，不以开发恢复 UI 作为上线条件。
+人工恢复只处理核实后的目标主体凭据，并按首次注册规则重新绑定；不能清空整个凭据库。
+AD 用户、密码和组继续通过 RSAT 或目录命令行管理，不在本应用增加目录管理页面。
 注册和验证均要求认证器 user verification（例如 PIN 或生物识别）。
 
 Spring Security 负责因素合并、会话轮换、退出和 CSRF。应用仅补目录主体与凭据所有权
@@ -66,5 +68,5 @@ IAM_WEBAUTHN_FIXTURE=1 npm --prefix frontend run test:browser -- webauthn.spec.t
 ```
 
 测试专用启动类仅在 test classpath，不进入生产 JAR，也不提供生产调试 API。
-真实用户的 passkey 注册、认证器兼容性和 Native 路径仍需独立验收；JVM/虚拟认证器通过
-不能代替真实人类或 Native 验收。生产共享 PostgreSQL 的接入留在部署阶段。
+维护者已确认开发入口的 AD + passkey 人类路径能够工作。更多认证器兼容性和 Native 路径
+仍需独立验收，不能套用虚拟认证器结果。生产共享 PostgreSQL 的接入留在部署阶段。

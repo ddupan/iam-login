@@ -25,6 +25,10 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 @SpringBootTest(properties = {"iam.ad.enabled=true", "iam.ad.domain=example.test", "iam.ad.base-dn=dc=example,dc=test",
+    "iam.clients.admin-group-dns[0]=CN=gitea-admins,dc=example,dc=test", "iam.hydra.enabled=true", "iam.hydra.admin-url=http://127.0.0.1:14445", "iam.hydra.public-url=http://localhost:14444",
+    "iam.hydra.clients[0]=gitea-fixture", "iam.hydra.subjects[0].authority=example.test",
+    "iam.hydra.subjects[0].directory-id=00112233-4455-6677-8899-aabbccddeeff",
+    "iam.hydra.subjects[0].subject=human:existing-subject",
     "iam.webauthn.enabled=true", "iam.webauthn.rp-id=localhost", "iam.webauthn.origin=https://localhost",
     "management.otlp.metrics.export.enabled=false", "spring.security.user.password=fixture-monitor-password"})
 @AutoConfigureMockMvc
@@ -46,6 +50,58 @@ class WebAuthnIntegrationTests {
     @AfterAll static void close() { Fixtures.DIRECTORY.close(); Fixtures.DATABASE.stop(); }
     @Autowired MockMvc mvc;
     @Autowired JdbcOperations jdbc;
+    @org.springframework.test.context.bean.override.mockito.MockitoBean
+    top.ddupan.iam.login.authorization.application.port.HydraGateway hydra;
+
+
+    @org.springframework.test.context.bean.override.mockito.MockitoBean
+    top.ddupan.iam.login.clients.application.ClientRegistry clients;
+    @org.springframework.test.context.bean.override.mockito.MockitoBean
+    top.ddupan.iam.login.authorization.application.port.LogoutGateway logout;
+
+    @Test
+    void clientAdministrationRequiresMfaAdminGroupAndCsrf() throws Exception {
+        mvc.perform(get("/api/iam/clients").with(https())).andExpect(status().isUnauthorized());
+        var session=login();
+        mvc.perform(get("/api/iam/clients").session(session).with(https())).andExpect(status().isForbidden());
+        secondFactor(session);
+        org.mockito.Mockito.when(clients.list(0,20)).thenReturn(List.of());
+        mvc.perform(get("/api/iam/clients").session(session).with(https())).andExpect(status().isOk());
+        mvc.perform(get("/api/iam/session").session(session).with(https())).andExpect(jsonPath("csrf.token").isNotEmpty());
+        mvc.perform(delete("/api/iam/clients/example").session(session).with(https())).andExpect(status().isForbidden());
+        mvc.perform(delete("/api/iam/clients/example").session(session).with(https()).with(csrf())).andExpect(status().isNoContent());
+        org.mockito.Mockito.verify(clients).delete("example");
+        var security=(SecurityContext)session.getAttribute("SPRING_SECURITY_CONTEXT");
+        var old=security.getAuthentication();
+        var principal=(top.ddupan.iam.login.authentication.infrastructure.security.DirectoryPrincipal)old.getPrincipal();
+        var user=principal.user();
+        var noGroups=new top.ddupan.iam.login.authentication.domain.User(user.id(),user.username(),user.displayName(),user.email(),List.of());
+        security.setAuthentication(UsernamePasswordAuthenticationToken.authenticated(
+            new top.ddupan.iam.login.authentication.infrastructure.security.DirectoryPrincipal(noGroups),null,old.getAuthorities()));
+        mvc.perform(get("/api/iam/clients").session(session).with(https())).andExpect(status().isForbidden());
+        mvc.perform(get("/admin/clients").session(session).with(https())).andExpect(status().isForbidden());
+    }
+
+    @Test
+    void logoutRequiresCsrfBrowserBindingAndInvalidatesLocalSession() throws Exception {
+        var session=login(); secondFactor(session);
+        var data=new top.ddupan.iam.login.authorization.application.port.LogoutGateway.Request(
+            "logout-challenge","human:existing-subject","sid","");
+        org.mockito.Mockito.when(logout.request("logout-challenge")).thenReturn(data);
+        org.mockito.Mockito.when(logout.startUrl()).thenReturn("http://localhost:14444/oauth2/sessions/logout");
+        org.mockito.Mockito.when(logout.accept("logout-challenge")).thenReturn("http://localhost:14444/oauth2/sessions/logout?logout_verifier=fixture");
+        var html=mvc.perform(get("/oauth2/logout").session(session).with(https()).param("logout_challenge","logout-challenge"))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        var match=java.util.regex.Pattern.compile("\"binding\":\"([^\"]+)\"").matcher(html);
+        assertThat(match.find()).isTrue(); var binding=match.group(1);
+        mvc.perform(post("/oauth2/logout").session(session).with(https()).param("binding",binding)).andExpect(status().isForbidden());
+        mvc.perform(post("/oauth2/logout").session(session).with(https()).with(csrf()).param("binding","other"))
+            .andExpect(status().isBadRequest());
+        mvc.perform(post("/oauth2/logout").session(session).with(https()).with(csrf()).param("binding",binding))
+            .andExpect(status().isSeeOther());
+        assertThat(session.isInvalid()).isTrue();
+        org.mockito.Mockito.verify(logout).accept("logout-challenge");
+    }
 
     @Test
     void passwordOnlyCanEnrollButCannotCompleteOrDelete() throws Exception {
@@ -75,6 +131,64 @@ class WebAuthnIntegrationTests {
                 .issuedAt(Instant.now().minusSeconds(601)).build())));
         mvc.perform(post("/webauthn/register/options").session(session).with(https()).with(csrf()))
             .andExpect(status().is3xxRedirection());
+    }
+
+    private static final String AUTH_URL = "http://localhost:14444/oauth2/auth?client_id=gitea-fixture&response_type=code";
+    private top.ddupan.iam.login.authorization.domain.AuthorizationRequest hydraRequest(String challenge, String subject,
+            String login, String binding) {
+        return new top.ddupan.iam.login.authorization.domain.AuthorizationRequest(challenge, "gitea-fixture",
+            List.of("openid", "profile", "groups"), List.of(), subject,
+            login == null ? null : top.ddupan.iam.login.authorization.domain.AuthorizationRequest.digest(login), binding, AUTH_URL, false);
+    }
+    private void secondFactor(MockHttpSession session) {
+        var context = (SecurityContext) session.getAttribute("SPRING_SECURITY_CONTEXT");
+        var previous = context.getAuthentication();
+        var factors = new java.util.ArrayList<org.springframework.security.core.GrantedAuthority>(previous.getAuthorities());
+        factors.add(FactorGrantedAuthority.withAuthority("FACTOR_WEBAUTHN").issuedAt(Instant.now()).build());
+        context.setAuthentication(UsernamePasswordAuthenticationToken.authenticated(previous.getPrincipal(), null, factors));
+    }
+
+    @Test
+    void hydraRequiresMfaCsrfBrowserBindingAndConsumesBothChallengesOnce() throws Exception {
+        org.mockito.Mockito.when(hydra.login("login-challenge")).thenReturn(hydraRequest("login-challenge", "", null, null));
+        var session = login();
+        mvc.perform(get("/oauth2/start").with(https()).session(session).param("login_challenge", "login-challenge"))
+            .andExpect(redirectedUrl("/oauth2/login"));
+        var intent = top.ddupan.iam.login.authorization.interfaces.web.HydraBrowserRequests.intent(
+            new org.springframework.mock.web.MockHttpServletRequest() {{ setSession(session); }});
+        mvc.perform(post("/oauth2/login").with(https()).session(session).with(csrf()).param("binding", intent.binding()))
+            .andExpect(status().is3xxRedirection());
+        org.mockito.Mockito.verify(hydra, org.mockito.Mockito.never()).acceptLogin(org.mockito.ArgumentMatchers.anyString(),
+            org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any());
+        secondFactor(session);
+        mvc.perform(post("/oauth2/login").with(https()).session(session).param("binding", intent.binding()))
+            .andExpect(status().isForbidden());
+        mvc.perform(post("/oauth2/login").with(https()).session(session).with(csrf()).param("binding", "other-browser"))
+            .andExpect(status().isBadRequest());
+        org.mockito.Mockito.when(hydra.acceptLogin(org.mockito.ArgumentMatchers.eq("login-challenge"),
+            org.mockito.ArgumentMatchers.eq("human:existing-subject"), org.mockito.ArgumentMatchers.eq(intent.binding()),
+            org.mockito.ArgumentMatchers.any())).thenReturn("http://localhost:14444/oauth2/auth?login_verifier=fixture");
+        mvc.perform(post("/oauth2/login").with(https()).session(session).with(csrf()).param("binding", intent.binding()))
+            .andExpect(status().isSeeOther());
+        mvc.perform(post("/oauth2/login").with(https()).session(session).with(csrf()).param("binding", intent.binding()))
+            .andExpect(status().isBadRequest());
+        org.mockito.Mockito.when(hydra.consent("consent-challenge")).thenReturn(
+            hydraRequest("consent-challenge", "human:existing-subject", "login-challenge", intent.binding()));
+        org.mockito.Mockito.when(hydra.acceptConsent(org.mockito.ArgumentMatchers.eq("consent-challenge"),
+            org.mockito.ArgumentMatchers.anyList(), org.mockito.ArgumentMatchers.anyMap()))
+            .thenReturn("http://localhost:14444/oauth2/auth?consent_verifier=fixture");
+        mvc.perform(get("/oauth2/consent").with(https()).session(session).param("consent_challenge", "consent-challenge"))
+            .andExpect(status().isSeeOther());
+        mvc.perform(get("/oauth2/consent").with(https()).session(session).param("consent_challenge", "consent-challenge"))
+            .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void consentCannotStartInAnotherBrowserEvenAfterMfa() throws Exception {
+        var session = login(); secondFactor(session);
+        mvc.perform(get("/oauth2/consent").with(https()).session(session).param("consent_challenge", "stolen-challenge"))
+            .andExpect(status().isBadRequest());
+        org.mockito.Mockito.verifyNoInteractions(hydra);
     }
 
     private MockHttpSession login() throws Exception {
