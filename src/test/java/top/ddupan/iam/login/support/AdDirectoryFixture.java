@@ -71,7 +71,9 @@ public final class AdDirectoryFixture implements AutoCloseable {
                         "80090308: LdapErr: DSID-0C090334, comment: AcceptSecurityContext error, data " + subcode + ", v1db1");
                     if (name.equalsIgnoreCase("alice@example.test")) {
                         request.setRequest(new SimpleBindRequest(USER_DN, request.getRequest().getPassword().getValue()));
-                    } else if (!name.equals(USER_DN)) {
+                    } else if (name.equalsIgnoreCase("bob@example.test")) {
+                        request.setRequest(new SimpleBindRequest("cn=Bob," + BASE, request.getRequest().getPassword().getValue()));
+                    } else if (!name.equals(USER_DN) && !name.equals("cn=Bob," + BASE)) {
                         throw new LDAPException(ResultCode.INVALID_CREDENTIALS, "Invalid credentials");
                     }
                 }
@@ -90,6 +92,14 @@ public final class AdDirectoryFixture implements AutoCloseable {
                 new com.unboundid.ldap.sdk.Attribute("mail", "alice@example.test"),
                 new com.unboundid.ldap.sdk.Attribute("objectGUID", GUID),
                 new com.unboundid.ldap.sdk.Attribute("memberOf", "CN=gitea-admins," + BASE, "CN=MixedCase," + BASE)));
+            ldap.add(new Entry("cn=Bob," + BASE,
+                new com.unboundid.ldap.sdk.Attribute("objectClass", "user"),
+                new com.unboundid.ldap.sdk.Attribute("cn", "Bob"),
+                new com.unboundid.ldap.sdk.Attribute("sAMAccountName", "bob"),
+                new com.unboundid.ldap.sdk.Attribute("userPrincipalName", "bob@example.test"),
+                new com.unboundid.ldap.sdk.Attribute("userPassword", "fixture-password"),
+                new com.unboundid.ldap.sdk.Attribute("displayName", "Bob"),
+                new com.unboundid.ldap.sdk.Attribute("objectGUID", new byte[16])));
         } catch (Exception ex) { throw new ExceptionInInitializerError(ex); }
     }
 

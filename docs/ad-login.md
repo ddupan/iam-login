@@ -10,8 +10,9 @@ try-with-resources 管理已认证用户仓储会话；基础设施的 `AdUserRe
 `AdUserEntry` 的 LDAP 注解不会进入领域对象。
 
 成功后重定向到 `/signin/mfa`，显示目录账号、objectGUID、邮箱、直接所属组及组 DN。
-**这是密码因素验收页面，MFA 尚未接入，不是完整登录成功。** Spring Security 保存
-仅含 `FACTOR_PASSWORD` 的认证结果；其余应用请求使用 `denyAll`，不调用 Hydra，
+**密码成功本身不是完整登录成功。** Spring Security 先保存仅含 `FACTOR_PASSWORD`
+的认证结果；启用 [WebAuthn](webauthn.md) 后在此继续第二因素，否则停留在等待页面。
+未实现的应用请求使用 `denyAll`，不调用 Hydra，
 不替换现役 Go/Authelia/Gitea 登录链路。
 
 ## 目录和组语义

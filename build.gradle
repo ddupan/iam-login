@@ -21,11 +21,16 @@ repositories {
 
 dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-actuator'
+	implementation 'org.springframework.boot:spring-boot-starter-jdbc'
+	implementation 'org.springframework.boot:spring-boot-starter-flyway'
+	runtimeOnly 'org.flywaydb:flyway-database-postgresql'
+	runtimeOnly 'org.postgresql:postgresql'
 	implementation 'org.springframework.boot:spring-boot-starter-data-ldap'
 	implementation 'org.springframework.boot:spring-boot-starter-opentelemetry'
 	implementation 'org.springframework.boot:spring-boot-starter-security'
 	implementation 'org.springframework.boot:spring-boot-starter-validation'
 	implementation 'org.springframework.boot:spring-boot-starter-webmvc'
+	implementation 'org.springframework.boot:spring-boot-starter-restclient'
 	implementation 'org.springframework.security:spring-security-webauthn'
 	compileOnly 'org.projectlombok:lombok'
 	developmentOnly 'org.springframework.boot:spring-boot-devtools'
@@ -42,6 +47,7 @@ dependencies {
 	testImplementation 'org.springframework.boot:spring-boot-testcontainers'
 	testImplementation 'com.unboundid:unboundid-ldapsdk'
 	testImplementation 'org.testcontainers:testcontainers-grafana'
+	testImplementation 'org.testcontainers:testcontainers-postgresql'
 	testImplementation 'org.testcontainers:testcontainers-junit-jupiter'
 	testCompileOnly 'org.projectlombok:lombok'
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
@@ -82,4 +88,19 @@ tasks.named('processResources') {
         }
     }
     from('frontend/dist') { into 'ui' }
+}
+
+// Explicit test-only entry point for browser WebAuthn ceremonies; no fixture endpoints in production.
+tasks.register('webauthnBrowserFixture', JavaExec) {
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'top.ddupan.iam.login.WebAuthnBrowserFixture'
+}
+
+// Adds a loopback-only Hydra issuer and fixture client to the same test-only browser application.
+tasks.register('hydraBrowserFixture', JavaExec) {
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'top.ddupan.iam.login.WebAuthnBrowserFixture'
+    systemProperty 'iam.fixture.hydra', 'true'
 }

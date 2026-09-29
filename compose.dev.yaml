@@ -1,0 +1,21 @@
+# Only the development credential database. Supply IAM_DEV_DB_PASSWORD outside Git.
+services:
+  postgres:
+    image: postgres@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873
+    environment:
+      POSTGRES_DB: iam_login
+      POSTGRES_USER: iam_login
+      POSTGRES_PASSWORD: ${IAM_DEV_DB_PASSWORD:?Set IAM_DEV_DB_PASSWORD outside Git}
+    ports:
+      - "127.0.0.1:${IAM_DEV_DB_PORT:-15432}:5432"
+    volumes:
+      - postgres:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U iam_login -d iam_login"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    cpus: 1
+    mem_limit: 512m
+volumes:
+  postgres:
