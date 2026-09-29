@@ -21,9 +21,9 @@ public class SignInController {
     private final PageRenderer renderer;
     private final ObjectProvider<MfaPolicy> policies;
 
-    private final ObjectProvider<top.ddupan.iam.login.authorization.application.port.LogoutGateway> logout;
+    private final ObjectProvider<top.ddupan.iam.login.authorization.application.port.HydraGateway> logout;
     public SignInController(PageRenderer renderer, ObjectProvider<MfaPolicy> policies,
-            ObjectProvider<top.ddupan.iam.login.authorization.application.port.LogoutGateway> logout) {
+            ObjectProvider<top.ddupan.iam.login.authorization.application.port.HydraGateway> logout) {
         this.logout=logout;
         this.renderer = renderer;
         this.policies = policies;
@@ -62,7 +62,7 @@ public class SignInController {
                 "groupDns", user.memberships().stream().map(GroupMembership::externalId).toList())));
         var gateway = logout.getIfAvailable();
         if (gateway == null) return page;
-        var uri = java.net.URI.create(gateway.startUrl());
+        var uri = java.net.URI.create(gateway.logoutUrl());
         return ResponseEntity.ok().headers(page.getHeaders()).header("Content-Security-Policy",
             PageRenderer.CONTENT_SECURITY_POLICY.replace("form-action 'self'",
                 "form-action 'self' " + uri.getScheme() + "://" + uri.getRawAuthority())).body(page.getBody());

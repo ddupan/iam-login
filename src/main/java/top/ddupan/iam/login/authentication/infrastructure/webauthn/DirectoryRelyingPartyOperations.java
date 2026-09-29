@@ -1,11 +1,10 @@
 package top.ddupan.iam.login.authentication.infrastructure.webauthn;
 
-import org.springframework.jdbc.core.JdbcOperations;
+import top.ddupan.iam.login.authentication.infrastructure.persistence.JdbcCredentialRegistration;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.webauthn.api.*;
 import org.springframework.security.web.webauthn.management.*;
-import org.springframework.transaction.support.TransactionTemplate;
 import top.ddupan.iam.login.authentication.infrastructure.security.DirectoryPrincipal;
 
 /** Adds directory ownership/enrollment policy; verification and storage remain upstream implementations. */
@@ -14,18 +13,16 @@ public final class DirectoryRelyingPartyOperations implements WebAuthnRelyingPar
     private final MfaPolicy policy;
     private final PublicKeyCredentialUserEntityRepository users;
     private final UserCredentialRepository credentials;
-    private final JdbcOperations jdbc;
-    private final TransactionTemplate transactions;
+    private final JdbcCredentialRegistration registrations;
 
     public DirectoryRelyingPartyOperations(WebAuthnRelyingPartyOperations delegate, MfaPolicy policy,
             PublicKeyCredentialUserEntityRepository users, UserCredentialRepository credentials,
-            JdbcOperations jdbc, TransactionTemplate transactions) {
+            JdbcCredentialRegistration registrations) {
         this.delegate = delegate;
         this.policy = policy;
         this.users = users;
         this.credentials = credentials;
-        this.jdbc = jdbc;
-        this.transactions = transactions;
+        this.registrations = registrations;
     }
 
     @Override
@@ -41,10 +38,7 @@ public final class DirectoryRelyingPartyOperations implements WebAuthnRelyingPar
         var principal = policy.current();
         var owner = request.getCreationOptions().getUser();
         if (!principal.getName().equals(owner.getName())) throw new AccessDeniedException("Credential owner mismatch");
-        return transactions.execute(status -> {
-            // Serialize first enrollment across sessions/processes, then recheck existing factors.
-            jdbc.queryForObject("select id from user_entities where id = ? for update", String.class,
-                owner.getId().toBase64UrlString());
+        return registrations.register(owner.getId().toBase64UrlString(), () -> {
             policy.requireEnrollment(SecurityContextHolder.getContext().getAuthentication());
             return delegate.registerCredential(request);
         });

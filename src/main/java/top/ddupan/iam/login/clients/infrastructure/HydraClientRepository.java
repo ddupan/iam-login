@@ -3,30 +3,28 @@ package top.ddupan.iam.login.clients.infrastructure;
 import java.util.*;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.web.client.RestClient;
-import top.ddupan.iam.login.clients.application.*;
+import top.ddupan.iam.login.clients.domain.*;
 import top.ddupan.iam.login.clients.domain.OidcClient;
-import top.ddupan.iam.login.authorization.infrastructure.hydra.HydraProperties;
-import top.ddupan.iam.login.authorization.infrastructure.hydra.HydraAdminClient;
 
-public final class HydraClientRegistry implements ClientRegistry {
+public final class HydraClientRepository implements ClientRepository {
     public static final String ENABLED = "iam_login_enabled";
     private static final ParameterizedTypeReference<Map<String,Object>> OBJECT = new ParameterizedTypeReference<>() {};
     private static final ParameterizedTypeReference<List<Map<String,Object>>> ARRAY = new ParameterizedTypeReference<>() {};
     private final RestClient http;
-    public HydraClientRegistry(HydraProperties properties) {
-        http = HydraAdminClient.restClient(properties).mutate()
+    public HydraClientRepository(RestClient client) {
+        http = client.mutate()
             .defaultStatusHandler(status -> !status.is2xxSuccessful(), (request, response) -> {
-                throw new ClientRegistryException(switch (response.getStatusCode().value()) {
-                    case 404 -> ClientRegistryException.Kind.NOT_FOUND;
-                    case 400, 409 -> ClientRegistryException.Kind.CONFLICT;
-                    default -> ClientRegistryException.Kind.UNAVAILABLE;
+                throw new ClientRepositoryException(switch (response.getStatusCode().value()) {
+                    case 404 -> ClientRepositoryException.Kind.NOT_FOUND;
+                    case 400, 409 -> ClientRepositoryException.Kind.CONFLICT;
+                    default -> ClientRepositoryException.Kind.UNAVAILABLE;
                 });
             }).build();
     }
     private <T> T call(java.util.function.Supplier<T> operation) {
         try { return operation.get(); }
-        catch (ClientRegistryException ex) { throw ex; }
-        catch (RuntimeException ex) { throw new ClientRegistryException(ClientRegistryException.Kind.UNAVAILABLE); }
+        catch (ClientRepositoryException ex) { throw ex; }
+        catch (RuntimeException ex) { throw new ClientRepositoryException(ClientRepositoryException.Kind.UNAVAILABLE); }
     }
     @Override public List<OidcClient> list(int page, int size) {
         if (page < 0 || size < 1 || size > 100) throw new IllegalArgumentException("Invalid pagination");
@@ -49,7 +47,7 @@ public final class HydraClientRegistry implements ClientRegistry {
     @Override public OidcClient update(OidcClient client) {
         return call(() -> {
             var previous = read(client.id());
-            if (!supported(previous)) throw new ClientRegistryException(ClientRegistryException.Kind.CONFLICT);
+            if (!supported(previous)) throw new ClientRepositoryException(ClientRepositoryException.Kind.CONFLICT);
             // Preserve issuer-owned fields and metadata, but never send back a stored secret/hash.
             var update = new LinkedHashMap<>(previous); update.remove("client_secret");
             var metadata = new LinkedHashMap<String,Object>();
@@ -82,7 +80,7 @@ public final class HydraClientRegistry implements ClientRegistry {
         map.put("metadata",Map.of(ENABLED,c.loginEnabled())); return map;
     }
     @SuppressWarnings("unchecked") private OidcClient view(Map<String,Object> m) {
-        if (!supported(m)) throw new ClientRegistryException(ClientRegistryException.Kind.CONFLICT);
+        if (!supported(m)) throw new ClientRepositoryException(ClientRepositoryException.Kind.CONFLICT);
         String id = (String)m.get("client_id");
         String name = Objects.toString(m.get("client_name"),"");
         return new OidcClient(id, name.isBlank() ? id : name,

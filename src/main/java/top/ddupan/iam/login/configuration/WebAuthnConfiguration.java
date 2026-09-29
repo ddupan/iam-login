@@ -3,11 +3,8 @@ package top.ddupan.iam.login.configuration;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.Set;
-import javax.sql.DataSource;
-import com.zaxxer.hikari.HikariDataSource;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
-import org.springframework.boot.jdbc.autoconfigure.DataSourceProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.jdbc.core.JdbcOperations;
@@ -22,13 +19,8 @@ import top.ddupan.iam.login.authentication.infrastructure.webauthn.*;
 
 @Configuration(proxyBeanMethods = false)
 @ConditionalOnProperty(prefix = "iam.webauthn", name = "enabled", havingValue = "true")
-@EnableConfigurationProperties({WebAuthnProperties.class, DataSourceProperties.class})
+@EnableConfigurationProperties(WebAuthnProperties.class)
 class WebAuthnConfiguration {
-    @Bean
-    DataSource webAuthnDataSource(DataSourceProperties properties) {
-        return properties.initializeDataSourceBuilder().type(HikariDataSource.class).build();
-    }
-
     @Bean
     PublicKeyCredentialUserEntityRepository credentialUsers(JdbcOperations jdbc) {
         return new JdbcPublicKeyCredentialUserEntityRepository(jdbc);
@@ -62,8 +54,9 @@ class WebAuthnConfiguration {
                 .userVerification(UserVerificationRequirement.REQUIRED).build()));
         delegate.setCustomizeRequestOptions(options -> options.timeout(Duration.ofMinutes(5))
             .userVerification(UserVerificationRequirement.REQUIRED));
-        return new DirectoryRelyingPartyOperations(delegate, policy, users, credentials, jdbc,
-            new TransactionTemplate(transactions));
+        return new DirectoryRelyingPartyOperations(delegate, policy, users, credentials,
+            new top.ddupan.iam.login.authentication.infrastructure.persistence.JdbcCredentialRegistration(
+                jdbc, new TransactionTemplate(transactions)));
     }
 
     @Bean

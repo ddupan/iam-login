@@ -9,13 +9,12 @@ import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.startupcheck.OneShotStartupCheckStrategy;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
-import top.ddupan.iam.login.authorization.infrastructure.hydra.HydraProperties;
-import top.ddupan.iam.login.clients.application.ClientRegistryException;
+import top.ddupan.iam.login.clients.domain.ClientRepositoryException;
 import top.ddupan.iam.login.clients.domain.OidcClient;
-import top.ddupan.iam.login.clients.infrastructure.HydraClientRegistry;
+import top.ddupan.iam.login.clients.infrastructure.HydraClientRepository;
 import static org.assertj.core.api.Assertions.*;
 
-class HydraRegistryIntegrationTests {
+class HydraRepositoryIntegrationTests {
     private static final String IMAGE="oryd/hydra:v26.2.0@sha256:ff67c7fb5f95074fa53374d41151713554960504b340cd3f95b09e65deaea2a9";
     private static final URI ADMIN=URI.create("http://127.0.0.1:14845");
     @Test void crudPersistsAcrossIssuerRestartAndDoesNotReturnSecretsOnRead() throws Exception {
@@ -33,7 +32,7 @@ class HydraRegistryIntegrationTests {
                     .withEnv("URLS_SELF_ISSUER","http://localhost:14844/").withEnv("LOG_LEVEL","error")
                     .withEnv("SECRETS_SYSTEM","fixture-only-stable-system-secret-32-characters").withCommand("serve","all","--dev")) {
                 hydra.start(); ready();
-                var registry=new HydraClientRegistry(new HydraProperties(true,ADMIN,URI.create("http://localhost:14844"),Set.of(),List.of()));
+                var registry=new HydraClientRepository(org.springframework.web.client.RestClient.builder().baseUrl(ADMIN.toString()).build());
                 var client=new OidcClient("managed-fixture","Fixture",List.of("https://rp.example/callback"),Set.of("openid","groups"),
                     List.of("https://rp.example/bye"),"https://rp.example/backchannel","",true);
                 var created=registry.create(client);
@@ -57,8 +56,8 @@ class HydraRegistryIntegrationTests {
                     assertThat(response.body()).contains("invalid_grant").doesNotContain("invalid_client");
                 }
                 registry.delete(client.id());
-                assertThatThrownBy(() -> registry.get(client.id())).isInstanceOfSatisfying(ClientRegistryException.class,
-                    ex -> assertThat(ex.kind()).isEqualTo(ClientRegistryException.Kind.NOT_FOUND));
+                assertThatThrownBy(() -> registry.get(client.id())).isInstanceOfSatisfying(ClientRepositoryException.class,
+                    ex -> assertThat(ex.kind()).isEqualTo(ClientRepositoryException.Kind.NOT_FOUND));
             }
         }
     }

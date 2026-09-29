@@ -46,6 +46,9 @@ iam:
     enabled: true
     admin-url: http://hydra-admin.hydra.svc.cluster.local:4445
     public-url: https://hydra.ad.ddupan.top
+    http:
+      connect-timeout: 3s
+      read-timeout: 5s
     clients: [gitea] # 仅供尚未写入管理标记的旧客户端过渡
     subjects:
       - authority: ad.example.test
@@ -63,6 +66,9 @@ Hydra 环境配置需将 login URL 指向 `/oauth2/start`，consent URL 指向 `
 logout URL 指向 `/oauth2/logout`，默认 post-logout URL 指向本服务 `/signin`。
 本仓库的实现与测试不等于这些生产设置已变更。Admin URL 可以使用现役受 NetworkPolicy
 约束的集群内 HTTP，也可通过 loopback port-forward；不能公开管理端口。
+HTTP client 在配置层使用 Boot 提供的 `RestClient.Builder` 装配并注入，保留框架定制与观测能力。
+上述连接/读取超时有默认值且必须为正，可按部署环境覆盖；禁止跟随重定向不提供关闭开关。
+Login、Consent 和 Logout 共用 `HydraGateway` 与 Admin client。
 公共 origin 必须 HTTPS，HTTP 只接受隔离测试的 loopback。客户端请求必须显式带 redirect_uri。
 
 ## 客户端注册与管理边界

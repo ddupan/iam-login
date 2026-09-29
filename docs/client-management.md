@@ -1,6 +1,7 @@
 # OAuth2/OIDC 客户端管理
 
 本服务通过受限 API 管理 Hydra 中的第一方 confidential authorization-code 客户端。
+领域层定义 `ClientRepository`，基础设施的 `HydraClientRepository` 实现远端持久化。
 API 没有管理 UI，沿用浏览器 Spring session；调用者必须完成有效的密码 + WebAuthn MFA，
 且直接属于配置的管理组。默认组列表为空，拒绝全部管理操作。
 

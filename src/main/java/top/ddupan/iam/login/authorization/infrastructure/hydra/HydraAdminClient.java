@@ -1,13 +1,10 @@
 package top.ddupan.iam.login.authorization.infrastructure.hydra;
 
 import java.net.URI;
-import java.net.http.HttpClient;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
 import top.ddupan.iam.login.authorization.application.port.HydraGateway;
 import top.ddupan.iam.login.authorization.domain.AuthorizationRequest;
@@ -16,19 +13,12 @@ import top.ddupan.iam.login.authorization.domain.AuthorizationRequest;
 public final class HydraAdminClient implements HydraGateway {
     private final RestClient client;
     private final URI publicUrl;
-    public HydraAdminClient(HydraProperties properties) {
-        client = restClient(properties).mutate()
+    public HydraAdminClient(HydraProperties properties, RestClient http) {
+        client = http.mutate()
             .defaultStatusHandler(status -> !status.is2xxSuccessful(), (request, response) -> {
                 throw new IllegalArgumentException("Hydra returned a non-success status");
             }).build();
         publicUrl = properties.publicUrl();
-    }
-    public static RestClient restClient(HydraProperties properties) {
-        var http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(3))
-            .followRedirects(HttpClient.Redirect.NEVER).build();
-        var factory = new JdkClientHttpRequestFactory(http);
-        factory.setReadTimeout(Duration.ofSeconds(5));
-        return RestClient.builder().baseUrl(properties.adminUrl().toString()).requestFactory(factory).build();
     }
     @com.fasterxml.jackson.annotation.JsonIgnoreProperties(ignoreUnknown = true)
     public record Client(String client_id, Map<String,Object> metadata) { }
@@ -118,5 +108,53 @@ public final class HydraAdminClient implements HydraGateway {
         if (challenge == null || challenge.isBlank() || challenge.length() > 8192) {
             throw new IllegalArgumentException("Invalid challenge");
         }
+    }
+    @com.fasterxml.jackson.annotation.JsonIgnoreProperties(ignoreUnknown=true)
+    public record LogoutResponse(String challenge,String subject,String sid,String request_url, LogoutClient client) { }
+    @com.fasterxml.jackson.annotation.JsonIgnoreProperties(ignoreUnknown=true)
+    public record LogoutClient(java.util.List<String> post_logout_redirect_uris) { }
+    @Override public LogoutRequest logout(String challenge) {
+        validateChallenge(challenge);
+        try {
+            var result = java.util.Objects.requireNonNull(client.get().uri(b -> b.path("/admin/oauth2/auth/requests/logout")
+                .queryParam("logout_challenge","{challenge}").build(challenge)).retrieve().body(LogoutResponse.class));
+            if (!challenge.equals(result.challenge())) throw new IllegalArgumentException("Wrong challenge");
+            // Hydra stores the original HTTP request-target, which may be origin-relative.
+            validateTarget(publicUrl.resolve(result.request_url()).toString());
+            String callback = "";
+            var query = URI.create(result.request_url()).getRawQuery();
+            if (query != null) for (var part : query.split("&")) {
+                var pair = part.split("=",2);
+                if ("post_logout_redirect_uri".equals(java.net.URLDecoder.decode(pair[0],java.nio.charset.StandardCharsets.UTF_8))) {
+                    if (!callback.isEmpty() || pair.length!=2) throw new IllegalArgumentException("Duplicate logout redirect");
+                    callback=java.net.URLDecoder.decode(pair[1],java.nio.charset.StandardCharsets.UTF_8);
+                }
+            }
+            if (!callback.isEmpty()) {
+                if (result.client()==null || result.client().post_logout_redirect_uris()==null
+                    || !result.client().post_logout_redirect_uris().contains(callback)) throw new IllegalArgumentException("Unregistered logout redirect");
+                var uri = URI.create(callback);
+                if (uri.getHost()==null || uri.getUserInfo()!=null || uri.getFragment()!=null
+                    || !("https".equals(uri.getScheme()) || "http".equals(uri.getScheme())
+                        && java.util.Set.of("localhost","127.0.0.1").contains(uri.getHost())))
+                    throw new IllegalArgumentException("Invalid logout callback");
+            }
+            return new LogoutRequest(challenge,result.subject(),result.sid(),callback);
+        } catch (RuntimeException ex) { throw new IllegalArgumentException("Logout request unavailable"); }
+    }
+    @Override public String acceptLogout(String challenge) {
+        validateChallenge(challenge);
+        try {
+            var result = java.util.Objects.requireNonNull(client.put().uri(b -> b.path("/admin/oauth2/auth/requests/logout/accept")
+                .queryParam("logout_challenge","{challenge}").build(challenge)).retrieve().body(HydraAdminClient.Redirect.class));
+            validateTarget(result.redirect_to()); return result.redirect_to();
+        } catch (RuntimeException ex) { throw new IllegalArgumentException("Logout acceptance unavailable"); }
+    }
+    @Override public String logoutUrl() { return publicUrl.resolve("/oauth2/sessions/logout").toString(); }
+    private void validateTarget(String target) {
+        var uri = URI.create(target);
+        if (!publicUrl.getScheme().equals(uri.getScheme()) || !publicUrl.getRawAuthority().equals(uri.getRawAuthority())
+                || uri.getUserInfo()!=null || uri.getFragment()!=null || !"/oauth2/sessions/logout".equals(uri.getRawPath()))
+            throw new IllegalArgumentException("Invalid logout redirect");
     }
 }

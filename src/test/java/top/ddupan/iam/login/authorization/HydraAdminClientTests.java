@@ -14,6 +14,13 @@ import top.ddupan.iam.login.authorization.infrastructure.hydra.*;
 import static org.assertj.core.api.Assertions.*;
 
 class HydraAdminClientTests {
+    private org.springframework.web.client.RestClient http(HttpServer server) {
+        var factory = new org.springframework.http.client.JdkClientHttpRequestFactory(
+            java.net.http.HttpClient.newBuilder().followRedirects(java.net.http.HttpClient.Redirect.NEVER).build());
+        return org.springframework.web.client.RestClient.builder()
+            .baseUrl("http://127.0.0.1:" + server.getAddress().getPort()).requestFactory(factory).build();
+    }
+
     @Test void logoutAcceptsOriginRelativeRequestsButRejectsForeignOrigins() throws Exception {
         var payload = new AtomicReference<String>();
         var server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
@@ -25,14 +32,14 @@ class HydraAdminClientTests {
         });
         server.start();
         try {
-            var client = new HydraLogoutClient(new HydraProperties(true,
+            var client = new HydraAdminClient(new HydraProperties(true,
                 URI.create("http://127.0.0.1:" + server.getAddress().getPort()), URI.create("http://localhost:14444"),
-                Set.of(), List.of()));
+                Set.of(), List.of()), http(server));
             payload.set("{\"challenge\":\"challenge\",\"subject\":\"subject\",\"sid\":\"session\",\"request_url\":\"/oauth2/sessions/logout\"}");
-            assertThat(client.request("challenge").subject()).isEqualTo("subject");
+            assertThat(client.logout("challenge").subject()).isEqualTo("subject");
             for (String url : List.of("//attacker.example/oauth2/sessions/logout", "https://attacker.example/oauth2/sessions/logout", "/admin/clients")) {
                 payload.set("{\"challenge\":\"challenge\",\"request_url\":\"" + url + "\"}");
-                assertThatIllegalArgumentException().isThrownBy(() -> client.request("challenge"));
+                assertThatIllegalArgumentException().isThrownBy(() -> client.logout("challenge"));
             }
         } finally { server.stop(0); }
     }
@@ -53,7 +60,7 @@ class HydraAdminClientTests {
         try {
             var client = new HydraAdminClient(new HydraProperties(true,
                 URI.create("http://127.0.0.1:" + server.getAddress().getPort()), URI.create("http://localhost:14444"),
-                Set.of("gitea"), List.of()));
+                Set.of("gitea"), List.of()), http(server));
             assertThat(client.acceptLogin("challenge", "subject", "binding", Instant.now()))
                 .startsWith("http://localhost:14444/oauth2/auth?");
             for (var target : List.of("https://attacker.example/oauth2/auth", "http://localhost:14444/admin/clients",

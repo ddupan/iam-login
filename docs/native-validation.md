@@ -44,3 +44,10 @@ WebAuthn 集成；TOTP、恢复方式与已有 Authelia MFA 的迁移方式需�
 
 通过上述测试后才准备生产切换；保留现役 OIDC 上游适配器作为回退路径。应用镜像以
 不可变 digest 交给 homelab-infra，部署状态与真实人类 MFA 验收分别记录。
+
+### 测试 AOT 的待排查项（2026-09-29）
+
+本轮重构的 `processTestAot` 在处理测试上下文后未退出；线程栈显示 `DestroyJavaVM`
+等待测试夹具的非 daemon LDAP listener。该轮日常验证使用
+`test bootJar -x processTestAot -x compileAotTestJava -x processAotTestResources`
+执行 JVM 测试，不把该结果视为测试 AOT 或 Native 验收。阶段性原生验证前需解决夹具生命周期。

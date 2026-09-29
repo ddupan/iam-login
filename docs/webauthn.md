@@ -70,3 +70,14 @@ IAM_WEBAUTHN_FIXTURE=1 npm --prefix frontend run test:browser -- webauthn.spec.t
 测试专用启动类仅在 test classpath，不进入生产 JAR，也不提供生产调试 API。
 维护者已确认开发入口的 AD + passkey 人类路径能够工作。更多认证器兼容性和 Native 路径
 仍需独立验收，不能套用虚拟认证器结果。生产共享 PostgreSQL 的接入留在部署阶段。
+
+## 数据源与注册事务
+
+PostgreSQL 是应用运行依赖，通过 `spring.datasource.*` 配置，连接池参数使用
+`spring.datasource.hikari.*`。DataSource、JdbcTemplate 与事务管理器由 Boot 自动配置，
+WebAuthn 配置仅装配官方凭据仓储及认证策略；不在应用配置中排除 DataSource 自动配置。
+仅不涉及持久化的独立测试显式排除它。
+
+首次注册的数据库锁由 `authentication/infrastructure/persistence/JdbcCredentialRegistration`
+封装；获得用户行锁后，在同一事务中重新检查注册策略并调用官方凭据保存逻辑。
+WebAuthn 策略集成不直接引用 SQL 或表结构。失败回滚与跨连接串行化由 PostgreSQL 集成测试覆盖。

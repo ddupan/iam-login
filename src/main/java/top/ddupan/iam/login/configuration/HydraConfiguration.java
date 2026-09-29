@@ -14,15 +14,23 @@ import top.ddupan.iam.login.authorization.infrastructure.hydra.*;
 
 @Configuration(proxyBeanMethods = false)
 @ConditionalOnProperty(prefix = "iam.hydra", name = "enabled", havingValue = "true")
-@EnableConfigurationProperties(HydraProperties.class)
+@EnableConfigurationProperties({HydraProperties.class, HydraHttpProperties.class})
 @org.springframework.aot.hint.annotation.RegisterReflectionForBinding({HydraAdminClient.Request.class,
-    HydraLogoutClient.Response.class, HydraLogoutClient.LogoutClient.class, HydraAdminClient.Client.class, HydraAdminClient.Context.class, HydraAdminClient.Redirect.class})
+    HydraAdminClient.LogoutResponse.class, HydraAdminClient.LogoutClient.class, HydraAdminClient.Client.class, HydraAdminClient.Context.class, HydraAdminClient.Redirect.class})
 class HydraConfiguration {
-    @Bean top.ddupan.iam.login.authorization.application.port.LogoutGateway logoutGateway(HydraProperties properties) {
-        return new HydraLogoutClient(properties);
+    @Bean
+    org.springframework.web.client.RestClient hydraAdminHttpClient(
+            org.springframework.web.client.RestClient.Builder builder, HydraProperties properties,
+            HydraHttpProperties timeouts) {
+        var http = java.net.http.HttpClient.newBuilder().connectTimeout(timeouts.connectTimeout())
+            .followRedirects(java.net.http.HttpClient.Redirect.NEVER).build();
+        var factory = new org.springframework.http.client.JdkClientHttpRequestFactory(http);
+        factory.setReadTimeout(timeouts.readTimeout());
+        return builder.baseUrl(properties.adminUrl().toString()).requestFactory(factory).build();
     }
-    @Bean HydraGateway hydraGateway(HydraProperties properties, MfaPolicy requiredMfa) {
-        return new HydraAdminClient(properties);
+    @Bean HydraGateway hydraGateway(HydraProperties properties, MfaPolicy requiredMfa,
+            org.springframework.web.client.RestClient hydraAdminHttpClient) {
+        return new HydraAdminClient(properties, hydraAdminHttpClient);
     }
     @Bean AuthorizationPolicy authorizationPolicy(HydraProperties properties) {
         return new AuthorizationPolicy(properties.clients(), properties.subjects().stream().collect(Collectors.toMap(

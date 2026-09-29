@@ -25,7 +25,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 @SpringBootTest(properties = {"iam.ad.enabled=true", "iam.ad.domain=example.test", "iam.ad.base-dn=dc=example,dc=test",
-    "iam.clients.admin-group-dns[0]=CN=gitea-admins,dc=example,dc=test", "iam.hydra.enabled=true", "iam.hydra.admin-url=http://127.0.0.1:14445", "iam.hydra.public-url=http://localhost:14444",
+    "spring.datasource.hikari.maximum-pool-size=3", "iam.clients.admin-group-dns[0]=CN=gitea-admins,dc=example,dc=test", "iam.hydra.enabled=true", "iam.hydra.admin-url=http://127.0.0.1:14445", "iam.hydra.public-url=http://localhost:14444",
     "iam.hydra.clients[0]=gitea-fixture", "iam.hydra.subjects[0].authority=example.test",
     "iam.hydra.subjects[0].directory-id=00112233-4455-6677-8899-aabbccddeeff",
     "iam.hydra.subjects[0].subject=human:existing-subject",
@@ -55,9 +55,52 @@ class WebAuthnIntegrationTests {
 
 
     @org.springframework.test.context.bean.override.mockito.MockitoBean
-    top.ddupan.iam.login.clients.application.ClientRegistry clients;
-    @org.springframework.test.context.bean.override.mockito.MockitoBean
-    top.ddupan.iam.login.authorization.application.port.LogoutGateway logout;
+    top.ddupan.iam.login.clients.domain.ClientRepository clients;
+
+    @Autowired org.springframework.transaction.PlatformTransactionManager transactionManager;
+    @Autowired javax.sql.DataSource dataSource;
+
+    @Test void registrationLockSerializesAndRollsBackOnFailure() throws Exception {
+        assertThat(((com.zaxxer.hikari.HikariDataSource)dataSource).getMaximumPoolSize()).isEqualTo(3);
+        var registrations = new top.ddupan.iam.login.authentication.infrastructure.persistence.JdbcCredentialRegistration(
+            jdbc, new org.springframework.transaction.support.TransactionTemplate(transactionManager));
+        String id = java.util.UUID.randomUUID().toString();
+        jdbc.update("insert into user_entities(id,name,display_name) values (?,?,?)", id,id,"before");
+        var locked = new java.util.concurrent.CountDownLatch(1);
+        var release = new java.util.concurrent.CountDownLatch(1);
+        var started = new java.util.concurrent.CountDownLatch(1);
+        try (var executor = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
+            var first = executor.submit(() -> registrations.register(id, () -> {
+                jdbc.update("update user_entities set display_name='committed' where id=?",id);
+                locked.countDown();
+                try {
+                    if (!release.await(5,java.util.concurrent.TimeUnit.SECONDS)) throw new IllegalStateException("Test timed out");
+                } catch (InterruptedException ex) { Thread.currentThread().interrupt(); throw new IllegalStateException(ex); }
+                return true;
+            }));
+            try {
+                assertThat(locked.await(5,java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+                var second = executor.submit(() -> {
+                    started.countDown();
+                    return registrations.register(id, () -> jdbc.queryForObject(
+                        "select display_name from user_entities where id=?",String.class,id));
+                });
+                assertThat(started.await(5,java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+                assertThatThrownBy(() -> second.get(200,java.util.concurrent.TimeUnit.MILLISECONDS))
+                    .isInstanceOf(java.util.concurrent.TimeoutException.class);
+                release.countDown();
+                assertThat(first.get(5,java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+                assertThat(second.get(5,java.util.concurrent.TimeUnit.SECONDS)).isEqualTo("committed");
+            } finally { release.countDown(); }
+        }
+        assertThatThrownBy(() -> registrations.register(id, () -> {
+            jdbc.update("update user_entities set display_name='rolled back' where id=?",id);
+            throw new IllegalStateException("Registration rejected");
+        })).isInstanceOf(IllegalStateException.class);
+        assertThat(jdbc.queryForObject("select display_name from user_entities where id=?",String.class,id))
+            .isEqualTo("committed");
+        jdbc.update("delete from user_entities where id=?",id);
+    }
 
     @Test
     void clientAdministrationRequiresMfaAdminGroupAndCsrf() throws Exception {
@@ -85,11 +128,11 @@ class WebAuthnIntegrationTests {
     @Test
     void logoutRequiresCsrfBrowserBindingAndInvalidatesLocalSession() throws Exception {
         var session=login(); secondFactor(session);
-        var data=new top.ddupan.iam.login.authorization.application.port.LogoutGateway.Request(
+        var data=new top.ddupan.iam.login.authorization.application.port.HydraGateway.LogoutRequest(
             "logout-challenge","human:existing-subject","sid","");
-        org.mockito.Mockito.when(logout.request("logout-challenge")).thenReturn(data);
-        org.mockito.Mockito.when(logout.startUrl()).thenReturn("http://localhost:14444/oauth2/sessions/logout");
-        org.mockito.Mockito.when(logout.accept("logout-challenge")).thenReturn("http://localhost:14444/oauth2/sessions/logout?logout_verifier=fixture");
+        org.mockito.Mockito.when(hydra.logout("logout-challenge")).thenReturn(data);
+        org.mockito.Mockito.when(hydra.logoutUrl()).thenReturn("http://localhost:14444/oauth2/sessions/logout");
+        org.mockito.Mockito.when(hydra.acceptLogout("logout-challenge")).thenReturn("http://localhost:14444/oauth2/sessions/logout?logout_verifier=fixture");
         var html=mvc.perform(get("/oauth2/logout").session(session).with(https()).param("logout_challenge","logout-challenge"))
             .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         var match=java.util.regex.Pattern.compile("\"binding\":\"([^\"]+)\"").matcher(html);
@@ -100,7 +143,7 @@ class WebAuthnIntegrationTests {
         mvc.perform(post("/oauth2/logout").session(session).with(https()).with(csrf()).param("binding",binding))
             .andExpect(status().isSeeOther());
         assertThat(session.isInvalid()).isTrue();
-        org.mockito.Mockito.verify(logout).accept("logout-challenge");
+        org.mockito.Mockito.verify(hydra).acceptLogout("logout-challenge");
     }
 
     @Test

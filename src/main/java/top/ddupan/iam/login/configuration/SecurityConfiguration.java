@@ -44,7 +44,7 @@ class SecurityConfiguration {
     @ConditionalOnProperty(prefix = "iam.ad", name = "enabled", havingValue = "true")
     SecurityFilterChain browser(HttpSecurity http, VerifyPassword passwords,
             ObjectProvider<WebAuthnBrowserConfigurer> webAuthn,
-            ObjectProvider<top.ddupan.iam.login.authorization.application.port.LogoutGateway> logoutGateway) throws Exception {
+            ObjectProvider<top.ddupan.iam.login.authorization.application.port.HydraGateway> logoutGateway) throws Exception {
         var passwordFactor = AuthorizationManagerFactories.<RequestAuthorizationContext>multiFactor()
             .requireFactor(factor -> factor.passwordAuthority().validDuration(Duration.ofMinutes(10)))
             .build();
@@ -71,7 +71,7 @@ class SecurityConfiguration {
                     var gateway = logoutGateway.getIfAvailable();
                     response.setStatus(303);
                     response.setHeader("Location",gateway!=null && PathPatternRequestMatcher.withDefaults().matcher("/signin/logout").matches(request)
-                        ? gateway.startUrl() : "/signin");
+                        ? gateway.logoutUrl() : "/signin");
                 }))
             .exceptionHandling(exceptions -> exceptions
                 .defaultAuthenticationEntryPointFor(new LoginUrlAuthenticationEntryPoint("/signin"),

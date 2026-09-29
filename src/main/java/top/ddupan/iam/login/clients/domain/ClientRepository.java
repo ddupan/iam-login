@@ -1,10 +1,9 @@
-package top.ddupan.iam.login.clients.application;
+package top.ddupan.iam.login.clients.domain;
 
 import java.util.List;
-import top.ddupan.iam.login.clients.domain.OidcClient;
 
-/** Hydra is the sole persistence authority. Secrets exist only in create/rotate responses. */
-public interface ClientRegistry {
+/** Client persistence contract. Secrets exist only in create responses. */
+public interface ClientRepository {
     record Created(OidcClient client, String secret) {
         @Override public String toString() { return "Created[client=" + client.id() + ", secret=REDACTED]"; }
     }
