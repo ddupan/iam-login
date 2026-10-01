@@ -39,8 +39,31 @@ public final class WebAuthnBrowserFixture {
             properties.put("iam.hydra.subjects[0].directory-id", "00112233-4455-6677-8899-aabbccddeeff");
             properties.put("iam.hydra.subjects[0].subject", "human:fixture-existing-oidc-subject");
         }
+        var authorizationServer = Boolean.getBoolean("iam.fixture.authorization-server");
+        if (authorizationServer) {
+            properties.put("iam.authorization-server.enabled", "true");
+            properties.put("iam.authorization-server.issuer", "https://localhost:18083");
+            properties.put("iam.authorization-server.subjects[0].authority", "example.test");
+            properties.put("iam.authorization-server.subjects[0].directory-id", "00112233-4455-6677-8899-aabbccddeeff");
+            properties.put("iam.authorization-server.subjects[0].subject", "human:fixture-existing-oidc-subject");
+        }
         application.setDefaultProperties(properties);
         var context = application.run(args);
+        if (authorizationServer) {
+            context.getBean(org.springframework.security.oauth2.server.authorization.client.RegisteredClientRepository.class).save(
+                org.springframework.security.oauth2.server.authorization.client.RegisteredClient.withId("fixture-rp")
+                    .clientId("fixture-rp").clientSecret("{noop}fixture-client-secret")
+                    .clientAuthenticationMethod(org.springframework.security.oauth2.core.ClientAuthenticationMethod.CLIENT_SECRET_BASIC)
+                    .authorizationGrantType(org.springframework.security.oauth2.core.AuthorizationGrantType.AUTHORIZATION_CODE)
+                    .authorizationGrantType(org.springframework.security.oauth2.core.AuthorizationGrantType.REFRESH_TOKEN)
+                    .redirectUri("http://localhost:14446/callback").postLogoutRedirectUri("http://localhost:14446/logged-out")
+                    .scope("openid").scope("profile").scope("email").scope("groups").scope("offline_access")
+                    .clientSettings(org.springframework.security.oauth2.server.authorization.settings.ClientSettings.builder()
+                        .requireProofKey(true).requireAuthorizationConsent(true).build())
+                    .tokenSettings(org.springframework.security.oauth2.server.authorization.settings.TokenSettings.builder()
+                        .reuseRefreshTokens(false).build())
+                    .build());
+        }
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             context.close(); directory.close(); database.stop();
             if (hydra != null) hydra.close();

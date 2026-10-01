@@ -1,0 +1,93 @@
+import { test, expect } from "@playwright/test";
+import { createServer, type Server } from "node:http";
+import { createHash, createPublicKey, randomBytes, verify } from "node:crypto";
+
+// Spike: the in-process authorization server, end to end with a real (virtual) WebAuthn authenticator.
+test.use({ ignoreHTTPSErrors: true });
+const ISSUER = "https://localhost:18083";
+const CALLBACK = "http://localhost:14446/callback";
+let callbackServer: Server | undefined;
+test.beforeAll(async () => {
+  if (process.env.IAM_AUTHORIZATION_SERVER_FIXTURE !== "1") return;
+  callbackServer = createServer((request, response) => {
+    response.writeHead(request.url?.startsWith("/callback?") || request.url === "/logged-out" ? 200 : 404, { "Content-Type": "text/html" });
+    response.end("Fixture callback");
+  });
+  await new Promise<void>(resolve => callbackServer!.listen(14446, "127.0.0.1", resolve));
+});
+test.afterAll(async () => {
+  if (callbackServer) await new Promise<void>((resolve, reject) => callbackServer!.close(error => error ? reject(error) : resolve()));
+});
+
+test("AD + passkey -> in-process authorization server: consent, tokens, userinfo, refresh, logout", async ({ page, context }) => {
+  test.skip(process.env.IAM_AUTHORIZATION_SERVER_FIXTURE !== "1", "Start authorizationServerBrowserFixture; never runs against production");
+  const cdp = await context.newCDPSession(page);
+  await cdp.send("WebAuthn.enable");
+  await cdp.send("WebAuthn.addVirtualAuthenticator", { options: {
+    protocol: "ctap2", transport: "internal", hasResidentKey: true,
+    hasUserVerification: true, isUserVerified: true, automaticPresenceSimulation: true,
+  } });
+  const discovery = await context.request.get(`${ISSUER}/.well-known/openid-configuration`).then(r => r.json());
+  expect(discovery.issuer).toBe(ISSUER);
+  const verifier = randomBytes(32).toString("base64url");
+  const state = randomBytes(24).toString("base64url");
+  const nonce = randomBytes(24).toString("base64url");
+  const authorize = new URL(discovery.authorization_endpoint);
+  authorize.search = new URLSearchParams({ client_id: "fixture-rp", response_type: "code", redirect_uri: CALLBACK,
+    scope: "openid profile email groups offline_access", state, nonce,
+    code_challenge: createHash("sha256").update(verifier).digest("base64url"), code_challenge_method: "S256",
+  }).toString();
+
+  await page.goto(authorize.toString());
+  await expect(page.getByRole("heading", { name: "登录你的账号" })).toBeVisible();
+  await page.getByLabel("用户名", { exact: true }).fill("alice");
+  await page.getByLabel("密码", { exact: true }).fill("fixture-password");
+  await page.getByRole("button", { name: "继续", exact: true }).click();
+  await page.getByRole("button", { name: "注册 Passkey", exact: true }).click();
+  await expect(page.getByRole("status")).toContainText("Passkey 已保存");
+  await page.getByRole("button", { name: "验证 Passkey", exact: true }).click();
+  // Resumed authorization request -> the framework's consent page (to be replaced by our own UI).
+  await expect(page.getByText("fixture-rp")).toBeVisible();
+  for (const box of await page.getByRole("checkbox").all()) await box.check();
+  await page.getByRole("button", { name: /submit/i }).click();
+  await expect.poll(() => new URL(page.url()).origin + new URL(page.url()).pathname).toBe(CALLBACK);
+  const callback = new URL(page.url());
+  expect(callback.searchParams.get("state")).toBe(state);
+  const basic = { Authorization: "Basic " + Buffer.from("fixture-rp:fixture-client-secret").toString("base64") };
+  const exchange = await context.request.post(discovery.token_endpoint, { headers: basic,
+    form: { grant_type: "authorization_code", code: callback.searchParams.get("code")!, redirect_uri: CALLBACK, code_verifier: verifier } });
+  expect(exchange.status()).toBe(200);
+  const tokens = await exchange.json();
+
+  const [h, p, s] = tokens.id_token.split(".");
+  const header = JSON.parse(Buffer.from(h, "base64url").toString());
+  const keys = await context.request.get(discovery.jwks_uri).then(r => r.json());
+  const jwk = keys.keys.find((key: { kid: string }) => key.kid === header.kid);
+  expect(verify("RSA-SHA256", Buffer.from(h + "." + p), createPublicKey({ key: jwk, format: "jwk" }), Buffer.from(s, "base64url"))).toBe(true);
+  const claims = JSON.parse(Buffer.from(p, "base64url").toString());
+  expect(claims).toMatchObject({ iss: ISSUER, sub: "human:fixture-existing-oidc-subject", nonce,
+    preferred_username: "alice", email: "alice@example.test", email_verified: false });
+  expect([claims.aud].flat()).toContain("fixture-rp");
+  expect(claims.groups).toEqual(expect.arrayContaining(["gitea-admins"]));
+
+  const userinfo = await context.request.get(discovery.userinfo_endpoint, { headers: { Authorization: `Bearer ${tokens.access_token}` } });
+  expect(userinfo.status()).toBe(200);
+  expect((await userinfo.json()).sub).toBe("human:fixture-existing-oidc-subject");
+
+  expect(tokens.refresh_token).toBeTruthy();
+  const refresh = (token: string) => context.request.post(discovery.token_endpoint, { headers: basic, form: { grant_type: "refresh_token", refresh_token: token } });
+  const renewed = await refresh(tokens.refresh_token);
+  expect(renewed.status()).toBe(200);
+  const latest = await renewed.json();
+  expect(latest.refresh_token).not.toBe(tokens.refresh_token);
+  expect((await refresh(tokens.refresh_token)).status()).toBe(400);
+
+  // RP-initiated logout ends the login session at the issuer. Refresh replaced the ID token, so the
+  // hint must be the latest one (the framework looks the authorization up by it).
+  const logout = new URL(discovery.end_session_endpoint);
+  logout.search = new URLSearchParams({ id_token_hint: latest.id_token, post_logout_redirect_uri: "http://localhost:14446/logged-out" }).toString();
+  await page.goto(logout.toString());
+  await expect.poll(() => new URL(page.url()).origin + new URL(page.url()).pathname).toBe("http://localhost:14446/logged-out");
+  await page.goto(authorize.toString());
+  await expect(page.getByRole("heading", { name: "登录你的账号" })).toBeVisible();
+});

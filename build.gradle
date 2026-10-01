@@ -99,6 +99,14 @@ tasks.register('webauthnBrowserFixture', JavaExec) {
     mainClass = 'top.ddupan.iam.login.WebAuthnBrowserFixture'
 }
 
+// Spike: the in-process authorization server instead of Hydra, with one fixture client.
+tasks.register('authorizationServerBrowserFixture', JavaExec) {
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'top.ddupan.iam.login.WebAuthnBrowserFixture'
+    systemProperty 'iam.fixture.authorization-server', 'true'
+}
+
 // Adds a loopback-only Hydra issuer and fixture client to the same test-only browser application.
 tasks.register('hydraBrowserFixture', JavaExec) {
     dependsOn tasks.named('testClasses')

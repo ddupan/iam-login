@@ -88,6 +88,8 @@ class AuthorizationServerConfiguration {
             // revocation authenticate the client, and discovery/JWKS are public.
             .authorizeHttpRequests(auth -> auth.requestMatchers("/oauth2/authorize").access(mfa.complete)
                 .anyRequest().authenticated())
+            // userinfo is called with the access tokens this server issued.
+            .oauth2ResourceServer(resource -> resource.jwt(Customizer.withDefaults()))
             .requestCache(cache -> cache.requestCache(new HttpSessionRequestCache()))
             .exceptionHandling(exceptions -> exceptions
                 .defaultAuthenticationEntryPointFor(new LoginUrlAuthenticationEntryPoint("/signin"),
@@ -168,9 +170,12 @@ class AuthorizationServerConfiguration {
         var service = new JdbcOAuth2AuthorizationService(jdbc, clients);
         var json = JsonMapper.builder()
             .addModules(SecurityJacksonModules.getModules(getClass().getClassLoader(),
-                allowlist(BasicPolymorphicTypeValidator.builder().allowIfSubType(DirectoryPrincipal.class))))
+                // After a real passkey step the session holds WebAuthnAuthentication, not the password token.
+                allowlist(BasicPolymorphicTypeValidator.builder().allowIfSubType(DirectoryPrincipal.class)
+                    .allowIfSubType(org.springframework.security.web.webauthn.authentication.WebAuthnAuthentication.class))))
             .addMixIn(User.class, PrincipalJson.UserMixin.class)
             .addMixIn(DirectoryPrincipal.class, PrincipalJson.DirectoryPrincipalMixin.class)
+            .addMixIn(org.springframework.security.web.webauthn.authentication.WebAuthnAuthentication.class, PrincipalJson.WebAuthnAuthenticationMixin.class)
             .build();
         var rows = new JdbcOAuth2AuthorizationService.JsonMapperOAuth2AuthorizationRowMapper(clients, json);
         service.setAuthorizationRowMapper(rows);
@@ -196,6 +201,10 @@ class AuthorizationServerConfiguration {
         var jwk = new RSAKey.Builder((RSAPublicKey) keys.getPublic()).privateKey((RSAPrivateKey) keys.getPrivate())
             .keyID(UUID.randomUUID().toString()).build();
         return new ImmutableJWKSet<>(new JWKSet(jwk));
+    }
+
+    @Bean org.springframework.security.oauth2.jwt.JwtDecoder jwtDecoder(JWKSource<SecurityContext> keys) {
+        return org.springframework.security.config.annotation.web.configuration.OAuth2AuthorizationServerConfiguration.jwtDecoder(keys);
     }
 
     @Bean AuthorizationServerSettings authorizationServerSettings(Properties properties) {

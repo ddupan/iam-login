@@ -3,7 +3,10 @@ package top.ddupan.iam.login.configuration;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import java.util.Collection;
 import java.util.List;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.web.webauthn.api.PublicKeyCredentialUserEntity;
 import top.ddupan.iam.login.authentication.domain.User;
 
 /** Jackson mappings kept out of the domain: the directory snapshot stored with an authorization. */
@@ -29,4 +32,13 @@ final class PrincipalJson {
     // Derived accessors from the WebAuthn user-entity interface are recomputed, not stored.
     @JsonIgnoreProperties(value = {"name", "displayName", "id"}, ignoreUnknown = true)
     abstract static class DirectoryPrincipalMixin { }
+
+    // Spring Security 7.1 ships no Jackson mapping for the passkey authentication result, which is what
+    // the session holds after the second factor. Rebuilt through its public constructor.
+    // The constructor already marks it authenticated; the setter refuses external trust, so never call it.
+    @JsonIgnoreProperties(value = {"authenticated", "details", "credentials", "name"}, ignoreUnknown = true)
+    abstract static class WebAuthnAuthenticationMixin {
+        @JsonCreator WebAuthnAuthenticationMixin(@JsonProperty("principal") PublicKeyCredentialUserEntity principal,
+                @JsonProperty("authorities") Collection<? extends GrantedAuthority> authorities) { }
+    }
 }
