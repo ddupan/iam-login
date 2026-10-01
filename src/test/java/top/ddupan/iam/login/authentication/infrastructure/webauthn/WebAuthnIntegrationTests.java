@@ -122,6 +122,10 @@ class WebAuthnIntegrationTests {
         mvc.perform(post("/api/iam/clients/example/secret").with(https()).with(manage)).andExpect(status().isOk())
             .andExpect(header().string("Cache-Control","no-store")).andExpect(jsonPath("secret").value("fixture-rotated-secret"));
         mvc.perform(get("/api/iam/session").with(https()).with(manage)).andExpect(status().isNotFound());
+        mvc.perform(post("/api/iam/clients").with(https()).with(manage).contentType("application/json").content("""
+            {"id":"no-policy","name":"No policy","redirectUris":["https://app.example.test/cb"],"scopes":["openid"]}
+            """)).andExpect(status().isBadRequest());
+        org.mockito.Mockito.verify(clients,org.mockito.Mockito.never()).create(org.mockito.ArgumentMatchers.any());
     }
 
     @Test

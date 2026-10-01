@@ -4,10 +4,14 @@ import java.net.URI;
 import java.util.List;
 import java.util.Set;
 
-/** First-party confidential authorization-code client. No caller-controlled grants or metadata. */
+/**
+ * First-party confidential authorization-code client. No caller-controlled grants or metadata.
+ * {@code loginEnabled} null means a legacy client without the metadata flag: login is then governed by
+ * the {@code iam.hydra.clients} allowlist, so it must round-trip as null rather than read as disabled.
+ */
 public record OidcClient(String id, String name, List<String> redirectUris, Set<String> scopes,
         List<String> postLogoutRedirectUris, String backchannelLogoutUri, String frontchannelLogoutUri,
-        boolean loginEnabled) {
+        Boolean loginEnabled) {
     public OidcClient {
         requireId(id);
         if (name == null || name.isBlank() || name.length() > 200) throw new IllegalArgumentException("Invalid name");

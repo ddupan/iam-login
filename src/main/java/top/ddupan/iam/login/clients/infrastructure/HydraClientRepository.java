@@ -54,7 +54,7 @@ public final class HydraClientRepository implements ClientRepository {
             var update = new LinkedHashMap<>(previous); update.remove("client_secret");
             var metadata = new LinkedHashMap<String,Object>();
             if (previous.get("metadata") instanceof Map<?,?> map) map.forEach((k,v) -> metadata.put(k.toString(),v));
-            metadata.put(ENABLED, client.loginEnabled());
+            if (client.loginEnabled() == null) metadata.remove(ENABLED); else metadata.put(ENABLED, client.loginEnabled());
             update.putAll(payload(client)); update.put("metadata", metadata);
             return view(Objects.requireNonNull(http.put().uri("/admin/clients/{id}", client.id())
                 .body(update).retrieve().body(OBJECT)));
@@ -92,7 +92,8 @@ public final class HydraClientRepository implements ClientRepository {
         map.put("backchannel_logout_session_required",true);
         map.put("frontchannel_logout_uri",c.frontchannelLogoutUri());
         map.put("frontchannel_logout_session_required",true);
-        map.put("metadata",Map.of(ENABLED,c.loginEnabled())); return map;
+        if (c.loginEnabled() != null) map.put("metadata",Map.of(ENABLED,c.loginEnabled()));
+        return map;
     }
     @SuppressWarnings("unchecked") private OidcClient view(Map<String,Object> m) {
         if (!supported(m)) throw new ClientRepositoryException(ClientRepositoryException.Kind.CONFLICT);
@@ -101,6 +102,6 @@ public final class HydraClientRepository implements ClientRepository {
         return new OidcClient(id, name.isBlank() ? id : name,
             (List<String>)m.get("redirect_uris"),new HashSet<>(Arrays.asList(Objects.toString(m.get("scope"),"").split(" +"))),
             (List<String>)m.get("post_logout_redirect_uris"),(String)m.get("backchannel_logout_uri"),
-            (String)m.get("frontchannel_logout_uri"),m.get("metadata") instanceof Map<?,?> meta && Boolean.TRUE.equals(meta.get(ENABLED)));
+            (String)m.get("frontchannel_logout_uri"),m.get("metadata") instanceof Map<?,?> meta && meta.get(ENABLED) instanceof Boolean b ? b : null);
     }
 }

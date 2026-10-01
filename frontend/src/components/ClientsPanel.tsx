@@ -2,7 +2,9 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 
 type Client = {
   id: string; name: string; redirectUris: string[]; scopes: string[]; postLogoutRedirectUris: string[];
-  backchannelLogoutUri: string; frontchannelLogoutUri: string; loginEnabled: boolean;
+  backchannelLogoutUri: string; frontchannelLogoutUri: string;
+  /** null: legacy client without the flag; login follows the server's configured allowlist. */
+  loginEnabled: boolean | null;
 };
 const SCOPES = ["openid", "profile", "email", "groups"];
 const blank: Client = { id: "", name: "", redirectUris: [], scopes: ["openid"], postLogoutRedirectUris: [],
@@ -53,7 +55,7 @@ export function ClientsPanel({ token, onExpired }: { token: string; onExpired: (
       postLogoutRedirectUris: lines("postLogoutRedirectUris"),
       backchannelLogoutUri: String(form.get("backchannelLogoutUri")).trim(),
       frontchannelLogoutUri: String(form.get("frontchannelLogoutUri")).trim(),
-      loginEnabled: form.get("loginEnabled") !== null,
+      loginEnabled: ({ true: true, false: false } as Record<string, boolean>)[String(form.get("loginEnabled"))] ?? null,
     };
     run(async () => {
       if (editing.isNew) {
@@ -95,7 +97,11 @@ export function ClientsPanel({ token, onExpired }: { token: string; onExpired: (
       <label>注销后回跳地址（每行一个，可空）<textarea name="postLogoutRedirectUris" rows={2} defaultValue={editing.client.postLogoutRedirectUris.join("\n")} /></label>
       <label>Back-channel 注销地址（应用不支持则留空）<input name="backchannelLogoutUri" defaultValue={editing.client.backchannelLogoutUri} /></label>
       <label>Front-channel 注销地址（应用不支持则留空）<input name="frontchannelLogoutUri" defaultValue={editing.client.frontchannelLogoutUri} /></label>
-      <label className="inline"><input type="checkbox" name="loginEnabled" defaultChecked={editing.client.loginEnabled} />允许登录</label>
+      <label>登录<select name="loginEnabled" defaultValue={String(editing.client.loginEnabled)}>
+        <option value="true">允许登录</option>
+        <option value="false">禁止登录</option>
+        {editing.client.loginEnabled === null && <option value="null">按服务端配置白名单（旧客户端）</option>}
+      </select></label>
       <button className="primary" type="submit" disabled={busy}>{editing.isNew ? "创建" : "保存"}</button>
       <button type="button" onClick={() => setEditing(null)}>取消</button>
     </form> : <>
@@ -104,7 +110,7 @@ export function ClientsPanel({ token, onExpired }: { token: string; onExpired: (
       <table>
         <thead><tr><th>ID</th><th>名称</th><th>状态</th><th>操作</th></tr></thead>
         <tbody>{clients.map(client => <tr key={client.id}>
-          <td>{client.id}</td><td>{client.name}</td><td>{client.loginEnabled ? "启用" : "已禁用"}</td>
+          <td>{client.id}</td><td>{client.name}</td><td>{client.loginEnabled === null ? "按配置白名单" : client.loginEnabled ? "启用" : "已禁用"}</td>
           <td>
             <button type="button" onClick={() => setEditing({ client, isNew: false })}>编辑</button>
             <button type="button" onClick={() => rotate(client.id)}>轮换 secret</button>
