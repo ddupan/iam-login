@@ -70,6 +70,12 @@ tasks.register('testAot', Test) {
 	shouldRunAfter tasks.named('test')
 }
 
+// Native bakes @ConditionalOnProperty decisions in at AOT time, so the features a binary needs must be
+// switched on here, e.g. -PaotArgs='--iam.ad.enabled=true --iam.webauthn.enabled=true'.
+tasks.named('processAot') {
+	args(providers.gradleProperty('aotArgs').map { it.trim().split(/\s+/) as List }.getOrElse([]))
+}
+
 // Native tests check behavior, not throughput. Keep the application binary optimized.
 graalvmNative {
 	binaries {
@@ -105,6 +111,22 @@ tasks.register('authorizationServerBrowserFixture', JavaExec) {
     classpath = sourceSets.test.runtimeClasspath
     mainClass = 'top.ddupan.iam.login.WebAuthnBrowserFixture'
     systemProperty 'iam.fixture.authorization-server', 'true'
+}
+
+// Spike: simulated AD + fixture client for a native binary under browser test. -PsmokeArgs='<jdbc> <user> <pw>'
+tasks.register('nativeSmokeSupport', JavaExec) {
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'top.ddupan.iam.login.NativeSmokeSupport'
+    args(providers.gradleProperty('smokeArgs').map { it.trim().split(/\s+/) as List }.getOrElse([]))
+}
+
+// Spike: password-only authorization (headless suite cannot do WebAuthn) for the OpenID conformance suite.
+tasks.register('conformanceFixture', JavaExec) {
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'top.ddupan.iam.login.WebAuthnBrowserFixture'
+    systemProperty 'iam.fixture.conformance', 'true'
 }
 
 // Adds a loopback-only Hydra issuer and fixture client to the same test-only browser application.

@@ -39,7 +39,9 @@ public final class WebAuthnBrowserFixture {
             properties.put("iam.hydra.subjects[0].directory-id", "00112233-4455-6677-8899-aabbccddeeff");
             properties.put("iam.hydra.subjects[0].subject", "human:fixture-existing-oidc-subject");
         }
-        var authorizationServer = Boolean.getBoolean("iam.fixture.authorization-server");
+        var conformance = Boolean.getBoolean("iam.fixture.conformance");
+        var authorizationServer = conformance || Boolean.getBoolean("iam.fixture.authorization-server");
+        if (conformance) application.addPrimarySources(java.util.List.of(ConformanceOverrides.class));
         if (authorizationServer) {
             properties.put("iam.authorization-server.enabled", "true");
             properties.put("iam.authorization-server.issuer", "https://localhost:18083");
@@ -63,6 +65,25 @@ public final class WebAuthnBrowserFixture {
                     .tokenSettings(org.springframework.security.oauth2.server.authorization.settings.TokenSettings.builder()
                         .reuseRefreshTokens(false).build())
                     .build());
+        }
+        if (conformance) {
+            var clients = context.getBean(org.springframework.security.oauth2.server.authorization.client.RegisteredClientRepository.class);
+            for (var id : java.util.List.of("conformance-1", "conformance-2")) {
+                clients.save(org.springframework.security.oauth2.server.authorization.client.RegisteredClient.withId(id)
+                    .clientId(id).clientSecret("{noop}" + id + "-secret")
+                    .clientAuthenticationMethod(org.springframework.security.oauth2.core.ClientAuthenticationMethod.CLIENT_SECRET_BASIC)
+                    .clientAuthenticationMethod(org.springframework.security.oauth2.core.ClientAuthenticationMethod.CLIENT_SECRET_POST)
+                    .authorizationGrantType(org.springframework.security.oauth2.core.AuthorizationGrantType.AUTHORIZATION_CODE)
+                    .authorizationGrantType(org.springframework.security.oauth2.core.AuthorizationGrantType.REFRESH_TOKEN)
+                    .redirectUri("https://localhost.emobix.co.uk:8443/test/a/iam-login/callback")
+                    .postLogoutRedirectUri("https://localhost.emobix.co.uk:8443/test/a/iam-login/post_logout_redirect")
+                    .scope("openid").scope("profile").scope("email").scope("address").scope("phone").scope("groups").scope("offline_access")
+                    .clientSettings(org.springframework.security.oauth2.server.authorization.settings.ClientSettings.builder()
+                        .requireAuthorizationConsent(false).build())
+                    .tokenSettings(org.springframework.security.oauth2.server.authorization.settings.TokenSettings.builder()
+                        .reuseRefreshTokens(false).build())
+                    .build());
+            }
         }
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             context.close(); directory.close(); database.stop();

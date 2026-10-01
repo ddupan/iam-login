@@ -21,6 +21,7 @@ import org.springframework.core.annotation.Order;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcOperations;
 import org.springframework.security.authentication.AuthenticationProvider;
+import org.springframework.security.authorization.AuthorizationManager;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.core.Authentication;
@@ -62,13 +63,14 @@ import top.ddupan.iam.login.authorization.infrastructure.hydra.HydraProperties;
 @Configuration(proxyBeanMethods = false)
 @ConditionalOnProperty(prefix = "iam.authorization-server", name = "enabled", havingValue = "true")
 @EnableConfigurationProperties(AuthorizationServerConfiguration.Properties.class)
+@org.springframework.context.annotation.ImportRuntimeHints(SecurityJacksonHints.class)
 class AuthorizationServerConfiguration {
     @ConfigurationProperties("iam.authorization-server")
     record Properties(boolean enabled, URI issuer, List<HydraProperties.SubjectBinding> subjects) { }
 
     @Bean @Order(2)
-    SecurityFilterChain authorizationServer(HttpSecurity http, MfaPolicy mfa, AuthorizationPolicy policy,
-            OAuth2AuthorizationService authorizations) throws Exception {
+    SecurityFilterChain authorizationServer(HttpSecurity http, AuthorizationManager<Object> requiredFactors,
+            AuthorizationPolicy policy, OAuth2AuthorizationService authorizations) throws Exception {
         http.oauth2AuthorizationServer(as -> {
             http.securityMatcher(as.getEndpointsMatcher());
             as.oidc(Customizer.withDefaults())
@@ -78,15 +80,15 @@ class AuthorizationServerConfiguration {
                 // Gates go first and defer (null) once MFA is satisfied; the framework's own providers
                 // must stay in the list unchanged, as the endpoint configurer looks them up by type.
                 .authorizationEndpoint(endpoint -> endpoint.authenticationProviders(providers -> {
-                    providers.addFirst(new MfaGate(OAuth2AuthorizationConsentAuthenticationToken.class, mfa));
-                    providers.addFirst(new MfaGate(OAuth2AuthorizationCodeRequestAuthenticationToken.class, mfa));
+                    providers.addFirst(new MfaGate(OAuth2AuthorizationConsentAuthenticationToken.class, requiredFactors));
+                    providers.addFirst(new MfaGate(OAuth2AuthorizationCodeRequestAuthenticationToken.class, requiredFactors));
                 }))
                 .tokenEndpoint(endpoint -> endpoint.authenticationProviders(providers ->
                     providers.addFirst(new RefreshPolicy(authorizations, policy))));
         })
             // Only the user-facing endpoint needs a human with both factors; token, introspection and
             // revocation authenticate the client, and discovery/JWKS are public.
-            .authorizeHttpRequests(auth -> auth.requestMatchers("/oauth2/authorize").access(mfa.complete)
+            .authorizeHttpRequests(auth -> auth.requestMatchers("/oauth2/authorize").access(requiredFactors)
                 .anyRequest().authenticated())
             // userinfo is called with the access tokens this server issued.
             .oauth2ResourceServer(resource -> resource.jwt(Customizer.withDefaults()))
@@ -106,10 +108,10 @@ class AuthorizationServerConfiguration {
      * the unauthenticated request makes the endpoint fall through to authorization, which redirects to the
      * missing factor's page. With MFA satisfied it returns null, so the next (framework) provider runs.
      */
-    record MfaGate(Class<? extends Authentication> type, MfaPolicy mfa) implements AuthenticationProvider {
+    record MfaGate(Class<? extends Authentication> type, AuthorizationManager<Object> requiredFactors) implements AuthenticationProvider {
         @Override public Authentication authenticate(Authentication request) throws AuthenticationException {
             var principal = (Authentication) request.getPrincipal();
-            var decision = mfa.complete.authorize(() -> principal, null);
+            var decision = requiredFactors.authorize(() -> principal, null);
             return decision != null && decision.isGranted() ? null : request;
         }
         @Override public boolean supports(Class<?> candidate) { return type.isAssignableFrom(candidate); }
@@ -133,6 +135,13 @@ class AuthorizationServerConfiguration {
         }
         @Override public boolean supports(Class<?> type) { return OAuth2RefreshTokenAuthenticationToken.class.isAssignableFrom(type); }
     }
+
+    /**
+     * Factors a human must hold to authorize a client: password and passkey, both fresh. A bean only so the
+     * test-only conformance fixture can substitute password-only (its headless browser cannot do WebAuthn);
+     * there is deliberately no configuration property for it.
+     */
+    @Bean AuthorizationManager<Object> requiredFactors(MfaPolicy mfa) { return mfa.complete; }
 
     @Bean AuthorizationPolicy authorizationServerPolicy(Properties properties) {
         return new AuthorizationPolicy(null, properties.subjects().stream().collect(Collectors.toMap(
