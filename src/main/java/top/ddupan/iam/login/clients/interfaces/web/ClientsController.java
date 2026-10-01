@@ -18,6 +18,8 @@ public class ClientsController {
             @RequestParam(defaultValue="20") int size) { return repository.list(page,size); }
     @GetMapping("/api/iam/clients/{id}") OidcClient get(@PathVariable String id) { return repository.get(id); }
     @PostMapping("/api/iam/clients") ResponseEntity<ClientRepository.Created> create(@RequestBody OidcClient input, Authentication auth) {
+        // Only clients registered out of band may be legacy; new ones state their login policy explicitly.
+        if (input.loginEnabled() == null) throw new IllegalArgumentException("loginEnabled is required");
         var created = repository.create(input); audit("create",input.id(),auth);
         return ResponseEntity.status(201).header("Cache-Control","no-store").body(created);
     }

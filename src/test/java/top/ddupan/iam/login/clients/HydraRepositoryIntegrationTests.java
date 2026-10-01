@@ -46,6 +46,11 @@ class HydraRepositoryIntegrationTests {
                     List.of(),"","",false);
                 assertThat(registry.update(changed)).isEqualTo(changed);
                 assertThat(registry.get(client.id()).loginEnabled()).isFalse();
+                // Legacy (no flag): reads back as null, never as disabled, and saving keeps it unflagged.
+                var legacy=new OidcClient(changed.id(),changed.name(),changed.redirectUris(),changed.scopes(),List.of(),"","",null);
+                assertThat(registry.update(legacy).loginEnabled()).isNull();
+                assertThat(registry.get(client.id()).loginEnabled()).isNull();
+                assertThat(registry.update(changed).loginEnabled()).isFalse();
                 // invalid_grant means the client authenticated and only the (deliberately bogus) code failed.
                 assertThat(tokenError(client.id(),created.secret())).contains("invalid_grant").doesNotContain("invalid_client");
                 var rotated=registry.rotateSecret(client.id());

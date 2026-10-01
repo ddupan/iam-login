@@ -176,7 +176,8 @@ main.admin {
 .admin .secret button {
   margin: 4px 8px 4px 0;
 }
-.admin textarea {
+.admin textarea,
+.admin select {
   display: block;
   width: 100%;
   margin: 9px 0 22px;

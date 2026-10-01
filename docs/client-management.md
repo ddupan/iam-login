@@ -95,6 +95,11 @@ Hydra v26.2.0（当前最新正式版）没有 `/admin/clients/{id}/secrets/rota
 重启后读取、更新后原密钥仍能认证、轮换后旧密钥被拒且新密钥可认证、删除。测试 PostgreSQL
 完全独立于真实开发 MFA 库。
 
+`loginEnabled` 是三态：`true`/`false` 写入 Hydra metadata；`null` 表示没有该标记的旧客户端
+（如带外登记的 `gitea`），其登录由 `iam.hydra.clients` 白名单决定。API 原样返回 `null`，PUT 时
+`null` 保持不写标记，不会把旧客户端误读或误存为禁用。新建客户端必须明确 `true` 或 `false`，
+否则 400。旧客户端显式标记后即可从白名单移除。
+
 列表按 Hydra 原始分页过滤不支持的授权类型，空页不表示之后必无客户端；本接口不是已有
 全部 Hydra 客户端类型的迁移工具。禁用写入 Hydra metadata，后续授权即时重读并拒绝，
 已签发 token 的生命周期另由 issuer 和应用控制。
