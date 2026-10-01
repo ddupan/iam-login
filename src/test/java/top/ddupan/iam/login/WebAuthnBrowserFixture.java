@@ -41,7 +41,6 @@ public final class WebAuthnBrowserFixture {
         }
         var conformance = Boolean.getBoolean("iam.fixture.conformance");
         var authorizationServer = conformance || Boolean.getBoolean("iam.fixture.authorization-server");
-        if (conformance) application.addPrimarySources(java.util.List.of(ConformanceOverrides.class));
         if (authorizationServer) {
             properties.put("iam.authorization-server.enabled", "true");
             properties.put("iam.authorization-server.issuer", "https://localhost:18083");
@@ -78,8 +77,10 @@ public final class WebAuthnBrowserFixture {
                     .redirectUri("https://localhost.emobix.co.uk:8443/test/a/iam-login/callback")
                     .postLogoutRedirectUri("https://localhost.emobix.co.uk:8443/test/a/iam-login/post_logout_redirect")
                     .scope("openid").scope("profile").scope("email").scope("address").scope("phone").scope("groups").scope("offline_access")
+                    // The Basic OP plan exercises classic confidential clients without PKCE; the framework
+                    // requires PKCE for every client by default (OAuth 2.1).
                     .clientSettings(org.springframework.security.oauth2.server.authorization.settings.ClientSettings.builder()
-                        .requireAuthorizationConsent(false).build())
+                        .requireProofKey(false).requireAuthorizationConsent(false).build())
                     .tokenSettings(org.springframework.security.oauth2.server.authorization.settings.TokenSettings.builder()
                         .reuseRefreshTokens(false).build())
                     .build());

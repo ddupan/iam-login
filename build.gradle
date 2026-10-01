@@ -121,7 +121,7 @@ tasks.register('nativeSmokeSupport', JavaExec) {
     args(providers.gradleProperty('smokeArgs').map { it.trim().split(/\s+/) as List }.getOrElse([]))
 }
 
-// Spike: password-only authorization (headless suite cannot do WebAuthn) for the OpenID conformance suite.
+// Spike: fixture clients for the OpenID conformance suite (driven by a Playwright browser with a passkey).
 tasks.register('conformanceFixture', JavaExec) {
     dependsOn tasks.named('testClasses')
     classpath = sourceSets.test.runtimeClasspath

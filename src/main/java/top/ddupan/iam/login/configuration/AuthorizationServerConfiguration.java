@@ -69,8 +69,9 @@ class AuthorizationServerConfiguration {
     record Properties(boolean enabled, URI issuer, List<HydraProperties.SubjectBinding> subjects) { }
 
     @Bean @Order(2)
-    SecurityFilterChain authorizationServer(HttpSecurity http, AuthorizationManager<Object> requiredFactors,
+    SecurityFilterChain authorizationServer(HttpSecurity http, MfaPolicy mfa,
             AuthorizationPolicy policy, OAuth2AuthorizationService authorizations) throws Exception {
+        var requiredFactors = mfa.complete;
         http.oauth2AuthorizationServer(as -> {
             http.securityMatcher(as.getEndpointsMatcher());
             as.oidc(Customizer.withDefaults())
@@ -135,13 +136,6 @@ class AuthorizationServerConfiguration {
         }
         @Override public boolean supports(Class<?> type) { return OAuth2RefreshTokenAuthenticationToken.class.isAssignableFrom(type); }
     }
-
-    /**
-     * Factors a human must hold to authorize a client: password and passkey, both fresh. A bean only so the
-     * test-only conformance fixture can substitute password-only (its headless browser cannot do WebAuthn);
-     * there is deliberately no configuration property for it.
-     */
-    @Bean AuthorizationManager<Object> requiredFactors(MfaPolicy mfa) { return mfa.complete; }
 
     @Bean AuthorizationPolicy authorizationServerPolicy(Properties properties) {
         return new AuthorizationPolicy(null, properties.subjects().stream().collect(Collectors.toMap(
