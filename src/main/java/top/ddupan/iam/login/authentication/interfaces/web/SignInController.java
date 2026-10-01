@@ -45,7 +45,14 @@ public class SignInController {
 
     @GetMapping(value = "/signin/complete", produces = MediaType.TEXT_HTML_VALUE)
     ResponseEntity<String> complete(@AuthenticationPrincipal DirectoryPrincipal principal, CsrfToken csrf,
-            jakarta.servlet.http.HttpServletRequest request) {
+            jakarta.servlet.http.HttpServletRequest request, jakarta.servlet.http.HttpServletResponse response) {
+        // An authorization request interrupted for login (in-process authorization server) resumes here.
+        var cache = new org.springframework.security.web.savedrequest.HttpSessionRequestCache();
+        var saved = cache.getRequest(request, response);
+        if (saved != null) {
+            cache.removeRequest(request, response);
+            return ResponseEntity.status(303).header("Cache-Control", "no-store").location(java.net.URI.create(saved.getRedirectUrl())).build();
+        }
         if (top.ddupan.iam.login.authorization.interfaces.web.HydraBrowserRequests.pending(request)) {
             return ResponseEntity.status(303).header("Cache-Control", "no-store").location(java.net.URI.create("/oauth2/login")).build();
         }

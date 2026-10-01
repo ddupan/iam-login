@@ -1,0 +1,162 @@
+package top.ddupan.iam.login.authorization;
+
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.time.Instant;
+import java.util.Base64;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.http.MediaType;
+import org.springframework.mock.web.MockHttpSession;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.FactorGrantedAuthority;
+import org.springframework.security.core.context.SecurityContext;
+import org.springframework.security.oauth2.core.AuthorizationGrantType;
+import org.springframework.security.oauth2.core.ClientAuthenticationMethod;
+import org.springframework.security.oauth2.server.authorization.client.RegisteredClient;
+import org.springframework.security.oauth2.server.authorization.client.RegisteredClientRepository;
+import org.springframework.security.oauth2.server.authorization.settings.ClientSettings;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
+import org.springframework.web.util.UriComponentsBuilder;
+import org.testcontainers.postgresql.PostgreSQLContainer;
+import org.testcontainers.utility.DockerImageName;
+import tools.jackson.databind.json.JsonMapper;
+import top.ddupan.iam.login.support.AdDirectoryFixture;
+import static org.assertj.core.api.Assertions.*;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.httpBasic;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+
+/** Spike: the in-process authorization server against simulated AD and a disposable database. */
+@SpringBootTest(properties = {"iam.ad.enabled=true", "iam.ad.domain=example.test", "iam.ad.base-dn=dc=example,dc=test",
+    "spring.datasource.hikari.maximum-pool-size=3",
+    "iam.webauthn.enabled=true", "iam.webauthn.rp-id=localhost", "iam.webauthn.origin=https://localhost",
+    "iam.authorization-server.enabled=true", "iam.authorization-server.issuer=https://localhost",
+    "iam.authorization-server.subjects[0].authority=example.test",
+    "iam.authorization-server.subjects[0].directory-id=00112233-4455-6677-8899-aabbccddeeff",
+    "iam.authorization-server.subjects[0].subject=human:existing-subject",
+    "management.otlp.metrics.export.enabled=false", "spring.security.user.password=fixture-monitor-password"})
+@AutoConfigureMockMvc
+class AuthorizationServerIntegrationTests {
+    static class Fixtures {
+        static final AdDirectoryFixture DIRECTORY = new AdDirectoryFixture();
+        static final PostgreSQLContainer DATABASE = new PostgreSQLContainer(DockerImageName.parse(
+            "postgres@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873")
+            .asCompatibleSubstituteFor("postgres"));
+        static { DATABASE.start(); }
+    }
+    @DynamicPropertySource
+    static void properties(DynamicPropertyRegistry r) {
+        r.add("iam.ad.url", () -> Fixtures.DIRECTORY.url());
+        r.add("spring.datasource.url", () -> Fixtures.DATABASE.getJdbcUrl());
+        r.add("spring.datasource.username", () -> Fixtures.DATABASE.getUsername());
+        r.add("spring.datasource.password", () -> Fixtures.DATABASE.getPassword());
+    }
+    @AfterAll static void close() { Fixtures.DIRECTORY.close(); Fixtures.DATABASE.stop(); }
+
+    private static final String CALLBACK = "https://rp.example/cb";
+    @Autowired MockMvc mvc;
+    @Autowired RegisteredClientRepository clients;
+
+    @BeforeEach void client() {
+        if (clients.findByClientId("spike-rp") != null) return;
+        clients.save(RegisteredClient.withId(UUID.randomUUID().toString()).clientId("spike-rp")
+            .clientSecret("{noop}spike-secret").clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_BASIC)
+            .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
+            .authorizationGrantType(AuthorizationGrantType.REFRESH_TOKEN)
+            .redirectUri(CALLBACK).scope("openid").scope("profile").scope("groups").scope("offline_access")
+            .clientSettings(ClientSettings.builder().requireProofKey(true).requireAuthorizationConsent(false).build())
+            // The framework reuses refresh tokens by default; rotation must be set per client.
+            .tokenSettings(org.springframework.security.oauth2.server.authorization.settings.TokenSettings.builder()
+                .reuseRefreshTokens(false).build())
+            .build());
+    }
+
+    @Test void noCodeIsIssuedUntilBothFactorsAreFresh() throws Exception {
+        var verifier = verifier();
+        mvc.perform(get(java.net.URI.create(authorize(verifier))).with(https()).accept(MediaType.TEXT_HTML))
+            .andExpect(status().is3xxRedirection()).andExpect(redirectedUrl("/signin"));
+        var session = login();
+        var passwordOnly = mvc.perform(get(java.net.URI.create(authorize(verifier))).with(https()).session(session).accept(MediaType.TEXT_HTML))
+            .andExpect(status().is3xxRedirection()).andReturn().getResponse().getRedirectedUrl();
+        assertThat(passwordOnly).startsWith("/signin/mfa").doesNotContain("code=");
+        secondFactor(session);
+        // The interrupted request is resumed after the passkey step.
+        var resumed = mvc.perform(get("/signin/complete").with(https()).session(session))
+            .andExpect(status().isSeeOther()).andReturn().getResponse().getHeader("Location");
+        assertThat(resumed).contains("/oauth2/authorize").contains("client_id=spike-rp");
+        assertThat(code(session, verifier)).isNotBlank();
+    }
+
+    @Test void codeExchangeKeepsExistingSubjectReleasesGroupsAndRefreshes() throws Exception {
+        var verifier = verifier();
+        var session = login(); secondFactor(session);
+        var tokens = json(mvc.perform(post("/oauth2/token").with(https()).with(httpBasic("spike-rp", "spike-secret"))
+                .param("grant_type", "authorization_code").param("code", code(session, verifier))
+                .param("redirect_uri", CALLBACK).param("code_verifier", verifier))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
+        var idToken = claims((String) tokens.get("id_token"));
+        assertThat(idToken).containsEntry("sub", "human:existing-subject").containsEntry("preferred_username", "alice");
+        assertThat(idToken.get("groups")).asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.LIST).contains("gitea-admins");
+        assertThat(claims((String) tokens.get("access_token"))).containsEntry("sub", "human:existing-subject");
+        assertThat(tokens.get("refresh_token")).as("offline_access was granted").isNotNull();
+        // Refresh reloads the stored principal from the database (Jackson allowlist round trip).
+        var refreshed = json(mvc.perform(post("/oauth2/token").with(https()).with(httpBasic("spike-rp", "spike-secret"))
+                .param("grant_type", "refresh_token").param("refresh_token", (String) tokens.get("refresh_token")))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
+        assertThat(claims((String) refreshed.get("access_token"))).containsEntry("sub", "human:existing-subject");
+        assertThat(refreshed.get("refresh_token")).isNotEqualTo(tokens.get("refresh_token"));
+        mvc.perform(post("/oauth2/token").with(https()).with(httpBasic("spike-rp", "spike-secret"))
+                .param("grant_type", "refresh_token").param("refresh_token", (String) tokens.get("refresh_token")))
+            .andExpect(status().isBadRequest());
+    }
+
+    private String code(MockHttpSession session, String verifier) throws Exception {
+        var location = mvc.perform(get(java.net.URI.create(authorize(verifier))).with(https()).session(session).accept(MediaType.TEXT_HTML))
+            .andExpect(status().is3xxRedirection()).andReturn().getResponse().getRedirectedUrl();
+        assertThat(location).startsWith(CALLBACK);
+        return UriComponentsBuilder.fromUriString(location).build().getQueryParams().getFirst("code");
+    }
+    private static String authorize(String verifier) throws Exception {
+        var challenge = Base64.getUrlEncoder().withoutPadding().encodeToString(
+            MessageDigest.getInstance("SHA-256").digest(verifier.getBytes(StandardCharsets.US_ASCII)));
+        return UriComponentsBuilder.fromPath("/oauth2/authorize").queryParam("response_type", "code")
+            .queryParam("client_id", "spike-rp").queryParam("redirect_uri", CALLBACK)
+            .queryParam("scope", "openid profile groups offline_access").queryParam("state", "spike-state")
+            .queryParam("nonce", "spike-nonce").queryParam("code_challenge", challenge)
+            .queryParam("code_challenge_method", "S256").encode().build().toUriString();
+    }
+    private static String verifier() { return UUID.randomUUID() + "-" + UUID.randomUUID(); }
+    private static Map<String, Object> json(String body) { return JsonMapper.builder().build().readValue(body, Map.class); }
+    private static Map<String, Object> claims(String jwt) {
+        return json(new String(Base64.getUrlDecoder().decode(jwt.split("\\.")[1]), StandardCharsets.UTF_8));
+    }
+    private MockHttpSession login() throws Exception {
+        var session = new MockHttpSession();
+        mvc.perform(post("/signin/password").session(session).with(https()).with(csrf())
+            .param("username", "alice").param("password", "fixture-password"))
+            .andExpect(redirectedUrl("/signin/mfa"));
+        return session;
+    }
+    private static void secondFactor(MockHttpSession session) {
+        var context = (SecurityContext) session.getAttribute("SPRING_SECURITY_CONTEXT");
+        var previous = context.getAuthentication();
+        var factors = new java.util.ArrayList<org.springframework.security.core.GrantedAuthority>(previous.getAuthorities());
+        factors.add(FactorGrantedAuthority.withAuthority("FACTOR_WEBAUTHN").issuedAt(Instant.now()).build());
+        context.setAuthentication(UsernamePasswordAuthenticationToken.authenticated(previous.getPrincipal(), null, factors));
+    }
+    private static RequestPostProcessor https() {
+        return request -> { request.setScheme("https"); request.setSecure(true); request.setServerPort(443); return request; };
+    }
+}
