@@ -101,7 +101,7 @@ Hydra 会话不存在或已过期时可能直接返回应用，不经过确认�
 - Hydra：discovery/JWKS、`/oauth2/auth`、`/oauth2/token`、`/oauth2/revoke`、
   `/oauth2/sessions/logout`、`/userinfo` 等经核对的 public 端点。
 - iam-login：`/signin`、`/signin/**`、`/webauthn/**`、`/login/webauthn`、
-  `/oauth2/start`、`/oauth2/login`、`/oauth2/consent`、`/oauth2/logout`、`/api/iam/**` 和静态资源。
+  `/oauth2/start`、`/oauth2/login`、`/oauth2/consent`、`/oauth2/logout`、`/api/iam/**`、`/console` 和静态资源。
 - 不把整个 `/oauth2/**` 路径交给 Hydra；不发布 Hydra `/admin/**` 或管理端口。
 
 这是部署计划，不是现网配置。上线前需核对 cookie 名称、受信任代理与 TLS 转发、issuer

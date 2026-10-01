@@ -10,6 +10,8 @@ public final class HydraClientRepository implements ClientRepository {
     public static final String ENABLED = "iam_login_enabled";
     private static final ParameterizedTypeReference<Map<String,Object>> OBJECT = new ParameterizedTypeReference<>() {};
     private static final ParameterizedTypeReference<List<Map<String,Object>>> ARRAY = new ParameterizedTypeReference<>() {};
+    private static final java.security.SecureRandom RANDOM = new java.security.SecureRandom();
+    private static final Base64.Encoder SECRETS = Base64.getUrlEncoder().withoutPadding();
     private final RestClient http;
     public HydraClientRepository(RestClient client) {
         http = client.mutate()
@@ -58,6 +60,19 @@ public final class HydraClientRepository implements ClientRepository {
                 .body(update).retrieve().body(OBJECT)));
         });
     }
+    @Override public String rotateSecret(String id) {
+        return call(() -> {
+            var current = read(id);
+            if (!supported(current)) throw new ClientRepositoryException(ClientRepositoryException.Kind.CONFLICT);
+            // ponytail: hard cut-over via PUT. Hydra master has POST /secrets/rotate with a grace period,
+            // but no release ships it yet (v26.2.0); switch here once one does.
+            var secret = SECRETS.encodeToString(randomBytes());
+            var update = new LinkedHashMap<>(current); update.put("client_secret", secret);
+            http.put().uri("/admin/clients/{id}", id).body(update).retrieve().toBodilessEntity();
+            return secret;
+        });
+    }
+    private static byte[] randomBytes() { var bytes = new byte[32]; RANDOM.nextBytes(bytes); return bytes; }
     @Override public void delete(String id) {
         OidcClient.requireId(id);
         call(() -> { http.delete().uri("/admin/clients/{id}",id).retrieve().toBodilessEntity(); return null; });

@@ -12,4 +12,6 @@ public interface ClientRepository {
     Created create(OidcClient client);
     OidcClient update(OidcClient client);
     void delete(String id);
+    /** Replaces the secret; the previous one stops working immediately. Returns the new value once. */
+    String rotateSecret(String id);
 }

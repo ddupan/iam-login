@@ -4,7 +4,6 @@ import java.util.Map;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
-import org.springframework.security.web.csrf.CsrfToken;
 import org.springframework.web.bind.annotation.*;
 import top.ddupan.iam.login.clients.domain.*;
 import top.ddupan.iam.login.clients.domain.OidcClient;
@@ -15,9 +14,6 @@ public class ClientsController {
     private final ClientRepository repository;
     private static final org.slf4j.Logger AUDIT = org.slf4j.LoggerFactory.getLogger("iam.audit.clients");
     public ClientsController(ClientRepository repository) { this.repository = repository; }
-    @GetMapping("/api/iam/session") Object session(CsrfToken csrf) {
-        return Map.of("csrf",Map.of("headerName",csrf.getHeaderName(),"token",csrf.getToken()));
-    }
     @GetMapping("/api/iam/clients") Object list(@RequestParam(defaultValue="0") int page,
             @RequestParam(defaultValue="20") int size) { return repository.list(page,size); }
     @GetMapping("/api/iam/clients/{id}") OidcClient get(@PathVariable String id) { return repository.get(id); }
@@ -31,6 +27,10 @@ public class ClientsController {
     }
     @DeleteMapping("/api/iam/clients/{id}") ResponseEntity<Void> delete(@PathVariable String id, Authentication auth) {
         repository.delete(id); audit("delete",id,auth); return ResponseEntity.noContent().build();
+    }
+    @PostMapping("/api/iam/clients/{id}/secret") ResponseEntity<Map<String,String>> rotate(@PathVariable String id, Authentication auth) {
+        var secret = repository.rotateSecret(id); audit("rotate-secret",id,auth);
+        return ResponseEntity.ok().header("Cache-Control","no-store").body(Map.of("secret",secret));
     }
     private void audit(String action,String id,Authentication auth) {
         AUDIT.info("client action={} client={} actor={}",action,id,auth.getName());

@@ -25,11 +25,13 @@ export type SignInContext = PageBase & (
     }
 );
 
-export function readPageContext(): SignInContext {
+export type AdminContext = { step: "admin"; authority: string; clientId: string };
+
+export function readPageContext(): SignInContext | AdminContext {
   const data = document.getElementById("login-context")?.textContent;
   if (!data) throw new Error("Missing login page context");
-  const context: SignInContext = JSON.parse(data);
-  if (context.step !== "logout" && context.step !== "authorize" && context.step !== "password" && context.step !== "mfa-pending" && context.step !== "mfa-complete") {
+  const context: SignInContext | AdminContext = JSON.parse(data);
+  if (context.step !== "admin" && context.step !== "logout" && context.step !== "authorize" && context.step !== "password" && context.step !== "mfa-pending" && context.step !== "mfa-complete") {
     throw new Error("Unknown login step");
   }
   return context;

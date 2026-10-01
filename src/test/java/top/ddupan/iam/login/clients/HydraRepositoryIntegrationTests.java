@@ -46,19 +46,28 @@ class HydraRepositoryIntegrationTests {
                     List.of(),"","",false);
                 assertThat(registry.update(changed)).isEqualTo(changed);
                 assertThat(registry.get(client.id()).loginEnabled()).isFalse();
-                try (var http=HttpClient.newHttpClient()) {
-                    String basic=Base64.getEncoder().encodeToString((client.id()+":"+created.secret()).getBytes(java.nio.charset.StandardCharsets.UTF_8));
-                    var response=http.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:14844/oauth2/token"))
-                        .header("Authorization","Basic "+basic).header("Content-Type","application/x-www-form-urlencoded")
-                        .POST(HttpRequest.BodyPublishers.ofString("grant_type=authorization_code&code=invalid-code&redirect_uri=https%3A%2F%2Frp.example%2Fnew-callback"))
-                        .build(),HttpResponse.BodyHandlers.ofString());
-                    assertThat(response.statusCode()).isEqualTo(400);
-                    assertThat(response.body()).contains("invalid_grant").doesNotContain("invalid_client");
-                }
+                // invalid_grant means the client authenticated and only the (deliberately bogus) code failed.
+                assertThat(tokenError(client.id(),created.secret())).contains("invalid_grant").doesNotContain("invalid_client");
+                var rotated=registry.rotateSecret(client.id());
+                assertThat(rotated).isNotBlank().isNotEqualTo(created.secret());
+                assertThat(tokenError(client.id(),created.secret())).contains("invalid_client");
+                assertThat(tokenError(client.id(),rotated)).contains("invalid_grant");
+                assertThat(registry.get(client.id())).isEqualTo(changed);
                 registry.delete(client.id());
                 assertThatThrownBy(() -> registry.get(client.id())).isInstanceOfSatisfying(ClientRepositoryException.class,
                     ex -> assertThat(ex.kind()).isEqualTo(ClientRepositoryException.Kind.NOT_FOUND));
             }
+        }
+    }
+    private static String tokenError(String id,String secret) throws Exception {
+        try (var http=HttpClient.newHttpClient()) {
+            String basic=Base64.getEncoder().encodeToString((id+":"+secret).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            var response=http.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:14844/oauth2/token"))
+                .header("Authorization","Basic "+basic).header("Content-Type","application/x-www-form-urlencoded")
+                .POST(HttpRequest.BodyPublishers.ofString("grant_type=authorization_code&code=invalid-code&redirect_uri=https%3A%2F%2Frp.example%2Fnew-callback"))
+                .build(),HttpResponse.BodyHandlers.ofString());
+            assertThat(response.statusCode()).isIn(400,401);
+            return response.body();
         }
     }
     private static void ready() throws Exception {
