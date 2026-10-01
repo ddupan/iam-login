@@ -33,7 +33,7 @@ public final class WebAuthnBrowserFixture {
             properties.put("iam.hydra.enabled", "true");
             properties.put("iam.hydra.admin-url", "http://127.0.0.1:14445");
             properties.put("iam.hydra.public-url", "http://localhost:14444");
-            properties.put("iam.clients.admin-group-dns[0]", "CN=gitea-admins,dc=example,dc=test");
+            properties.put("iam.clients.admin-groups[0]", "gitea-admins");
             properties.put("iam.clients.admin-ui-client-id", "iam-admin-ui");
             properties.put("iam.hydra.subjects[0].authority", "example.test");
             properties.put("iam.hydra.subjects[0].directory-id", "00112233-4455-6677-8899-aabbccddeeff");

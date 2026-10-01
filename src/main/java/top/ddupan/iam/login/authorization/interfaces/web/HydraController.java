@@ -42,7 +42,6 @@ public class HydraController {
             CsrfToken csrf) {
         var intent = HydraBrowserRequests.intent(request);
         policy.subject(principal.user());
-        policy.permit(principal.user(), intent.request());
         var page = renderer.render(Map.of("step", "authorize", "name", principal.user().displayName(), "error", "",
             "action", "/oauth2/login", "csrf", Map.of("name", csrf.getParameterName(), "value", csrf.getToken(),
                 "headerName", csrf.getHeaderName()), "binding", intent.binding(),

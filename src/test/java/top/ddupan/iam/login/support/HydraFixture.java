@@ -62,7 +62,7 @@ public final class HydraFixture implements AutoCloseable {
             var admin = http.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:14445/admin/clients"))
                 .header("Content-Type", "application/json").POST(HttpRequest.BodyPublishers.ofString("""
                 {"client_id":"iam-admin-ui","client_name":"IAM 管理","redirect_uris":["https://localhost:18083/console/callback"],
-                 "grant_types":["authorization_code"],"response_types":["code"],"scope":"openid iam.clients.manage",
+                 "grant_types":["authorization_code"],"response_types":["code"],"scope":"openid groups","audience":["iam-login"],
                  "token_endpoint_auth_method":"none","subject_type":"public","metadata":{"iam_login_enabled":true}}
                 """)).build(), HttpResponse.BodyHandlers.discarding());
             if (admin.statusCode() != 201) throw new IllegalStateException("Unable to create fixture admin UI client");

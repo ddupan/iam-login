@@ -1,7 +1,8 @@
 package top.ddupan.iam.login.configuration;
 
+import java.util.Collection;
+import java.util.Map;
 import java.util.Set;
-import javax.naming.ldap.LdapName;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -14,8 +15,8 @@ import org.springframework.security.oauth2.server.resource.introspection.BadOpaq
 import org.springframework.security.oauth2.server.resource.introspection.OpaqueTokenIntrospector;
 import org.springframework.security.oauth2.server.resource.introspection.SpringOpaqueTokenIntrospector;
 import org.springframework.security.web.SecurityFilterChain;
-import top.ddupan.iam.login.authentication.domain.User;
-import top.ddupan.iam.login.authorization.application.AuthorizationPolicy;
+import org.springframework.security.authorization.AuthorizationDecision;
+import org.springframework.security.oauth2.server.resource.authentication.BearerTokenAuthentication;
 import top.ddupan.iam.login.authorization.infrastructure.hydra.HydraHttpProperties;
 import top.ddupan.iam.login.authorization.infrastructure.hydra.HydraProperties;
 import top.ddupan.iam.login.clients.domain.ClientRepository;
@@ -27,16 +28,20 @@ import top.ddupan.iam.login.clients.domain.OidcClient;
 @EnableConfigurationProperties(ClientManagementConfiguration.Access.class)
 @org.springframework.aot.hint.annotation.RegisterReflectionForBinding({OidcClient.class,ClientRepository.Created.class})
 class ClientManagementConfiguration {
-    /** Who may be granted the management scope, and which Hydra client (the admin UI) may request it. */
+    /**
+     * The API is an ordinary resource server: the token must be issued for it (audience) and its subject
+     * must be in an administrator group, taken from the groups released into the access token.
+     * Matching is by group name, the same value every downstream application sees. A user with two
+     * same-named direct groups cannot log in at all; a look-alike group elsewhere needs AD rights to create.
+     */
     @ConfigurationProperties("iam.clients")
-    record Access(Set<String> adminGroupDns, String adminUiClientId) {
-        Access { adminGroupDns = adminGroupDns == null ? Set.of() : Set.copyOf(adminGroupDns); adminGroupDns.forEach(Access::dn); }
-        static LdapName dn(String value) {
-            try { return new LdapName(value); } catch (javax.naming.InvalidNameException ex) { throw new IllegalArgumentException("Invalid administrator group DN"); }
-        }
-        boolean allowed(User user) {
-            return user.memberships().stream().anyMatch(group ->
-                adminGroupDns.stream().anyMatch(admin -> dn(admin).equals(dn(group.externalId()))));
+    record Access(Set<String> adminGroups, String adminUiClientId) {
+        static final String AUDIENCE = "iam-login";
+        Access { adminGroups = adminGroups == null ? Set.of() : Set.copyOf(adminGroups); }
+        boolean allowed(Map<String, Object> token) {
+            return token.get("aud") instanceof Collection<?> audience && audience.contains(AUDIENCE)
+                && token.get("ext") instanceof Map<?, ?> ext && ext.get("groups") instanceof Collection<?> groups
+                && groups.stream().anyMatch(adminGroups::contains);
         }
     }
     @Bean ClientRepository clientRepository(org.springframework.web.client.RestClient hydraAdminHttpClient) { return new HydraClientRepository(hydraAdminHttpClient); }
@@ -57,11 +62,11 @@ class ClientManagementConfiguration {
         };
     }
 
-    // Bearer only: the admin UI and any future automation use the same token check; who receives the
-    // scope is decided once, at consent (AuthorizationPolicy), not here.
-    @Bean @Order(2) SecurityFilterChain clientManagement(HttpSecurity http, OpaqueTokenIntrospector introspector) throws Exception {
+    // Bearer only: the admin UI and any future caller go through the same audience + group check.
+    @Bean @Order(2) SecurityFilterChain clientManagement(HttpSecurity http, OpaqueTokenIntrospector introspector, Access access) throws Exception {
         return http.securityMatcher("/api/iam/**").redirectToHttps(org.springframework.security.config.Customizer.withDefaults())
-            .authorizeHttpRequests(auth -> auth.anyRequest().hasAuthority("SCOPE_" + AuthorizationPolicy.MANAGE_CLIENTS))
+            .authorizeHttpRequests(auth -> auth.anyRequest().access((authentication, request) -> new AuthorizationDecision(
+                authentication.get() instanceof BearerTokenAuthentication token && access.allowed(token.getTokenAttributes()))))
             .oauth2ResourceServer(server -> server.opaqueToken(token -> token.introspector(introspector)))
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .requestCache(cache -> cache.disable()).logout(logout -> logout.disable()).build();

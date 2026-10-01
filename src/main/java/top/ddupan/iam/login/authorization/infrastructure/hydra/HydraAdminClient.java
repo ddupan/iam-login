@@ -62,9 +62,11 @@ public final class HydraAdminClient implements HydraGateway {
             "authenticated_at", authenticatedAt.toString(), "amr", List.of("pwd", "mfa"),
             "context", Map.of("browser_binding", binding, "login_challenge_digest", AuthorizationRequest.digest(challenge))));
     }
-    @Override public String acceptConsent(String challenge, List<String> scopes, Map<String, Object> claims) {
-        return accept("consent", challenge, Map.of("grant_scope", scopes, "grant_access_token_audience", List.of(),
-            "remember", false, "session", Map.of("id_token", claims)));
+    @Override public String acceptConsent(String challenge, List<String> scopes, List<String> audience,
+            Map<String, Object> idTokenClaims, Map<String, Object> accessTokenClaims) {
+        // Requested audiences were already checked by Hydra against the client's registration.
+        return accept("consent", challenge, Map.of("grant_scope", scopes, "grant_access_token_audience", audience,
+            "remember", false, "session", Map.of("id_token", idTokenClaims, "access_token", accessTokenClaims)));
     }
     private String accept(String kind, String challenge, Object payload) {
         validateChallenge(challenge);

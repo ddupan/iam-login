@@ -29,31 +29,24 @@ class AuthorizationPolicyTests {
         assertThat(claims).containsEntry("email_verified", false).containsEntry("groups", List.of("gitea-admins"))
             .doesNotContainKey("preferred_username");
     }
-    @Test void clientsScopesAndAudienceFailClosed() {
+    @Test void unknownClientsAndNonOidcRequestsFailClosed() {
         assertThatIllegalArgumentException().isThrownBy(() -> policy.validate(request("other", List.of("openid"), List.of())));
-        assertThatIllegalArgumentException().isThrownBy(() -> policy.validate(request("gitea", List.of("openid", "offline_access"), List.of())));
-        assertThatIllegalArgumentException().isThrownBy(() -> policy.validate(request("gitea", List.of("openid"), List.of("other-api"))));
+        assertThatIllegalArgumentException().isThrownBy(() -> policy.validate(request("gitea", List.of("profile"), List.of())));
+    }
+    @Test void scopesAndAudiencesRegisteredWithTheIssuerPassThrough() {
+        // Hydra has already limited both to the client's registration; neither is a permission here.
+        policy.validate(request("gitea", List.of("openid", "custom.read"), List.of("some-api")));
+    }
+    @Test void groupsReachTheAccessTokenOnlyWhenRequested() {
+        assertThat(policy.accessTokenClaims(user, request("gitea", List.of("openid", "groups"), List.of("iam-login"))))
+            .isEqualTo(Map.of("groups", List.of("gitea-admins")));
+        assertThat(policy.accessTokenClaims(user, request("gitea", List.of("openid", "profile"), List.of("iam-login")))).isEmpty();
     }
     @Test void registeredMetadataAllowsNewClientsAndExplicitDisableOverridesLegacyAllowlist() {
         var enabled=new AuthorizationRequest("challenge","new-client",List.of("openid"),List.of(),"",null,null,"https://issuer/oauth2/auth",false,true);
         policy.validate(enabled);
         var disabled=new AuthorizationRequest("challenge","gitea",List.of("openid"),List.of(),"",null,null,"https://issuer/oauth2/auth",false,false);
         assertThatIllegalArgumentException().isThrownBy(() -> policy.validate(disabled));
-    }
-    @Test void managementScopeOnlyForManagementClientAndDirectAdministrators() {
-        var managed = new AuthorizationPolicy(Set.of("gitea", "iam-admin-ui"), Map.of(user.id(), "human:old-issuer-sub-hash"),
-            "iam-admin-ui", candidate -> candidate.memberships().stream().anyMatch(group -> group.name().equals("gitea-admins")));
-        var manage = List.of("openid", AuthorizationPolicy.MANAGE_CLIENTS);
-        managed.permit(user, request("iam-admin-ui", manage, List.of()));
-        assertThat(managed.claims(user, request("iam-admin-ui", manage, List.of()))).isEmpty();
-        // Ordinary applications cannot obtain the scope, even for an administrator.
-        assertThatIllegalArgumentException().isThrownBy(() -> managed.validate(request("gitea", manage, List.of())));
-        var member = new User(user.id(), user.username(), user.displayName(), user.email(), List.of());
-        assertThatIllegalArgumentException().isThrownBy(() -> managed.permit(member, request("iam-admin-ui", manage, List.of())));
-        assertThatIllegalArgumentException().isThrownBy(() -> managed.claims(member, request("iam-admin-ui", manage, List.of())));
-        managed.permit(member, request("iam-admin-ui", List.of("openid"), List.of()));
-        // Without a configured management client the scope does not exist.
-        assertThatIllegalArgumentException().isThrownBy(() -> policy.validate(request("gitea", manage, List.of())));
     }
     private AuthorizationRequest request(String client, List<String> scopes, List<String> audience) {
         return new AuthorizationRequest("challenge", client, scopes, audience, "", null, null, "https://issuer/oauth2/auth", false);

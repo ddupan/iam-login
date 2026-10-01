@@ -32,10 +32,9 @@ class HydraConfiguration {
             org.springframework.web.client.RestClient hydraAdminHttpClient) {
         return new HydraAdminClient(properties, hydraAdminHttpClient);
     }
-    @Bean AuthorizationPolicy authorizationPolicy(HydraProperties properties, ClientManagementConfiguration.Access access) {
+    @Bean AuthorizationPolicy authorizationPolicy(HydraProperties properties) {
         return new AuthorizationPolicy(properties.clients(), properties.subjects().stream().collect(Collectors.toMap(
-            binding -> new User.UserId(binding.authority(), binding.directoryId()), HydraProperties.SubjectBinding::subject)),
-            access.adminUiClientId(), access::allowed);
+            binding -> new User.UserId(binding.authority(), binding.directoryId()), HydraProperties.SubjectBinding::subject)));
     }
     @Bean AuthorizeApplication authorizeApplication(AuthorizationPolicy policy, HydraGateway hydra) {
         return new AuthorizeApplication(policy, hydra);

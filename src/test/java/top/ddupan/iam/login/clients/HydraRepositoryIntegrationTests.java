@@ -87,6 +87,12 @@ class HydraRepositoryIntegrationTests {
         }
         throw new IllegalStateException("Fixture issuer not ready");
     }
+    @Test void acceptsAnyWellFormedScopeButRequiresOpenid() {
+        new OidcClient("id","Name",List.of("https://rp.example/cb"),Set.of("openid","offline_access","api:read"),List.of(),"","",true);
+        for (var scopes:List.of(Set.of("profile"),Set.of("openid","has space"),Set.of("openid","quote\""),Set.of("openid",""))) {
+            assertThatIllegalArgumentException().isThrownBy(() -> new OidcClient("id","Name",List.of("https://rp.example/cb"),scopes,List.of(),"","",true));
+        }
+    }
     @Test void rejectsCallbackWildcardsFragmentsAndInsecureNonLoopback() {
         for (var target:List.of("https://rp.example/*","https://rp.example/callback#x","http://rp.example/callback","https://user@rp.example/callback")) {
             assertThatIllegalArgumentException().isThrownBy(() -> new OidcClient("id","Name",List.of(target),Set.of("openid"),List.of(),"","",true));

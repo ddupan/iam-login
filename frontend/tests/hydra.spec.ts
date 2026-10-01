@@ -66,6 +66,10 @@ test("AD + passkey -> Hydra authorization code -> signed OIDC token and coordina
   expect(exchange.status()).toBe(200);
   const tokens = await exchange.json();
   expect(tokens.refresh_token).toBeUndefined();
+  // An administrator's token issued to another application is not a credential for the IAM API (audience).
+  const foreign = await context.request.get("https://localhost:18083/api/iam/clients",
+    { headers: { Authorization: `Bearer ${tokens.access_token}` } });
+  expect(foreign.status()).toBe(403);
   const [headerPart, payloadPart, signature] = tokens.id_token.split(".");
   const header = JSON.parse(Buffer.from(headerPart, "base64url").toString());
   expect(header.alg).toBe("RS256");

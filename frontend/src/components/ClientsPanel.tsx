@@ -6,10 +6,9 @@ type Client = {
   /** null: legacy client without the flag; login follows the server's configured allowlist. */
   loginEnabled: boolean | null;
 };
-const SCOPES = ["openid", "profile", "email", "groups"];
-const blank: Client = { id: "", name: "", redirectUris: [], scopes: ["openid"], postLogoutRedirectUris: [],
+const blank: Client = { id: "", name: "", redirectUris: [], scopes: ["openid", "profile", "email", "groups"], postLogoutRedirectUris: [],
   backchannelLogoutUri: "", frontchannelLogoutUri: "", loginEnabled: true };
-const ERRORS: Record<number, string> = { 400: "输入无效：检查 ID、回调地址（HTTPS、无通配符）与 scope。",
+const ERRORS: Record<number, string> = { 400: "输入无效：检查 ID、回调地址（HTTPS、无通配符）与 scope（须含 openid）。",
   403: "当前登录没有客户端管理权限。", 404: "客户端不存在。", 409: "冲突：ID 已存在，或该客户端不是本服务可管理的类型。" };
 class Expired extends Error { }
 
@@ -51,7 +50,7 @@ export function ClientsPanel({ token, onExpired }: { token: string; onExpired: (
       id: editing.isNew ? String(form.get("id")).trim() : editing.client.id,
       name: String(form.get("name")).trim(),
       redirectUris: lines("redirectUris"),
-      scopes: SCOPES.filter(scope => scope === "openid" || form.get(`scope-${scope}`) !== null),
+      scopes: [...new Set(["openid", ...String(form.get("scopes")).split(/\s+/).filter(Boolean)])],
       postLogoutRedirectUris: lines("postLogoutRedirectUris"),
       backchannelLogoutUri: String(form.get("backchannelLogoutUri")).trim(),
       frontchannelLogoutUri: String(form.get("frontchannelLogoutUri")).trim(),
@@ -91,9 +90,8 @@ export function ClientsPanel({ token, onExpired }: { token: string; onExpired: (
       {editing.isNew && <label>Client ID<input name="id" required pattern="[a-zA-Z0-9][a-zA-Z0-9._\-]{0,127}" /></label>}
       <label>名称<input name="name" required maxLength={200} defaultValue={editing.client.name} /></label>
       <label>回调地址（每行一个）<textarea name="redirectUris" required rows={3} defaultValue={editing.client.redirectUris.join("\n")} /></label>
-      <fieldset><legend>Scope</legend>{SCOPES.map(scope => <label key={scope} className="inline">
-        <input type="checkbox" name={`scope-${scope}`} disabled={scope === "openid"}
-          defaultChecked={editing.client.scopes.includes(scope)} />{scope}</label>)}</fieldset>
+      <label>Scope（空格分隔，openid 必含）<input name="scopes" required
+        defaultValue={editing.client.scopes.join(" ")} /></label>
       <label>注销后回跳地址（每行一个，可空）<textarea name="postLogoutRedirectUris" rows={2} defaultValue={editing.client.postLogoutRedirectUris.join("\n")} /></label>
       <label>Back-channel 注销地址（应用不支持则留空）<input name="backchannelLogoutUri" defaultValue={editing.client.backchannelLogoutUri} /></label>
       <label>Front-channel 注销地址（应用不支持则留空）<input name="frontchannelLogoutUri" defaultValue={editing.client.frontchannelLogoutUri} /></label>
