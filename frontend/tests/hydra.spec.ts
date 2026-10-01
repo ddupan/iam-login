@@ -97,6 +97,33 @@ test("AD + passkey -> Hydra authorization code -> signed OIDC token and coordina
   await page.getByRole("button", { name: "继续至应用", exact: true }).click();
   await expect.poll(() => new URL(page.url()).origin + new URL(page.url()).pathname).toBe("http://localhost:14446/callback");
   expect(new URL(page.url()).searchParams.has("error")).toBe(false);
+
+  // OIDC Core 11: a granted offline_access yields a refresh token; it rotates and cannot be replayed.
+  const offlineVerifier = randomBytes(32).toString("base64url");
+  const offline = new URL("http://localhost:14444/oauth2/auth");
+  offline.search = new URLSearchParams({ client_id: "offline-fixture", response_type: "code",
+    redirect_uri: "http://localhost:14446/callback", scope: "openid offline_access",
+    state: randomBytes(24).toString("base64url"), nonce: randomBytes(24).toString("base64url"),
+    code_challenge: createHash("sha256").update(offlineVerifier).digest("base64url"), code_challenge_method: "S256",
+  }).toString();
+  await page.goto(offline.toString());
+  await expect(page.getByRole("heading", { name: "继续登录 offline-fixture" })).toBeVisible();
+  await expect(page.getByRole("note")).toContainText("refresh token");
+  await page.getByRole("button", { name: "继续至应用", exact: true }).click();
+  await expect.poll(() => new URL(page.url()).origin + new URL(page.url()).pathname).toBe("http://localhost:14446/callback");
+  const offlineAuth = { Authorization: "Basic " + Buffer.from("offline-fixture:fixture-offline-secret").toString("base64") };
+  const offlineTokens = await context.request.post("http://localhost:14444/oauth2/token", { headers: offlineAuth,
+    form: { grant_type: "authorization_code", code: new URL(page.url()).searchParams.get("code")!,
+      redirect_uri: "http://localhost:14446/callback", code_verifier: offlineVerifier } }).then(r => r.json());
+  expect(offlineTokens.refresh_token).toBeTruthy();
+  const refresh = (token: string) => context.request.post("http://localhost:14444/oauth2/token",
+    { headers: offlineAuth, form: { grant_type: "refresh_token", refresh_token: token } });
+  const refreshed = await refresh(offlineTokens.refresh_token);
+  expect(refreshed.status()).toBe(200);
+  const renewed = await refreshed.json();
+  expect(renewed.access_token).toBeTruthy();
+  expect(renewed.refresh_token).not.toBe(offlineTokens.refresh_token);
+  expect((await refresh(offlineTokens.refresh_token)).status()).toBe(400);
   const logout = new URL("http://localhost:14444/oauth2/sessions/logout");
   logout.search = new URLSearchParams({ id_token_hint: tokens.id_token, post_logout_redirect_uri: "http://localhost:14446/logged-out" }).toString();
   await page.goto(logout.toString());

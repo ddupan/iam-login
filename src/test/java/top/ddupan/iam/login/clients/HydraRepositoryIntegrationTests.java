@@ -58,10 +58,24 @@ class HydraRepositoryIntegrationTests {
                 assertThat(tokenError(client.id(),created.secret())).contains("invalid_client");
                 assertThat(tokenError(client.id(),rotated)).contains("invalid_grant");
                 assertThat(registry.get(client.id())).isEqualTo(changed);
+                var offline=new OidcClient(client.id(),"Updated",List.of("https://rp.example/new-callback"),Set.of("openid","offline_access"),
+                    List.of(),"","",true);
+                assertThat(registry.update(offline)).isEqualTo(offline);
+                assertThat(grantTypes(client.id())).isEqualTo("[\"authorization_code\",\"refresh_token\"]");
+                registry.update(changed);
+                assertThat(grantTypes(client.id())).isEqualTo("[\"authorization_code\"]");
                 registry.delete(client.id());
                 assertThatThrownBy(() -> registry.get(client.id())).isInstanceOfSatisfying(ClientRepositoryException.class,
                     ex -> assertThat(ex.kind()).isEqualTo(ClientRepositoryException.Kind.NOT_FOUND));
             }
+        }
+    }
+    private static String grantTypes(String id) throws Exception {
+        try (var http=HttpClient.newHttpClient()) {
+            var body=http.send(HttpRequest.newBuilder(ADMIN.resolve("/admin/clients/"+id)).GET().build(),HttpResponse.BodyHandlers.ofString()).body();
+            var match=java.util.regex.Pattern.compile("\"grant_types\":(\\[[^\\]]*\\])").matcher(body);
+            assertThat(match.find()).isTrue();
+            return match.group(1);
         }
     }
     private static String tokenError(String id,String secret) throws Exception {

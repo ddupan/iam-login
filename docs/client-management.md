@@ -67,7 +67,13 @@ POST/PUT 请求示例（PUT 的 id 必须等于路径）：
 回调必须 HTTPS（隔离开发允许 loopback HTTP），不允许通配符、fragment 或 URL 用户信息。
 本轮固定 `authorization_code`、`code`、`client_secret_basic`、public subject。scope 可为任意
 符合 RFC 6749 的 scope-token（最多 50 个），必须含 `openid`；scope 不代表权限，所以不设白名单。
-`profile`/`email`/`groups` 决定 consent 释放哪些声明，其余 scope 原样授予。登记 audience 尚未
+`profile`/`email`/`groups` 决定 consent 释放哪些声明，其余 scope 原样授予。
+含 `offline_access` 时（OIDC Core 第 11 节）客户端同时登记 `refresh_token` 授权类型，Hydra 才会签发
+refresh token；去掉该 scope 时一并移除。规范要求无 `prompt=consent` 时须有其他条件才可授予离线
+访问：本服务每次授权都显示明确的确认页（不记住 consent），并在页面上标明将获得 refresh token。
+refresh 由 Hydra 直接处理（默认 30 天、严格轮换、重放即撤销整条链），**不经过本服务**：
+禁用客户端、移出组或停用 AD 账号都不会阻止已签发 refresh token 续期，续期 token 中的 `groups`
+也保持授权时的快照。需要时再用 Hydra token hook 或缩短 `ttl.refresh_token` 处理，尚未实现。登记 audience 尚未
 开放（当前只有带外登记的管理客户端需要）。不接收任意 Hydra 字段、密钥、签名配置或授权类型，也没有通用 Admin API
 代理。不要为并不支持注销协议的应用登记虚构的端点。
 

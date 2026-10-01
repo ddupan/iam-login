@@ -66,6 +66,14 @@ public final class HydraFixture implements AutoCloseable {
                  "token_endpoint_auth_method":"none","subject_type":"public","metadata":{"iam_login_enabled":true}}
                 """)).build(), HttpResponse.BodyHandlers.discarding());
             if (admin.statusCode() != 201) throw new IllegalStateException("Unable to create fixture admin UI client");
+            var offline = http.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:14445/admin/clients"))
+                .header("Content-Type", "application/json").POST(HttpRequest.BodyPublishers.ofString("""
+                {"client_id":"offline-fixture","client_secret":"fixture-offline-secret",
+                 "redirect_uris":["http://localhost:14446/callback"],"grant_types":["authorization_code","refresh_token"],
+                 "response_types":["code"],"scope":"openid offline_access","token_endpoint_auth_method":"client_secret_basic",
+                 "subject_type":"public","metadata":{"iam_login_enabled":true}}
+                """)).build(), HttpResponse.BodyHandlers.discarding());
+            if (offline.statusCode() != 201) throw new IllegalStateException("Unable to create fixture offline client");
         } catch (Exception ex) { hydra.stop(); throw new IllegalStateException("Fixture client initialization failed", ex); }
     }
     @Override public void close() { hydra.stop(); }
