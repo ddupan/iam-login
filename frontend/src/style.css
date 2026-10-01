@@ -153,3 +153,54 @@ button:focus-visible {
 .directory-result { overflow-wrap: anywhere; }
 .directory-result dd { margin: 0 0 1rem; }
 .directory-result h2 { font-size: 1rem; }
+
+/* Admin UI: deliberately plain until the frontend redesign. */
+main.admin {
+  max-width: 960px;
+}
+.admin table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 20px;
+  font-size: 14px;
+}
+.admin th,
+.admin td {
+  text-align: left;
+  padding: 8px;
+  border-bottom: 1px solid #dce4dd;
+  overflow-wrap: anywhere;
+}
+.admin td button,
+.admin form > button:not(.primary),
+.admin .secret button {
+  margin: 4px 8px 4px 0;
+}
+.admin textarea {
+  display: block;
+  width: 100%;
+  margin: 9px 0 22px;
+  font: inherit;
+}
+.admin fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0 0 22px;
+}
+.admin label.inline {
+  display: inline-flex;
+  gap: 6px;
+  margin-right: 16px;
+  font-weight: 400;
+}
+.admin label.inline input {
+  width: auto;
+  margin: 0;
+}
+.admin .secret output {
+  display: block;
+  font-family: ui-monospace, monospace;
+  padding: 12px;
+  background: #f3f5f1;
+  overflow-wrap: anywhere;
+}

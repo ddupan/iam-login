@@ -40,6 +40,21 @@ class AuthorizationPolicyTests {
         var disabled=new AuthorizationRequest("challenge","gitea",List.of("openid"),List.of(),"",null,null,"https://issuer/oauth2/auth",false,false);
         assertThatIllegalArgumentException().isThrownBy(() -> policy.validate(disabled));
     }
+    @Test void managementScopeOnlyForManagementClientAndDirectAdministrators() {
+        var managed = new AuthorizationPolicy(Set.of("gitea", "iam-admin-ui"), Map.of(user.id(), "human:old-issuer-sub-hash"),
+            "iam-admin-ui", candidate -> candidate.memberships().stream().anyMatch(group -> group.name().equals("gitea-admins")));
+        var manage = List.of("openid", AuthorizationPolicy.MANAGE_CLIENTS);
+        managed.permit(user, request("iam-admin-ui", manage, List.of()));
+        assertThat(managed.claims(user, request("iam-admin-ui", manage, List.of()))).isEmpty();
+        // Ordinary applications cannot obtain the scope, even for an administrator.
+        assertThatIllegalArgumentException().isThrownBy(() -> managed.validate(request("gitea", manage, List.of())));
+        var member = new User(user.id(), user.username(), user.displayName(), user.email(), List.of());
+        assertThatIllegalArgumentException().isThrownBy(() -> managed.permit(member, request("iam-admin-ui", manage, List.of())));
+        assertThatIllegalArgumentException().isThrownBy(() -> managed.claims(member, request("iam-admin-ui", manage, List.of())));
+        managed.permit(member, request("iam-admin-ui", List.of("openid"), List.of()));
+        // Without a configured management client the scope does not exist.
+        assertThatIllegalArgumentException().isThrownBy(() -> policy.validate(request("gitea", manage, List.of())));
+    }
     private AuthorizationRequest request(String client, List<String> scopes, List<String> audience) {
         return new AuthorizationRequest("challenge", client, scopes, audience, "", null, null, "https://issuer/oauth2/auth", false);
     }
