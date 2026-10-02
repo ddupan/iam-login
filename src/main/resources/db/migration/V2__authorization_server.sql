@@ -1,7 +1,6 @@
 -- Spring Security 7.1 authorization server schema, adapted for PostgreSQL as its bundled scripts
 -- instruct: blob -> text, timestamp -> timestamptz.
--- ponytail: spike schema. Token-value lookups scan the table and expired rows are never purged;
--- add indexes on the *_value columns and a cleanup job before production.
+-- Expired rows are removed by ExpiredAuthorizations.
 CREATE TABLE oauth2_registered_client (
     id varchar(100) NOT NULL,
     client_id varchar(100) NOT NULL,
@@ -63,3 +62,13 @@ CREATE TABLE oauth2_authorization (
     device_code_metadata text DEFAULT NULL,
     PRIMARY KEY (id)
 );
+
+-- Token lookups are exact matches on these columns (findByToken). Hash indexes: JWT values with group
+-- claims can exceed the B-tree row size limit (~2.7 kB).
+CREATE INDEX oauth2_authorization_state ON oauth2_authorization USING hash (state);
+CREATE INDEX oauth2_authorization_code ON oauth2_authorization USING hash (authorization_code_value);
+CREATE INDEX oauth2_authorization_access_token ON oauth2_authorization USING hash (access_token_value);
+CREATE INDEX oauth2_authorization_id_token ON oauth2_authorization USING hash (oidc_id_token_value);
+CREATE INDEX oauth2_authorization_refresh_token ON oauth2_authorization USING hash (refresh_token_value);
+CREATE INDEX oauth2_authorization_user_code ON oauth2_authorization USING hash (user_code_value);
+CREATE INDEX oauth2_authorization_device_code ON oauth2_authorization USING hash (device_code_value);

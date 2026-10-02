@@ -44,6 +44,7 @@ public final class WebAuthnBrowserFixture {
         if (authorizationServer) {
             properties.put("iam.authorization-server.enabled", "true");
             properties.put("iam.authorization-server.issuer", "https://localhost:18083");
+            properties.put("iam.authorization-server.signing-keys[0]", "file:" + top.ddupan.iam.login.support.SigningKeyFixture.write());
             properties.put("iam.authorization-server.subjects[0].authority", "example.test");
             properties.put("iam.authorization-server.subjects[0].directory-id", "00112233-4455-6677-8899-aabbccddeeff");
             properties.put("iam.authorization-server.subjects[0].subject", "human:fixture-existing-oidc-subject");

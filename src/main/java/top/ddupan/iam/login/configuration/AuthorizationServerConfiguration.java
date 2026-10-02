@@ -1,16 +1,11 @@
 package top.ddupan.iam.login.configuration;
 
 import com.nimbusds.jose.jwk.JWKSet;
-import com.nimbusds.jose.jwk.RSAKey;
 import com.nimbusds.jose.jwk.source.ImmutableJWKSet;
 import com.nimbusds.jose.jwk.source.JWKSource;
 import com.nimbusds.jose.proc.SecurityContext;
 import java.net.URI;
-import java.security.KeyPairGenerator;
-import java.security.interfaces.RSAPrivateKey;
-import java.security.interfaces.RSAPublicKey;
 import java.util.List;
-import java.util.UUID;
 import java.util.stream.Collectors;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.ConfigurationProperties;
@@ -65,20 +60,25 @@ import top.ddupan.iam.login.authorization.application.AuthorizationPolicy;
 import top.ddupan.iam.login.authorization.infrastructure.hydra.HydraProperties;
 
 /**
- * Spike: Spring Security's own authorization server, in process, replacing Hydra.
- * Mutually exclusive with {@code iam.hydra.enabled}. Signing keys are ephemeral (see {@link #jwkSource}).
+ * Spring Security's own authorization server, in process, replacing Hydra. Mutually exclusive with
+ * {@code iam.hydra.enabled}. Signing keys come from configuration (see {@link SigningKeys}).
  */
 @Configuration(proxyBeanMethods = false)
 @ConditionalOnProperty(prefix = "iam.authorization-server", name = "enabled", havingValue = "true")
 @EnableConfigurationProperties(AuthorizationServerConfiguration.Properties.class)
 @org.springframework.context.annotation.ImportRuntimeHints(SecurityJacksonHints.class)
+@org.springframework.scheduling.annotation.EnableScheduling
 class AuthorizationServerConfiguration {
     @ConfigurationProperties("iam.authorization-server")
-    record Properties(boolean enabled, URI issuer, List<HydraProperties.SubjectBinding> subjects) { }
+    record Properties(boolean enabled, URI issuer, List<HydraProperties.SubjectBinding> subjects,
+            List<org.springframework.core.io.Resource> signingKeys) { }
 
     @Bean @Order(2)
     SecurityFilterChain authorizationServer(HttpSecurity http, MfaPolicy mfa,
-            AuthorizationPolicy policy, OAuth2AuthorizationService authorizations) throws Exception {
+            AuthorizationPolicy policy, OAuth2AuthorizationService authorizations,
+            @org.springframework.beans.factory.annotation.Value("${iam.hydra.enabled:false}") boolean hydra) throws Exception {
+        // Both would serve /oauth2/**, and Hydra-mode login pages would hand out Hydra challenges.
+        if (hydra) throw new IllegalStateException("iam.authorization-server.enabled and iam.hydra.enabled are mutually exclusive");
         var requiredFactors = mfa.complete;
         // Registered at the authorization endpoint's position before the endpoint itself (added later, while
         // building); filters of equal order keep insertion order, so this runs first.
@@ -284,19 +284,23 @@ class AuthorizationServerConfiguration {
         return builder;
     }
 
+    @Bean ExpiredAuthorizations expiredAuthorizations(JdbcOperations jdbc) {
+        return new ExpiredAuthorizations(jdbc, java.time.Clock.systemUTC());
+    }
+
     @Bean OAuth2AuthorizationConsentService consents(JdbcOperations jdbc, RegisteredClientRepository clients) {
         return new JdbcOAuth2AuthorizationConsentService(jdbc, clients);
     }
 
-    // ponytail: ephemeral signing key, regenerated on every start (all tokens die with the process).
-    // Persist and rotate it (OpenBao or the database) before anything real depends on it.
-    @Bean JWKSource<SecurityContext> jwkSource() throws Exception {
-        var generator = KeyPairGenerator.getInstance("RSA");
-        generator.initialize(2048);
-        var keys = generator.generateKeyPair();
-        var jwk = new RSAKey.Builder((RSAPublicKey) keys.getPublic()).privateKey((RSAPrivateKey) keys.getPrivate())
-            .keyID(UUID.randomUUID().toString()).build();
-        return new ImmutableJWKSet<>(new JWKSet(jwk));
+    // All configured keys: the JWKS endpoint publishes their public halves; userinfo verifies against them.
+    @Bean JWKSource<SecurityContext> jwkSource(Properties properties) {
+        return new ImmutableJWKSet<>(new JWKSet(List.copyOf(SigningKeys.load(properties.signingKeys()))));
+    }
+
+    // Signing uses the first key only; the framework takes a JwtEncoder bean over building one from all keys.
+    @Bean org.springframework.security.oauth2.jwt.JwtEncoder jwtEncoder(Properties properties) {
+        return new org.springframework.security.oauth2.jwt.NimbusJwtEncoder(
+            new ImmutableJWKSet<>(new JWKSet(SigningKeys.load(properties.signingKeys()).getFirst())));
     }
 
     @Bean org.springframework.security.oauth2.jwt.JwtDecoder jwtDecoder(JWKSource<SecurityContext> keys) {

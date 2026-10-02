@@ -31,6 +31,7 @@ import org.springframework.web.util.UriComponentsBuilder;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
 import tools.jackson.databind.json.JsonMapper;
+import org.springframework.security.oauth2.server.authorization.OAuth2AuthorizationService;
 import top.ddupan.iam.login.support.AdDirectoryFixture;
 import static org.assertj.core.api.Assertions.*;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
@@ -55,6 +56,8 @@ class AuthorizationServerIntegrationTests {
             "postgres@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873")
             .asCompatibleSubstituteFor("postgres"));
         static { DATABASE.start(); }
+        static final java.nio.file.Path ACTIVE_KEY = top.ddupan.iam.login.support.SigningKeyFixture.write();
+        static final java.nio.file.Path PREVIOUS_KEY = top.ddupan.iam.login.support.SigningKeyFixture.write();
     }
     @DynamicPropertySource
     static void properties(DynamicPropertyRegistry r) {
@@ -62,6 +65,8 @@ class AuthorizationServerIntegrationTests {
         r.add("spring.datasource.url", () -> Fixtures.DATABASE.getJdbcUrl());
         r.add("spring.datasource.username", () -> Fixtures.DATABASE.getUsername());
         r.add("spring.datasource.password", () -> Fixtures.DATABASE.getPassword());
+        r.add("iam.authorization-server.signing-keys[0]", () -> "file:" + Fixtures.ACTIVE_KEY);
+        r.add("iam.authorization-server.signing-keys[1]", () -> "file:" + Fixtures.PREVIOUS_KEY);
     }
     @AfterAll static void close() { Fixtures.DIRECTORY.close(); Fixtures.DATABASE.stop(); }
 
@@ -173,6 +178,53 @@ class AuthorizationServerIntegrationTests {
         assertThat(metadata).containsEntry("request_parameter_supported", false)
             .containsEntry("request_uri_parameter_supported", false).containsEntry("claims_parameter_supported", false);
         assertThat(metadata.get("claims_supported")).asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.LIST).contains("groups", "auth_time");
+    }
+
+    @Test void tokensAreSignedByTheFirstKeyAndAllKeysArePublished() throws Exception {
+        var jwks = json(mvc.perform(get("/oauth2/jwks").with(https())).andExpect(status().isOk())
+            .andReturn().getResponse().getContentAsString());
+        var keys = (List<Map<String, Object>>) jwks.get("keys");
+        assertThat(keys).hasSize(2).allSatisfy(key -> assertThat(key).doesNotContainKeys("d", "p", "q"));
+        var active = thumbprint(Fixtures.ACTIVE_KEY);
+        assertThat(keys).extracting(key -> key.get("kid")).containsExactly(active, thumbprint(Fixtures.PREVIOUS_KEY));
+        var session = login(); secondFactor(session);
+        var verifier = verifier();
+        var tokens = json(mvc.perform(post("/oauth2/token").with(https()).with(httpBasic("spike-rp", "spike-secret"))
+                .param("grant_type", "authorization_code").param("code", code(session, verifier))
+                .param("redirect_uri", CALLBACK).param("code_verifier", verifier))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
+        var header = json(new String(Base64.getUrlDecoder().decode(((String) tokens.get("id_token")).split("\\.")[0]), StandardCharsets.UTF_8));
+        assertThat(header).containsEntry("kid", active);
+    }
+
+    @Test void expiredAuthorizationsArePurged(@Autowired OAuth2AuthorizationService authorizations,
+            @Autowired top.ddupan.iam.login.configuration.ExpiredAuthorizations expired) {
+        var client = clients.findByClientId("spike-rp");
+        var now = Instant.now();
+        var stale = authorization(client, now.minusSeconds(7200), now.minusSeconds(3600));
+        var live = authorization(client, now.minusSeconds(60), now.plusSeconds(3600));
+        authorizations.save(stale); authorizations.save(live);
+        expired.purge();
+        assertThat(authorizations.findById(stale.getId())).isNull();
+        assertThat(authorizations.findById(live.getId())).isNotNull();
+    }
+
+    private static org.springframework.security.oauth2.server.authorization.OAuth2Authorization authorization(
+            RegisteredClient client, Instant issued, Instant expires) {
+        return org.springframework.security.oauth2.server.authorization.OAuth2Authorization.withRegisteredClient(client)
+            .principalName("purge-test").authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
+            .token(new org.springframework.security.oauth2.core.OAuth2AccessToken(
+                org.springframework.security.oauth2.core.OAuth2AccessToken.TokenType.BEARER, UUID.randomUUID().toString(), issued, expires))
+            .build();
+    }
+
+    private static String thumbprint(java.nio.file.Path pem) throws Exception {
+        var der = Base64.getMimeDecoder().decode(java.nio.file.Files.readString(pem).replaceAll("-----(BEGIN|END) PRIVATE KEY-----", ""));
+        var key = (java.security.interfaces.RSAPrivateCrtKey) java.security.KeyFactory.getInstance("RSA")
+            .generatePrivate(new java.security.spec.PKCS8EncodedKeySpec(der));
+        return new com.nimbusds.jose.jwk.RSAKey.Builder((java.security.interfaces.RSAPublicKey) java.security.KeyFactory.getInstance("RSA")
+            .generatePublic(new java.security.spec.RSAPublicKeySpec(key.getModulus(), key.getPublicExponent())))
+            .build().computeThumbprint().toString();
     }
 
     private String code(MockHttpSession session, String verifier) throws Exception {
