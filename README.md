@@ -93,6 +93,7 @@ configuration → 装配上述实现
 - `authentication/interfaces/web`：登录页面与上下文转换；不处理密码 POST、认证会话或退出。
 - `configuration`：Spring 组件装配、安全链、静态资源和 Native hints。
 - `authorization`：领域请求、应用授权用例与策略、Hydra Admin 基础设施、浏览器请求绑定分层维护；客户端注册与签发仍归 Hydra。
+- 内置授权服务器（`iam.authorization-server.enabled`，默认关闭，与 Hydra 模式互斥）：Spring Security 7 在进程内签发 token，见[内置授权服务器](docs/authorization-server.md)。
 - `clients/domain/ClientRepository`：客户端仓储契约，由 Hydra HTTP 实现；客户端 CRUD 与密钥轮换的 bearer API（scope `iam.clients.manage`，仅在 consent 时发给直接管理组成员），`/console` 为调用该 API 的 public 客户端前端；持久化与密钥由 Hydra 持有，见[管理接口](docs/client-management.md)。
 - `frontend/src`：入口、页面、表单组件和页面数据契约分别维护，只包含真实登录流程。
 

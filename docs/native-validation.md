@@ -51,3 +51,13 @@ WebAuthn 集成；TOTP、恢复方式与已有 Authelia MFA 的迁移方式需�
 等待测试夹具的非 daemon LDAP listener。该轮日常验证使用
 `test bootJar -x processTestAot -x compileAotTestJava -x processAotTestResources`
 执行 JVM 测试，不把该结果视为测试 AOT 或 Native 验收。阶段性原生验证前需解决夹具生命周期。
+
+### 内置授权服务器的 Native 验证（2026-10-01 起）
+
+在 pve1 临时 LXC 上以 `-PaotArgs='--iam.ad.enabled=true --iam.webauthn.enabled=true --iam.authorization-server.enabled=true'`
+编译（约 11.5 分钟，峰值约 5.4 GB），以 Native 二进制为被测对象、`nativeSmokeSupport`（模拟 AD 与夹具客户端）
+加 Playwright 跑 `authorization-server.spec.ts`，完整链路通过；启动约 1.5 s、常驻约 190 MB。
+JVM 下不可见的缺口集中在 `SecurityJacksonHints`：Spring Security 按类名发现 Jackson 模块、各模块
+mix-in 与反序列化器、存储 JSON 中的类型、WebAuthn API 与请求/响应 DTO、WebAuthn4J 数据类型、本服务
+`User` 的非 bean 访问器。WebAuthn 部分与授权服务器无关，任何 WebAuthn 路径的 Native 部署都需要。
+
