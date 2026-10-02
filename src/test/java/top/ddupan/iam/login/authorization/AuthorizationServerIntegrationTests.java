@@ -122,16 +122,72 @@ class AuthorizationServerIntegrationTests {
             .andExpect(status().isBadRequest());
     }
 
+    @Test void promptNoneAnswersTheClientInsteadOfShowingLogin() throws Exception {
+        var none = authorize(verifier(), Map.of("prompt", "none"));
+        // No session, and a password-only session: the client gets login_required, never a page or a code.
+        var anonymous = location(null, none);
+        assertThat(anonymous).startsWith(CALLBACK);
+        assertThat(query(anonymous)).containsEntry("error", "login_required").containsEntry("state", "spike-state").doesNotContainKey("code");
+        var session = login();
+        assertThat(query(location(session, none))).containsEntry("error", "login_required").doesNotContainKey("code");
+        secondFactor(session);
+        assertThat(query(location(session, none))).containsKey("code");
+        // The error goes to the client only once its redirect URI is verified.
+        var foreign = none.replace("redirect_uri=" + CALLBACK, "redirect_uri=https://attacker.example/cb");
+        assertThat(foreign).isNotEqualTo(none);
+        mvc.perform(get(java.net.URI.create(foreign)).with(https()).accept(MediaType.TEXT_HTML)).andExpect(status().isBadRequest());
+    }
+
+    @Test void promptLoginAndMaxAgeDemandAFreshAuthentication() throws Exception {
+        var session = login(); secondFactor(session);
+        var login = authorize(verifier(), Map.of("prompt", "login"));
+        assertThat(location(session, login)).isEqualTo("/signin");
+        // Signing in again (password + passkey) satisfies the same request, which then yields a code.
+        password(session); secondFactor(session);
+        assertThat(query(location(session, login))).containsKey("code");
+
+        // Five minutes old: still within the MFA policy's own freshness window, but beyond max_age=60.
+        var old = login(); secondFactor(old, Instant.now().minusSeconds(300));
+        assertThat(query(location(old, authorize(verifier(), Map.of("max_age", "86400"))))).containsKey("code");
+        var recent = authorize(verifier(), Map.of("max_age", "60"));
+        assertThat(location(old, recent)).isEqualTo("/signin");
+        password(old); secondFactor(old);
+        assertThat(query(location(old, recent))).containsKey("code");
+    }
+
+    @Test void requestObjectsAreRejectedRatherThanIgnored() throws Exception {
+        var session = login(); secondFactor(session);
+        assertThat(query(location(session, authorize(verifier(), Map.of("request", "eyJhbGciOiJub25lIn0.e30.")))))
+            .containsEntry("error", "request_not_supported").doesNotContainKey("code");
+        // request_uri is read as a pushed authorization request reference; an unknown one is refused without
+        // redirecting anywhere.
+        mvc.perform(get(java.net.URI.create(authorize(verifier(), Map.of("request_uri", "urn:ietf:params:oauth:request_uri:unknown"))))
+            .with(https()).session(session).accept(MediaType.TEXT_HTML)).andExpect(status().isBadRequest());
+    }
+
+    @Test void discoveryDescribesWhatIsSupported() throws Exception {
+        var metadata = json(mvc.perform(get("/.well-known/openid-configuration").with(https()))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
+        assertThat(metadata.get("scopes_supported")).asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.LIST)
+            .contains("openid", "profile", "email", "groups", "offline_access").doesNotHaveDuplicates();
+        assertThat(metadata).containsEntry("request_parameter_supported", false)
+            .containsEntry("request_uri_parameter_supported", false).containsEntry("claims_parameter_supported", false);
+        assertThat(metadata.get("claims_supported")).asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.LIST).contains("groups", "auth_time");
+    }
+
     private String code(MockHttpSession session, String verifier) throws Exception {
         var location = mvc.perform(get(java.net.URI.create(authorize(verifier))).with(https()).session(session).accept(MediaType.TEXT_HTML))
             .andExpect(status().is3xxRedirection()).andReturn().getResponse().getRedirectedUrl();
         assertThat(location).startsWith(CALLBACK);
         return UriComponentsBuilder.fromUriString(location).build().getQueryParams().getFirst("code");
     }
-    private static String authorize(String verifier) throws Exception {
+    private static String authorize(String verifier) throws Exception { return authorize(verifier, Map.of()); }
+    private static String authorize(String verifier, Map<String, String> extra) throws Exception {
         var challenge = Base64.getUrlEncoder().withoutPadding().encodeToString(
             MessageDigest.getInstance("SHA-256").digest(verifier.getBytes(StandardCharsets.US_ASCII)));
-        return UriComponentsBuilder.fromPath("/oauth2/authorize").queryParam("response_type", "code")
+        var builder = UriComponentsBuilder.fromPath("/oauth2/authorize");
+        extra.forEach(builder::queryParam);
+        return builder.queryParam("response_type", "code")
             .queryParam("client_id", "spike-rp").queryParam("redirect_uri", CALLBACK)
             .queryParam("scope", "openid profile groups offline_access").queryParam("state", "spike-state")
             .queryParam("nonce", "spike-nonce").queryParam("code_challenge", challenge)
@@ -142,19 +198,33 @@ class AuthorizationServerIntegrationTests {
     private static Map<String, Object> claims(String jwt) {
         return json(new String(Base64.getUrlDecoder().decode(jwt.split("\\.")[1]), StandardCharsets.UTF_8));
     }
-    private MockHttpSession login() throws Exception {
-        var session = new MockHttpSession();
+    private MockHttpSession login() throws Exception { return password(new MockHttpSession()); }
+    private MockHttpSession password(MockHttpSession session) throws Exception {
         mvc.perform(post("/signin/password").session(session).with(https()).with(csrf())
             .param("username", "alice").param("password", "fixture-password"))
             .andExpect(redirectedUrl("/signin/mfa"));
         return session;
     }
-    private static void secondFactor(MockHttpSession session) {
+    private static void secondFactor(MockHttpSession session) { secondFactor(session, Instant.now()); }
+    /** Adds the passkey factor and backdates every factor to {@code at}. */
+    private static void secondFactor(MockHttpSession session, Instant at) {
         var context = (SecurityContext) session.getAttribute("SPRING_SECURITY_CONTEXT");
         var previous = context.getAuthentication();
-        var factors = new java.util.ArrayList<org.springframework.security.core.GrantedAuthority>(previous.getAuthorities());
-        factors.add(FactorGrantedAuthority.withAuthority("FACTOR_WEBAUTHN").issuedAt(Instant.now()).build());
+        var factors = new java.util.ArrayList<org.springframework.security.core.GrantedAuthority>();
+        for (var authority : previous.getAuthorities()) {
+            factors.add(authority instanceof FactorGrantedAuthority factor
+                ? FactorGrantedAuthority.withAuthority(factor.getAuthority()).issuedAt(at).build() : authority);
+        }
+        factors.add(FactorGrantedAuthority.withAuthority("FACTOR_WEBAUTHN").issuedAt(at).build());
         context.setAuthentication(UsernamePasswordAuthenticationToken.authenticated(previous.getPrincipal(), null, factors));
+    }
+    private String location(MockHttpSession session, String url) throws Exception {
+        var request = get(java.net.URI.create(url)).with(https()).accept(MediaType.TEXT_HTML);
+        if (session != null) request.session(session);
+        return mvc.perform(request).andExpect(status().is3xxRedirection()).andReturn().getResponse().getRedirectedUrl();
+    }
+    private static Map<String, String> query(String location) {
+        return UriComponentsBuilder.fromUriString(location).build().getQueryParams().toSingleValueMap();
     }
     private static RequestPostProcessor https() {
         return request -> { request.setScheme("https"); request.setSecure(true); request.setServerPort(443); return request; };
