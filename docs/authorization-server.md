@@ -70,12 +70,15 @@ provider 再抛错。
 - 客户端管理 API 仍只面向 Hydra；授权服务器模式下客户端通过 `RegisteredClientRepository` 管理。
 - 前/后通道注销（框架仅支持 RP-Initiated Logout）。
 - `acr`、`claims` 请求参数、userinfo 请求体携带 access token。
+- `profile`/`email` 声明目前放在 ID token；OIDC Core 5.4 建议签发 access token 时经 userinfo 返回（一致性测试为警告）。
 
 ## 验证
 
 - JVM：`AuthorizationServerIntegrationTests`（MFA、prompt/max_age、request object、discovery、
   密钥与清理）、`RefreshPolicyTests`、`SigningKeysTests`。
 - 浏览器：`authorizationServerBrowserFixture` + `authorization-server.spec.ts`（真实虚拟认证器）。
-- Native 与 OpenID 一致性测试的过程见 [Native 验证](native-validation.md)。一致性测试套件自带的
+- OpenID 一致性测试（release-v5.3.1，Basic OP，discovery + static client，2026-10-02）：1733 条件通过、
+  0 失败、6 警告；`prompt=login`、`max_age=1`、非法 redirect_uri 等模块按套件要求待人工截图审查。
+- Native 的过程见 [Native 验证](native-validation.md)。一致性测试套件自带的
   HtmlUnit 无法执行 ES module 登录页或 WebAuthn，用 `frontend/tests/conformance/driver.mjs`
   （Playwright）驱动其浏览器步骤，配合 `conformanceFixture`。
