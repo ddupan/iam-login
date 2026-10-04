@@ -26,7 +26,7 @@ class AdUserRepositoryIntegrationTests {
         try (var session = authenticator.authenticate("alice", "fixture-password")) {
             var user = session.users().findByLoginName(session.loginName()).orElseThrow();
             assertThat(user.id().value()).isEqualTo("00112233-4455-6677-8899-aabbccddeeff");
-            assertThat(user.memberships()).extracting(GroupMembership::name).containsExactly("MixedCase", "gitea-admins");
+            assertThat(user.memberships()).extracting(GroupMembership::name).containsExactly("MixedCase", "gitea-admins", "staff");
             assertThat(session.users().findByLoginName("alice")).contains(user);
             assertThat(directory.binds.get() - before).isEqualTo(1);
             assertThat(directory.searchConnection).isEqualTo(directory.bindConnection);

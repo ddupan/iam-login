@@ -95,7 +95,8 @@ public final class AdDirectoryFixture implements AutoCloseable {
                 new Attribute("displayName", "Alice </script><script>attack()</script>"),
                 new Attribute("mail", "alice@example.test"),
                 new Attribute("objectGUID", GUID),
-                new Attribute("memberOf", "CN=gitea-admins," + BASE, "CN=MixedCase," + BASE)));
+                // Three groups: stored as ImmutableCollections.ListN, the shape native serialization needs hints for.
+                new Attribute("memberOf", "CN=gitea-admins," + BASE, "CN=MixedCase," + BASE, "CN=staff," + BASE)));
             ldap.add(new Entry("cn=Bob," + BASE,
                 new Attribute("objectClass", "user"),
                 new Attribute("cn", "Bob"),

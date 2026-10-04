@@ -81,6 +81,10 @@ final class SecurityJacksonHints implements RuntimeHintsRegistrar {
         // Our own stored types and the Jackson mix-ins describing them.
         new BindingReflectionHintsRegistrar().registerReflectionHints(hints.reflection(),
             DirectoryPrincipal.class, User.class, User.UserId.class, User.GroupMembership.class);
+        // Stored lists are immutable List.of(...); from three elements on that is ImmutableCollections.ListN,
+        // whose E[] constructor makes Jackson instantiate the element's array type when building the serializer.
+        // One or two groups (List12) never reach it, so only users with 3+ groups failed in production.
+        hints.reflection().registerType(TypeReference.of(User.GroupMembership[].class));
         // User is not a bean (id(), username(), ...): the mix-in maps those accessors, which the binding
         // registrar above does not cover.
         hints.reflection().registerType(User.class, MemberCategory.INVOKE_DECLARED_CONSTRUCTORS,
