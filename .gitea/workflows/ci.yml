@@ -1,7 +1,8 @@
 name: ci
 # Runs on the repository runner "iam-build" (temporary: a host-mode runner in a disposable LXC on pve1,
 # so that caches persist and native builds stay off the k3s laptop). JVM checks run for every change;
-# the native image (~11 min, ~5.5 GB peak) only after a merge to main, or on demand.
+# the native image (~11 min, ~5.5 GB peak) only after a merge to main, or on demand. On main the
+# tested binary is also published to zot (scripts/publish-image), so releases are never rebuilt.
 on:
   pull_request:
   push:
@@ -51,3 +52,7 @@ jobs:
         env:
           IAM_BUILD_MEMORY: 3g
         run: scripts/native-smoke
+      - name: Publish image
+        # Only main ships; on-demand runs still build and test but publish nothing.
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: scripts/publish-image
