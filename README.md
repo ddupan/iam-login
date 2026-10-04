@@ -94,7 +94,7 @@ configuration → 装配上述实现
 - `configuration`：Spring 组件装配、安全链、静态资源和 Native hints。
 - `authorization`：领域请求、应用授权用例与策略、Hydra Admin 基础设施、浏览器请求绑定分层维护；客户端注册与签发仍归 Hydra。
 - 内置授权服务器（`iam.authorization-server.enabled`，默认关闭，与 Hydra 模式互斥）：Spring Security 7 在进程内签发 token，见[内置授权服务器](docs/authorization-server.md)。
-- `clients/domain/ClientRepository`：客户端仓储契约，由 Hydra HTTP 实现；客户端 CRUD 与密钥轮换的 bearer API（scope `iam.clients.manage`，仅在 consent 时发给直接管理组成员），`/console` 为调用该 API 的 public 客户端前端；持久化与密钥由 Hydra 持有，见[管理接口](docs/client-management.md)。
+- `clients`：客户端管理。领域契约 `ClientRepository` 由 `RegisteredClients`（内置授权服务器的客户端仓储）实现；bearer API 要求 audience `iam-login` 且 token 的 `groups` 含管理组，`/console` 为调用该 API 的 public 客户端前端，见[客户端管理](docs/client-management.md)。
 - `frontend/src`：入口、页面、表单组件和页面数据契约分别维护，只包含真实登录流程。
 
 测试覆盖应用用例、AD 仓储和完整 Spring Security 过滤器链，LDAP 夹具集中在测试 `support` 包。

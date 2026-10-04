@@ -25,9 +25,6 @@ public final class HydraFixture implements AutoCloseable {
             .withEnv("URLS_CONSENT", "https://localhost:18083/oauth2/consent")
             .withEnv("URLS_LOGOUT", "https://localhost:18083/oauth2/logout")
             .withEnv("URLS_POST_LOGOUT_REDIRECT", "https://localhost:18083/signin")
-            // The admin UI exchanges its code from the browser, so the issuer must allow that origin.
-            .withEnv("SERVE_PUBLIC_CORS_ENABLED", "true")
-            .withEnv("SERVE_PUBLIC_CORS_ALLOWED_ORIGINS", "https://localhost:18083")
             .withEnv("LOG_LEVEL", "error")
             .withEnv("SECRETS_SYSTEM", "fixture-only-hydra-system-secret-32-characters")
             .withCommand("serve", "all", "--dev")
@@ -60,13 +57,6 @@ public final class HydraFixture implements AutoCloseable {
                  "post_logout_redirect_uris":["http://localhost:14446/logged-out"]}
                 """)).build(), HttpResponse.BodyHandlers.discarding());
             if (response.statusCode() != 201) throw new IllegalStateException("Unable to create fixture client");
-            var admin = http.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:14445/admin/clients"))
-                .header("Content-Type", "application/json").POST(HttpRequest.BodyPublishers.ofString("""
-                {"client_id":"iam-admin-ui","client_name":"IAM 管理","redirect_uris":["https://localhost:18083/console/callback"],
-                 "grant_types":["authorization_code"],"response_types":["code"],"scope":"openid iam.clients.manage",
-                 "token_endpoint_auth_method":"none","subject_type":"public","metadata":{"iam_login_enabled":true}}
-                """)).build(), HttpResponse.BodyHandlers.discarding());
-            if (admin.statusCode() != 201) throw new IllegalStateException("Unable to create fixture admin UI client");
         } catch (Exception ex) { hydra.stop(); throw new IllegalStateException("Fixture client initialization failed", ex); }
     }
     @Override public void close() { hydra.stop(); }

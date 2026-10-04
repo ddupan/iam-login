@@ -67,7 +67,6 @@ provider 再抛错。
 ## 尚未实现
 
 - 授权确认页仍为框架默认页面（英文、无本服务样式）。
-- 客户端管理 API 仍只面向 Hydra；授权服务器模式下客户端通过 `RegisteredClientRepository` 管理。
 - 前/后通道注销（框架仅支持 RP-Initiated Logout）。
 - `acr`、`claims` 请求参数、userinfo 请求体携带 access token。
 - `profile`/`email` 声明目前放在 ID token；OIDC Core 5.4 建议签发 access token 时经 userinfo 返回（一致性测试为警告）。
