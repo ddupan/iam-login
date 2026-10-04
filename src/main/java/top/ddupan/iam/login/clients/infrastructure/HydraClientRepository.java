@@ -1,6 +1,8 @@
 package top.ddupan.iam.login.clients.infrastructure;
 
+import java.security.SecureRandom;
 import java.util.*;
+import java.util.function.Supplier;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.web.client.RestClient;
 import top.ddupan.iam.login.clients.domain.*;
@@ -10,7 +12,7 @@ public final class HydraClientRepository implements ClientRepository {
     public static final String ENABLED = "iam_login_enabled";
     private static final ParameterizedTypeReference<Map<String,Object>> OBJECT = new ParameterizedTypeReference<>() {};
     private static final ParameterizedTypeReference<List<Map<String,Object>>> ARRAY = new ParameterizedTypeReference<>() {};
-    private static final java.security.SecureRandom RANDOM = new java.security.SecureRandom();
+    private static final SecureRandom RANDOM = new SecureRandom();
     private static final Base64.Encoder SECRETS = Base64.getUrlEncoder().withoutPadding();
     private final RestClient http;
     public HydraClientRepository(RestClient client) {
@@ -23,7 +25,7 @@ public final class HydraClientRepository implements ClientRepository {
                 });
             }).build();
     }
-    private <T> T call(java.util.function.Supplier<T> operation) {
+    private <T> T call(Supplier<T> operation) {
         try { return operation.get(); }
         catch (ClientRepositoryException ex) { throw ex; }
         catch (RuntimeException ex) { throw new ClientRepositoryException(ClientRepositoryException.Kind.UNAVAILABLE); }

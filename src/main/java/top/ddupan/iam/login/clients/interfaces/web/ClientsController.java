@@ -1,6 +1,9 @@
 package top.ddupan.iam.login.clients.interfaces.web;
 
+import java.util.Locale;
 import java.util.Map;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
@@ -12,7 +15,7 @@ import top.ddupan.iam.login.clients.domain.OidcClient;
 @ConditionalOnProperty(prefix="iam.hydra", name="enabled", havingValue="true")
 public class ClientsController {
     private final ClientRepository repository;
-    private static final org.slf4j.Logger AUDIT = org.slf4j.LoggerFactory.getLogger("iam.audit.clients");
+    private static final Logger AUDIT = LoggerFactory.getLogger("iam.audit.clients");
     public ClientsController(ClientRepository repository) { this.repository = repository; }
     @GetMapping("/api/iam/clients") Object list(@RequestParam(defaultValue="0") int page,
             @RequestParam(defaultValue="20") int size) { return repository.list(page,size); }
@@ -42,6 +45,6 @@ public class ClientsController {
     }
     @ExceptionHandler(ClientRepositoryException.class) ResponseEntity<?> unavailable(ClientRepositoryException ex) {
         int status = switch (ex.kind()) { case NOT_FOUND -> 404; case CONFLICT -> 409; case UNAVAILABLE -> 502; };
-        return ResponseEntity.status(status).body(Map.of("error",ex.kind().name().toLowerCase(java.util.Locale.ROOT)));
+        return ResponseEntity.status(status).body(Map.of("error",ex.kind().name().toLowerCase(Locale.ROOT)));
     }
 }

@@ -1,6 +1,7 @@
 package top.ddupan.iam.login.clients.interfaces.web;
 
 import java.util.Map;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -16,7 +17,7 @@ public class ConsolePageController {
     private final Map<String,String> context;
     private final String csp;
     public ConsolePageController(PageRenderer renderer, HydraProperties hydra,
-            @org.springframework.beans.factory.annotation.Value("${iam.clients.admin-ui-client-id}") String clientId) {
+            @Value("${iam.clients.admin-ui-client-id}") String clientId) {
         this.renderer = renderer;
         var issuer = hydra.publicUrl();
         this.context = Map.of("step","admin","authority",issuer.toString(),"clientId",clientId);

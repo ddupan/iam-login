@@ -8,12 +8,13 @@ import java.util.TreeMap;
 import java.util.UUID;
 import javax.naming.NamingException;
 import javax.naming.ldap.LdapName;
+import org.springframework.dao.DataAccessException;
 import org.springframework.data.ldap.repository.LdapRepository;
 import org.springframework.ldap.core.support.SingleContextSource;
 import top.ddupan.iam.login.authentication.application.port.AuthenticatedUserSession;
-import top.ddupan.iam.login.authentication.domain.User;
 import top.ddupan.iam.login.authentication.domain.User.GroupMembership;
 import top.ddupan.iam.login.authentication.domain.User.UserId;
+import top.ddupan.iam.login.authentication.domain.User;
 import top.ddupan.iam.login.authentication.domain.UserRepository;
 import static org.springframework.ldap.query.LdapQueryBuilder.query;
 
@@ -41,7 +42,7 @@ final class AdUserRepository implements UserRepository, AuthenticatedUserSession
                 .and("objectClass").not().is("computer")
                 .and(query().where("sAMAccountName").is(name).or("userPrincipalName").is(name)))
                 .map(this::toUser);
-        } catch (org.springframework.ldap.NamingException | org.springframework.dao.DataAccessException | IllegalArgumentException ex) {
+        } catch (org.springframework.ldap.NamingException | DataAccessException | IllegalArgumentException ex) {
             throw new UserRepository.AccessFailure();
         }
     }

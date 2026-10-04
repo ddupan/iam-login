@@ -1,23 +1,26 @@
 package top.ddupan.iam.login.authorization;
 
+import com.sun.net.httpserver.HttpServer;
 import java.net.InetSocketAddress;
 import java.net.URI;
+import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
-import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
+import org.springframework.web.client.RestClient;
 import top.ddupan.iam.login.authorization.infrastructure.hydra.*;
 import static org.assertj.core.api.Assertions.*;
 
 class HydraAdminClientTests {
-    private org.springframework.web.client.RestClient http(HttpServer server) {
-        var factory = new org.springframework.http.client.JdkClientHttpRequestFactory(
-            java.net.http.HttpClient.newBuilder().followRedirects(java.net.http.HttpClient.Redirect.NEVER).build());
-        return org.springframework.web.client.RestClient.builder()
+    private RestClient http(HttpServer server) {
+        var factory = new JdkClientHttpRequestFactory(
+            HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).build());
+        return RestClient.builder()
             .baseUrl("http://127.0.0.1:" + server.getAddress().getPort()).requestFactory(factory).build();
     }
 
