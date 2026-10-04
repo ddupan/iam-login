@@ -13,5 +13,6 @@ public interface HydraGateway {
     AuthorizationRequest login(String challenge);
     AuthorizationRequest consent(String challenge);
     String acceptLogin(String challenge, String subject, String binding, Instant authenticatedAt);
-    String acceptConsent(String challenge, List<String> scopes, Map<String, Object> claims);
+    String acceptConsent(String challenge, List<String> scopes, List<String> audience,
+        Map<String, Object> idTokenClaims, Map<String, Object> accessTokenClaims);
 }

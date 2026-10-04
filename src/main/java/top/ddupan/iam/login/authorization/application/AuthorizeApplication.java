@@ -20,12 +20,10 @@ public final class AuthorizeApplication {
         return request;
     }
     public String subject(User user) { return policy.subject(user); }
-    public void permit(User user, AuthorizationRequest request) { policy.permit(user, request); }
     public AcceptedLogin login(AuthorizationRequest expected, String binding, User user, Instant authenticatedAt) {
         var current = hydra.login(expected.challenge());
         sameRequest(expected, current);
         var subject = policy.subject(user);
-        policy.permit(user, current);
         if (current.skip() && !subject.equals(current.subject())
                 || current.subject() != null && !current.subject().isBlank() && !current.subject().equals(subject)) {
             throw new IllegalArgumentException("Issuer subject mismatch");
@@ -39,7 +37,8 @@ public final class AuthorizeApplication {
                 || !binding.equals(current.binding()) || !expected.challengeDigest().equals(current.loginChallengeDigest())) {
             throw new IllegalArgumentException("Issuer/browser binding mismatch");
         }
-        return hydra.acceptConsent(challenge, current.scopes(), policy.claims(user, current));
+        return hydra.acceptConsent(challenge, current.scopes(), current.audience(),
+            policy.claims(user, current), policy.accessTokenClaims(user, current));
     }
     private void sameRequest(AuthorizationRequest expected, AuthorizationRequest current) {
         policy.validate(current);

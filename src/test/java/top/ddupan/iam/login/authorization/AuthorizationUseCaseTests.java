@@ -29,7 +29,7 @@ class AuthorizationUseCaseTests {
             when(gateway.consent("consent")).thenReturn(consent);
             assertThatIllegalArgumentException().isThrownBy(() -> useCase.consent(expected, "binding", "old-sub", user, "consent"));
         }
-        verify(gateway, never()).acceptConsent(anyString(), anyList(), anyMap());
+        verify(gateway, never()).acceptConsent(anyString(), anyList(), anyList(), anyMap(), anyMap());
     }
     @Test void rememberedIssuerSessionStillRequiresMatchingAuthenticatedUser() {
         var gateway = mock(HydraGateway.class);

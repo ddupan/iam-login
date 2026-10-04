@@ -4,31 +4,35 @@
 领域层定义 `ClientRepository`，基础设施的 `HydraClientRepository` 实现远端持久化。
 API 是主要交付物（为 IaC 等自动化准备）；`/console` 管理界面只是调用同一 API 的前端应用。
 
-## 鉴权：只认 bearer token
+## 鉴权：经典的 audience + groups 模型
 
-`/api/iam/**` 是 OAuth2 resource server，只接受 Hydra 签发的 access token：
-通过 Hydra Admin introspection 校验（`active`、`token_use=access_token`），并要求 scope
-`iam.clients.manage`。浏览器 session、cookie 与 CSRF 都不是 API 凭据；已完成 MFA 的管理员
-session 直接调用 API 同样返回 401。不支持 refresh token 调用。
+scope 是委托，不是权限。本 API 和任何下游应用一样，是普通的 resource server：
 
-**谁能拿到这个 scope，只在授权确认（consent）一处决定**，见 `AuthorizationPolicy`：
+1. 只接受 Hydra 签发的 bearer access token，经 Admin introspection 校验（`active`、
+   `token_use=access_token`）。浏览器 session、cookie 与 CSRF 都不是 API 凭据。
+2. **audience**：token 的 `aud` 必须包含 `iam-login`。签给其他应用的 token（例如管理员登录
+   Gitea 时 Gitea 拿到的 token）即使带着管理员组也被拒绝，否则每个接入应用都能冒用用户管理 IAM。
+   哪些客户端能申请该 audience 由 Hydra 按客户端登记的 `audience` 白名单执行。
+3. **groups**：客户端申请 `groups` scope 时，consent 把用户的直接 AD 组名同时写入 ID token 和
+   access token（introspection 的 `ext.groups`）。API 要求其中有 `iam.clients.admin-groups` 之一。
 
-- 只有 `iam.clients.admin-ui-client-id` 配置的客户端可以申请该 scope，普通应用申请会被拒绝；
-- 只发给直接属于 `iam.clients.admin-group-dns` 的用户（完整 DN 匹配，不展开嵌套组，
-  组成员来自本次目录登录快照）；非管理员在授权确认页即被拒绝；
-- 人类仍需经过 AD 密码 + passkey，consent 规则不绕过登录。
+匿名、token 无效返回 401；audience 不符或不是管理员返回 403。
 
 ```yaml
 iam:
   clients:
-    admin-group-dns:
-      - CN=IAM Administrators,CN=Users,DC=example,DC=test
+    admin-groups:
+      - Domain Admins
     admin-ui-client-id: iam-admin-ui
 ```
 
-未配置 `admin-ui-client-id` 时该 scope 不存在、`/console` 不提供，API 实际不可用（fail closed）。
-以后自动化（Terraform、平台其他组件）如何获取带该 scope 的 token 是独立决策；只要 token
-由 Hydra 签发并带有该 scope，API 行为不变。
+按组名匹配，与下游应用看到的 `groups` 一致；组名取 memberOf DN 的 CN，只含直接组。同一
+用户若有两个同名直接组，登录直接失败；他处的同名组需要 AD 建组权限才能伪造。组成员是登录时
+的快照，移出管理组后最长在 access token 有效期（Hydra 当前 15 分钟）内仍可调用。
+
+consent 不按用户筛选 scope 或 audience：两者已由 Hydra 限定在客户端登记范围内，consent 只
+释放身份事实，权限由各资源自行判断。以后自动化调用方（无人类用户）如何取得 token、按何种
+主体授权，另行设计；本 API 的 audience 检查不变。
 
 ## 接口
 
@@ -61,8 +65,16 @@ POST/PUT 请求示例（PUT 的 id 必须等于路径）：
 ```
 
 回调必须 HTTPS（隔离开发允许 loopback HTTP），不允许通配符、fragment 或 URL 用户信息。
-本轮固定 `authorization_code`、`code`、`client_secret_basic`、public subject；scope 限于上述
-四项且要求 openid。不接收任意 Hydra 字段、密钥、签名配置或授权类型，也没有通用 Admin API
+本轮固定 `authorization_code`、`code`、`client_secret_basic`、public subject。scope 可为任意
+符合 RFC 6749 的 scope-token（最多 50 个），必须含 `openid`；scope 不代表权限，所以不设白名单。
+`profile`/`email`/`groups` 决定 consent 释放哪些声明，其余 scope 原样授予。
+含 `offline_access` 时（OIDC Core 第 11 节）客户端同时登记 `refresh_token` 授权类型，Hydra 才会签发
+refresh token；去掉该 scope 时一并移除。规范要求无 `prompt=consent` 时须有其他条件才可授予离线
+访问：本服务每次授权都显示明确的确认页（不记住 consent），并在页面上标明将获得 refresh token。
+refresh 由 Hydra 直接处理（默认 30 天、严格轮换、重放即撤销整条链），**不经过本服务**：
+禁用客户端、移出组或停用 AD 账号都不会阻止已签发 refresh token 续期，续期 token 中的 `groups`
+也保持授权时的快照。需要时再用 Hydra token hook 或缩短 `ttl.refresh_token` 处理，尚未实现。登记 audience 尚未
+开放（当前只有带外登记的管理客户端需要）。不接收任意 Hydra 字段、密钥、签名配置或授权类型，也没有通用 Admin API
 代理。不要为并不支持注销协议的应用登记虚构的端点。
 
 ### 密钥轮换
@@ -74,14 +86,15 @@ Hydra v26.2.0（当前最新正式版）没有 `/admin/clients/{id}/secrets/rota
 
 ## `/console` 管理界面
 
-`/console` 是 Hydra 的普通 **public** OIDC 客户端（授权码 + PKCE，无 secret），与本服务同源
+`/console` 是 Hydra 的普通 **public** OIDC 客户端（授权码 + PKCE，无 secret；申请 `openid groups`
+与 audience `iam-login`），与本服务同源
 部署但不享有任何特权：页面外壳不含数据，所有数据经上面的 bearer API 获取。access token
 只保存在内存中，刷新页面即重新登录；不申请 refresh token，过期后提示重新登录。
 
 部署前提（基础设施负责）：
 
 - 在 Hydra 登记该客户端：`token_endpoint_auth_method=none`，grant `authorization_code`，
-  scope `openid iam.clients.manage`，redirect `https://<本服务>/console/callback`，
+  scope `openid groups`，audience `["iam-login"]`，redirect `https://<本服务>/console/callback`，
   metadata `iam_login_enabled=true`。它不是 confidential 客户端，因此不出现在本 API 的列表中，
   也无法经本 API 删除自身；登记与恢复走 Hydra Admin 带外通道。
 - Hydra public 端口开启 CORS 并只允许本服务 origin：浏览器直接向 Hydra 换取 token。

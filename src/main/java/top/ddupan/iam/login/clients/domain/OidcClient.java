@@ -17,7 +17,10 @@ public record OidcClient(String id, String name, List<String> redirectUris, Set<
         if (name == null || name.isBlank() || name.length() > 200) throw new IllegalArgumentException("Invalid name");
         if (redirectUris == null || redirectUris.isEmpty() || redirectUris.size() > 20) throw new IllegalArgumentException("Invalid callbacks");
         redirectUris = List.copyOf(redirectUris);
-        if (scopes == null || !scopes.contains("openid") || !Set.of("openid", "profile", "email", "groups").containsAll(scopes))
+        // Scopes are delegation, not permission (resources check audience and identity), so any
+        // well-formed RFC 6749 scope-token is accepted; openid is required because login is OIDC.
+        if (scopes == null || !scopes.contains("openid") || scopes.size() > 50
+                || !scopes.stream().allMatch(scope -> scope != null && scope.matches("[\\x21\\x23-\\x5B\\x5D-\\x7E]{1,128}")))
             throw new IllegalArgumentException("Invalid scopes");
         scopes = Set.copyOf(scopes);
         postLogoutRedirectUris = postLogoutRedirectUris == null ? List.of() : List.copyOf(postLogoutRedirectUris);

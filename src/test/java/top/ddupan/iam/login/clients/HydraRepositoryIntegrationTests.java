@@ -6,6 +6,7 @@ import java.net.http.*;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.*;
+import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.client.RestClient;
 import org.testcontainers.containers.GenericContainer;
@@ -61,10 +62,24 @@ class HydraRepositoryIntegrationTests {
                 assertThat(tokenError(client.id(),created.secret())).contains("invalid_client");
                 assertThat(tokenError(client.id(),rotated)).contains("invalid_grant");
                 assertThat(registry.get(client.id())).isEqualTo(changed);
+                var offline=new OidcClient(client.id(),"Updated",List.of("https://rp.example/new-callback"),Set.of("openid","offline_access"),
+                    List.of(),"","",true);
+                assertThat(registry.update(offline)).isEqualTo(offline);
+                assertThat(grantTypes(client.id())).isEqualTo("[\"authorization_code\",\"refresh_token\"]");
+                registry.update(changed);
+                assertThat(grantTypes(client.id())).isEqualTo("[\"authorization_code\"]");
                 registry.delete(client.id());
                 assertThatThrownBy(() -> registry.get(client.id())).isInstanceOfSatisfying(ClientRepositoryException.class,
                     ex -> assertThat(ex.kind()).isEqualTo(ClientRepositoryException.Kind.NOT_FOUND));
             }
+        }
+    }
+    private static String grantTypes(String id) throws Exception {
+        try (var http=HttpClient.newHttpClient()) {
+            var body=http.send(HttpRequest.newBuilder(ADMIN.resolve("/admin/clients/"+id)).GET().build(),HttpResponse.BodyHandlers.ofString()).body();
+            var match=Pattern.compile("\"grant_types\":(\\[[^\\]]*\\])").matcher(body);
+            assertThat(match.find()).isTrue();
+            return match.group(1);
         }
     }
     private static String tokenError(String id,String secret) throws Exception {
@@ -89,6 +104,12 @@ class HydraRepositoryIntegrationTests {
             }
         }
         throw new IllegalStateException("Fixture issuer not ready");
+    }
+    @Test void acceptsAnyWellFormedScopeButRequiresOpenid() {
+        new OidcClient("id","Name",List.of("https://rp.example/cb"),Set.of("openid","offline_access","api:read"),List.of(),"","",true);
+        for (var scopes:List.of(Set.of("profile"),Set.of("openid","has space"),Set.of("openid","quote\""),Set.of("openid",""))) {
+            assertThatIllegalArgumentException().isThrownBy(() -> new OidcClient("id","Name",List.of("https://rp.example/cb"),scopes,List.of(),"","",true));
+        }
     }
     @Test void rejectsCallbackWildcardsFragmentsAndInsecureNonLoopback() {
         for (var target:List.of("https://rp.example/*","https://rp.example/callback#x","http://rp.example/callback","https://user@rp.example/callback")) {

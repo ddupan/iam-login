@@ -15,6 +15,8 @@ export function SignInPage({ context }: { context: SignInContext }) {
     <p>{context.name}，密码与 passkey 已验证。</p>
     <p>本次向应用提供以下范围的信息：</p>
     <ul>{context.scopes.map(scope => <li key={scope}>{scope}</li>)}</ul>
+    {context.scopes.includes("offline_access") &&
+      <p role="note">包含 offline_access：应用将获得 refresh token，在你离开后仍可持续访问，直到令牌过期或被撤销。</p>}
     <SubmitForm action={context.action} csrf={context.csrf} label="继续至应用">
       <input type="hidden" name="binding" value={context.binding} />
     </SubmitForm>

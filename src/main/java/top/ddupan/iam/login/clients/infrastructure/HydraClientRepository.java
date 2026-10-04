@@ -80,14 +80,19 @@ public final class HydraClientRepository implements ClientRepository {
         call(() -> { http.delete().uri("/admin/clients/{id}",id).retrieve().toBodilessEntity(); return null; });
     }
     private boolean supported(Map<String,Object> data) {
-        return List.of("authorization_code").equals(data.get("grant_types"))
+        return data.get("grant_types") instanceof List<?> grants
+            && (List.of("authorization_code").equals(grants) || List.of("authorization_code","refresh_token").equals(grants))
             && "client_secret_basic".equals(data.get("token_endpoint_auth_method"));
     }
     private Map<String,Object> payload(OidcClient c) {
         var map = new LinkedHashMap<String,Object>();
         map.put("client_id",c.id()); map.put("client_name",c.name()); map.put("redirect_uris",c.redirectUris());
         map.put("scope",String.join(" ",new TreeSet<>(c.scopes())));
-        map.put("grant_types",List.of("authorization_code")); map.put("response_types",List.of("code"));
+        // OIDC Core 11: offline_access asks for a refresh token. Hydra issues one only when the scope is
+        // granted *and* the client may use the refresh_token grant, so the two are kept in step here.
+        map.put("grant_types",c.scopes().contains("offline_access") ? List.of("authorization_code","refresh_token")
+            : List.of("authorization_code"));
+        map.put("response_types",List.of("code"));
         map.put("token_endpoint_auth_method","client_secret_basic"); map.put("subject_type","public");
         map.put("post_logout_redirect_uris",c.postLogoutRedirectUris());
         map.put("backchannel_logout_uri",c.backchannelLogoutUri());

@@ -9,7 +9,9 @@ export function AdminApp({ context }: { context: AdminContext }) {
     authority: context.authority,
     client_id: context.clientId,
     redirect_uri: `${window.location.origin}/console/callback`,
-    scope: "openid iam.clients.manage",
+    // groups carries the identity facts the API authorizes on; the audience makes the token valid for it.
+    scope: "openid groups",
+    extraQueryParams: { audience: "iam-login" },
     // Tokens stay in memory: a reload signs in again rather than leaving a bearer token in storage.
     userStore: new WebStorageStateStore({ store: new InMemoryWebStorage() }),
     automaticSilentRenew: false,
