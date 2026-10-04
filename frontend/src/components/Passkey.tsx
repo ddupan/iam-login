@@ -41,8 +41,12 @@ export function Passkey({ csrf, initial }: { csrf: CsrfToken; initial: "register
           publicKey: PublicKeyCredential.parseRequestOptionsFromJSON(options),
         }) as PublicKeyCredential | null;
         if (!credential) throw new Error("验证已取消。");
-        await post("/login/webauthn", credential.toJSON());
-        window.location.assign("/signin/complete");
+        // Spring Security answers with the request that was interrupted for login (it consumes the saved
+        // request); "/" means there was none, and the sign-in result page decides what comes next.
+        const result = await post("/login/webauthn", credential.toJSON());
+        const target = typeof result.redirectUrl === "string" ? new URL(result.redirectUrl, window.location.origin) : null;
+        window.location.assign(target && target.origin === window.location.origin && target.pathname !== "/"
+          ? target.toString() : "/signin/complete");
       }
     } catch (cause) {
       setError(cause instanceof DOMException ? "操作已取消或认证器不可用，可以重试。"

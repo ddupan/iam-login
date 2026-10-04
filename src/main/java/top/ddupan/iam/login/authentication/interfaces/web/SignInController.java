@@ -1,6 +1,7 @@
 package top.ddupan.iam.login.authentication.interfaces.web;
 
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import java.net.URI;
 import java.util.Map;
 import org.springframework.beans.factory.ObjectProvider;
@@ -9,6 +10,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.web.csrf.CsrfToken;
+import org.springframework.security.web.savedrequest.HttpSessionRequestCache;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -49,7 +51,14 @@ public class SignInController {
 
     @GetMapping(value = "/signin/complete", produces = MediaType.TEXT_HTML_VALUE)
     ResponseEntity<String> complete(@AuthenticationPrincipal DirectoryPrincipal principal, CsrfToken csrf,
-            HttpServletRequest request) {
+            HttpServletRequest request, HttpServletResponse response) {
+        // An authorization request interrupted for login (in-process authorization server) resumes here.
+        var cache = new HttpSessionRequestCache();
+        var saved = cache.getRequest(request, response);
+        if (saved != null) {
+            cache.removeRequest(request, response);
+            return ResponseEntity.status(303).header("Cache-Control", "no-store").location(URI.create(saved.getRedirectUrl())).build();
+        }
         if (HydraBrowserRequests.pending(request)) {
             return ResponseEntity.status(303).header("Cache-Control", "no-store").location(URI.create("/oauth2/login")).build();
         }

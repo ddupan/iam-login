@@ -29,6 +29,7 @@ dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-opentelemetry'
 	implementation 'org.springframework.boot:spring-boot-starter-security'
 	implementation 'org.springframework.boot:spring-boot-starter-security-oauth2-resource-server'
+	implementation 'org.springframework.boot:spring-boot-starter-security-oauth2-authorization-server'
 	implementation 'org.springframework.boot:spring-boot-starter-validation'
 	implementation 'org.springframework.boot:spring-boot-starter-webmvc'
 	implementation 'org.springframework.boot:spring-boot-starter-restclient'
@@ -69,6 +70,12 @@ tasks.register('testAot', Test) {
 	shouldRunAfter tasks.named('test')
 }
 
+// Native bakes @ConditionalOnProperty decisions in at AOT time, so the features a binary needs must be
+// switched on here, e.g. -PaotArgs='--iam.ad.enabled=true --iam.webauthn.enabled=true'.
+tasks.named('processAot') {
+	args(providers.gradleProperty('aotArgs').map { it.trim().split(/\s+/) as List }.getOrElse([]))
+}
+
 // Native tests check behavior, not throughput. Keep the application binary optimized.
 graalvmNative {
 	binaries {
@@ -96,6 +103,30 @@ tasks.register('webauthnBrowserFixture', JavaExec) {
     dependsOn tasks.named('testClasses')
     classpath = sourceSets.test.runtimeClasspath
     mainClass = 'top.ddupan.iam.login.WebAuthnBrowserFixture'
+}
+
+// Spike: the in-process authorization server instead of Hydra, with one fixture client.
+tasks.register('authorizationServerBrowserFixture', JavaExec) {
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'top.ddupan.iam.login.WebAuthnBrowserFixture'
+    systemProperty 'iam.fixture.authorization-server', 'true'
+}
+
+// Spike: simulated AD + fixture client for a native binary under browser test. -PsmokeArgs='<jdbc> <user> <pw>'
+tasks.register('nativeSmokeSupport', JavaExec) {
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'top.ddupan.iam.login.NativeSmokeSupport'
+    args(providers.gradleProperty('smokeArgs').map { it.trim().split(/\s+/) as List }.getOrElse([]))
+}
+
+// Spike: fixture clients for the OpenID conformance suite (driven by a Playwright browser with a passkey).
+tasks.register('conformanceFixture', JavaExec) {
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'top.ddupan.iam.login.WebAuthnBrowserFixture'
+    systemProperty 'iam.fixture.conformance', 'true'
 }
 
 // Adds a loopback-only Hydra issuer and fixture client to the same test-only browser application.
