@@ -289,7 +289,7 @@ class AuthorizationServerIntegrationTests {
         var admin = token(List.of("iam-login"), List.of("gitea-admins"));
         var body = """
             {"id":"managed-app","name":"Managed","redirectUris":["https://rp.example/managed"],
-             "scopes":["openid","profile","offline_access"],"postLogoutRedirectUris":[],"loginEnabled":true}
+             "scopes":["openid","profile","offline_access"],"postLogoutRedirectUris":[],"loginEnabled":true,"pkceRequired":true}
             """;
         var created = json(mvc.perform(post("/api/iam/clients").with(https()).with(admin).contentType(MediaType.APPLICATION_JSON).content(body))
             .andExpect(status().isCreated()).andExpect(header().string("Cache-Control", "no-store"))
@@ -304,10 +304,13 @@ class AuthorizationServerIntegrationTests {
         assertThat(registered.getClientSecret()).startsWith("{bcrypt}").doesNotContain(secret);
         mvc.perform(get("/api/iam/clients").with(https()).with(admin)).andExpect(status().isOk())
             .andExpect(jsonPath("$[?(@.id=='managed-app')]").exists()).andExpect(jsonPath("$[?(@.id=='iam-console')]").doesNotExist());
-        // Missing loginEnabled is rejected rather than defaulted.
-        mvc.perform(post("/api/iam/clients").with(https()).with(admin).contentType(MediaType.APPLICATION_JSON)
-                .content(body.replace("managed-app", "no-flag").replace(",\"loginEnabled\":true", "")))
-            .andExpect(status().isBadRequest());
+        assertThat(registered.getClientSettings().isRequireProofKey()).isTrue();
+        // Missing loginEnabled or pkceRequired is rejected rather than defaulted.
+        for (var flag : List.of(",\"loginEnabled\":true", ",\"pkceRequired\":true")) {
+            mvc.perform(post("/api/iam/clients").with(https()).with(admin).contentType(MediaType.APPLICATION_JSON)
+                    .content(body.replace("managed-app", "no-flag").replace(flag, "")))
+                .andExpect(status().isBadRequest());
+        }
 
         var rotated = (String) json(mvc.perform(post("/api/iam/clients/managed-app/secret").with(https()).with(admin))
             .andExpect(status().isOk()).andReturn().getResponse().getContentAsString()).get("secret");
@@ -324,6 +327,12 @@ class AuthorizationServerIntegrationTests {
             .queryParam("scope", "openid").queryParam("state", "s").queryParam("code_challenge", "x".repeat(43))
             .queryParam("code_challenge_method", "S256").encode().build().toUriString();
         assertThat(query(location(session, disabled))).containsEntry("error", "unauthorized_client").doesNotContainKey("code");
+
+        // PKCE can be turned off for a confidential client that cannot send it (Gitea).
+        mvc.perform(put("/api/iam/clients/managed-app").with(https()).with(admin).contentType(MediaType.APPLICATION_JSON)
+                .content(body.replace("\"pkceRequired\":true", "\"pkceRequired\":false"))).andExpect(status().isOk())
+            .andExpect(jsonPath("pkceRequired").value(false));
+        assertThat(clients.findByClientId("managed-app").getClientSettings().isRequireProofKey()).isFalse();
 
         // Deleting removes the client's authorizations with it.
         var authorization = authorization(clients.findByClientId("managed-app"), Instant.now(), Instant.now().plusSeconds(600));
