@@ -8,10 +8,10 @@ import jakarta.servlet.http.HttpServletRequest;
 import java.net.URI;
 import java.security.Principal;
 import java.time.Clock;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -53,6 +53,7 @@ import org.springframework.security.oauth2.server.authorization.authentication.O
 import org.springframework.security.oauth2.server.authorization.authentication.OAuth2AuthorizationCodeRequestAuthenticationToken;
 import org.springframework.security.oauth2.server.authorization.authentication.OAuth2AuthorizationCodeRequestAuthenticationValidator;
 import org.springframework.security.oauth2.server.authorization.authentication.OAuth2AuthorizationConsentAuthenticationToken;
+import org.springframework.security.oauth2.server.authorization.authentication.OAuth2ClientAuthenticationToken;
 import org.springframework.security.oauth2.server.authorization.authentication.OAuth2RefreshTokenAuthenticationToken;
 import org.springframework.security.oauth2.server.authorization.client.JdbcRegisteredClientRepository;
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClientRepository;
@@ -72,12 +73,12 @@ import tools.jackson.databind.jsontype.BasicPolymorphicTypeValidator;
 import top.ddupan.iam.login.authentication.domain.User;
 import top.ddupan.iam.login.authentication.infrastructure.security.DirectoryPrincipal;
 import top.ddupan.iam.login.authentication.infrastructure.webauthn.MfaPolicy;
-import top.ddupan.iam.login.authorization.application.AuthorizationPolicy;
-import top.ddupan.iam.login.authorization.infrastructure.hydra.HydraProperties;
+import top.ddupan.iam.login.authorization.application.SubjectBindings;
+import top.ddupan.iam.login.clients.infrastructure.RegisteredClients;
 
 /**
- * Spring Security's own authorization server, in process, replacing Hydra. Mutually exclusive with
- * {@code iam.hydra.enabled}. Signing keys come from configuration (see {@link SigningKeys}).
+ * Spring Security's own authorization server, in process: the token issuer of this IAM. Signing keys come
+ * from configuration (see {@link SigningKeys}).
  */
 @Configuration(proxyBeanMethods = false)
 @ConditionalOnProperty(prefix = "iam.authorization-server", name = "enabled", havingValue = "true")
@@ -86,15 +87,15 @@ import top.ddupan.iam.login.authorization.infrastructure.hydra.HydraProperties;
 @EnableScheduling
 class AuthorizationServerConfiguration {
     @ConfigurationProperties("iam.authorization-server")
-    record Properties(boolean enabled, URI issuer, List<HydraProperties.SubjectBinding> subjects,
-            List<Resource> signingKeys) { }
+    record Properties(boolean enabled, URI issuer, List<SubjectBinding> subjects,
+            List<Resource> signingKeys) {
+        /** A reviewed binding of a directory identity (authority + immutable id) to its existing OIDC subject. */
+        record SubjectBinding(String authority, String directoryId, String subject) { }
+    }
 
     @Bean @Order(2)
     SecurityFilterChain authorizationServer(HttpSecurity http, MfaPolicy mfa,
-            AuthorizationPolicy policy, OAuth2AuthorizationService authorizations,
-            @Value("${iam.hydra.enabled:false}") boolean hydra) throws Exception {
-        // Both would serve /oauth2/**, and Hydra-mode login pages would hand out Hydra challenges.
-        if (hydra) throw new IllegalStateException("iam.authorization-server.enabled and iam.hydra.enabled are mutually exclusive");
+            SubjectBindings policy, OAuth2AuthorizationService authorizations) throws Exception {
         var requiredFactors = mfa.complete;
         // Registered at the authorization endpoint's position before the endpoint itself (added later, while
         // building); filters of equal order keep insertion order, so this runs first.
@@ -106,7 +107,7 @@ class AuthorizationServerConfiguration {
                     // Advertise what consent actually releases; clients and conformance tests rely on it.
                     metadata.scopes(scopes -> { scopes.removeAll(SCOPES); scopes.addAll(SCOPES); });
                     metadata.claim("claims_supported", CLAIMS);
-                    // Request objects are rejected (rejectRequestObjects); request_uri defaults to true if absent.
+                    // Request objects are rejected (requestPolicy); request_uri defaults to true if absent.
                     metadata.claim("request_parameter_supported", false);
                     metadata.claim("request_uri_parameter_supported", false);
                     metadata.claim("claims_parameter_supported", false);
@@ -127,7 +128,7 @@ class AuthorizationServerConfiguration {
                             .map(OAuth2AuthorizationCodeRequestAuthenticationProvider.class::cast)
                             .forEach(codeRequests -> codeRequests.setAuthenticationValidator(
                                 new OAuth2AuthorizationCodeRequestAuthenticationValidator()
-                                    .andThen(AuthorizationServerConfiguration::rejectRequestObjects)));
+                                    .andThen(AuthorizationServerConfiguration::requestPolicy)));
                         providers.addFirst(new MfaGate(OAuth2AuthorizationConsentAuthenticationToken.class, requiredFactors));
                         providers.addFirst(new MfaGate(OAuth2AuthorizationCodeRequestAuthenticationToken.class, requiredFactors));
                     }))
@@ -211,13 +212,20 @@ class AuthorizationServerConfiguration {
     }
 
     /**
-     * Request objects are not supported. Ignoring them (the framework's default) silently drops the state and
-     * nonce they carry; OIDC Core 6.1 requires request_not_supported instead. Runs after the framework's own
-     * validation, so the client and redirect URI the error is sent to are already verified. (request_uri never
-     * gets here: the framework reads it as a pushed authorization request and rejects unknown ones itself.)
+     * Runs after the framework's own validation, so the client and redirect URI an error is sent to are
+     * already verified.
+     * <ul>
+     * <li>A client disabled for login (client management) gets unauthorized_client.</li>
+     * <li>Request objects are not supported. Ignoring them (the framework's default) silently drops the state
+     * and nonce they carry; OIDC Core 6.1 requires request_not_supported instead. (request_uri never gets
+     * here: the framework reads it as a pushed authorization request and rejects unknown ones itself.)</li>
+     * </ul>
      */
-    static void rejectRequestObjects(OAuth2AuthorizationCodeRequestAuthenticationContext context) {
+    static void requestPolicy(OAuth2AuthorizationCodeRequestAuthenticationContext context) {
         OAuth2AuthorizationCodeRequestAuthenticationToken code = context.getAuthentication();
+        if (!RegisteredClients.loginEnabled(context.getRegisteredClient())) {
+            throw new OAuth2AuthorizationCodeRequestAuthenticationException(new OAuth2Error(OAuth2ErrorCodes.UNAUTHORIZED_CLIENT), code);
+        }
         if (code.getAdditionalParameters().containsKey("request")) {
             throw new OAuth2AuthorizationCodeRequestAuthenticationException(new OAuth2Error("request_not_supported"), code);
         }
@@ -228,12 +236,17 @@ class AuthorizationServerConfiguration {
         "name", "preferred_username", "email", "email_verified", "groups");
 
     /**
-     * Refresh does not pass through login, so policy that must still hold is re-checked here. Spike rule:
-     * the subject binding must still exist; withdrawing it stops refresh immediately (Hydra cannot do this).
+     * Refresh does not pass through login, so policy that must still hold is re-checked here: the client must
+     * still be enabled for login, and the subject binding must still exist. Either change stops refresh
+     * immediately (Hydra could not do this).
      */
-    record RefreshPolicy(OAuth2AuthorizationService authorizations, AuthorizationPolicy policy) implements AuthenticationProvider {
+    record RefreshPolicy(OAuth2AuthorizationService authorizations, SubjectBindings policy) implements AuthenticationProvider {
         @Override public Authentication authenticate(Authentication request) throws AuthenticationException {
             var refresh = (OAuth2RefreshTokenAuthenticationToken) request;
+            if (refresh.getPrincipal() instanceof OAuth2ClientAuthenticationToken client && client.getRegisteredClient() != null
+                    && !RegisteredClients.loginEnabled(client.getRegisteredClient())) {
+                throw new OAuth2AuthenticationException(OAuth2ErrorCodes.UNAUTHORIZED_CLIENT);
+            }
             var authorization = authorizations.findByToken(refresh.getRefreshToken(), OAuth2TokenType.REFRESH_TOKEN);
             var stored = authorization == null ? null : authorization.<Authentication>getAttribute(Principal.class.getName());
             try {
@@ -246,13 +259,13 @@ class AuthorizationServerConfiguration {
         @Override public boolean supports(Class<?> type) { return OAuth2RefreshTokenAuthenticationToken.class.isAssignableFrom(type); }
     }
 
-    @Bean AuthorizationPolicy authorizationServerPolicy(Properties properties) {
-        return new AuthorizationPolicy(null, properties.subjects().stream().collect(Collectors.toMap(
-            binding -> new User.UserId(binding.authority(), binding.directoryId()), HydraProperties.SubjectBinding::subject)));
+    @Bean SubjectBindings subjectBindings(Properties properties) {
+        return new SubjectBindings(properties.subjects().stream().collect(Collectors.toMap(
+            binding -> new User.UserId(binding.authority(), binding.directoryId()), Properties.SubjectBinding::subject)));
     }
 
     /** Existing subjects are preserved, so downstream account links survive the issuer change. */
-    @Bean OAuth2TokenCustomizer<JwtEncodingContext> claims(AuthorizationPolicy policy) {
+    @Bean OAuth2TokenCustomizer<JwtEncodingContext> claims(SubjectBindings policy) {
         return context -> {
             if (!(context.getPrincipal().getPrincipal() instanceof DirectoryPrincipal principal)) return;
             var user = principal.user();
@@ -260,6 +273,13 @@ class AuthorizationServerConfiguration {
             context.getClaims().subject(policy.subject(user));
             if (scopes.contains("groups")) {
                 context.getClaims().claim("groups", user.memberships().stream().map(User.GroupMembership::name).toList());
+            }
+            if (OAuth2TokenType.ACCESS_TOKEN.equals(context.getTokenType())
+                    && context.getRegisteredClient().getClientSettings().getSetting(RegisteredClients.AUDIENCES) instanceof String extra) {
+                // Resource audiences registered for the client (the framework has no audience parameter).
+                var audience = new ArrayList<>(List.of(context.getRegisteredClient().getClientId()));
+                for (var value : extra.split(",")) if (!value.isBlank() && !audience.contains(value.trim())) audience.add(value.trim());
+                context.getClaims().audience(audience);
             }
             if (OidcParameterNames.ID_TOKEN.equals(context.getTokenType().getValue())) {
                 if (scopes.contains("profile")) {

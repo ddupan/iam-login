@@ -18,6 +18,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.assertj.core.api.InstanceOfAssertFactories;
+import org.hamcrest.Matchers;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -53,6 +54,7 @@ import top.ddupan.iam.login.support.SigningKeyFixture;
 import static org.assertj.core.api.Assertions.*;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.httpBasic;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
@@ -64,7 +66,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
     "iam.authorization-server.subjects[0].authority=example.test",
     "iam.authorization-server.subjects[0].directory-id=00112233-4455-6677-8899-aabbccddeeff",
     "iam.authorization-server.subjects[0].subject=human:existing-subject",
-    "management.otlp.metrics.export.enabled=false", "spring.security.user.password=fixture-monitor-password"})
+    "management.otlp.metrics.export.enabled=false", "spring.security.user.password=fixture-monitor-password",
+    "iam.clients.admin-groups[0]=gitea-admins"})
 @AutoConfigureMockMvc
 class AuthorizationServerIntegrationTests {
     static class Fixtures {
@@ -242,6 +245,105 @@ class AuthorizationServerIntegrationTests {
         return new RSAKey.Builder((RSAPublicKey) KeyFactory.getInstance("RSA")
             .generatePublic(new RSAPublicKeySpec(key.getModulus(), key.getPublicExponent())))
             .build().computeThumbprint().toString();
+    }
+
+    @Test void clientApiRequiresATokenForItsAudienceWhoseSubjectIsAnAdministrator() throws Exception {
+        mvc.perform(get("/api/iam/clients").with(https())).andExpect(status().isUnauthorized());
+        // A fully authenticated administrator's browser session is not an API credential.
+        var session = login(); secondFactor(session);
+        mvc.perform(get("/api/iam/clients").session(session).with(https())).andExpect(status().isUnauthorized());
+        // An administrator's token issued to another application must not work here (audience).
+        mvc.perform(get("/api/iam/clients").with(https()).with(token(List.of("spike-rp"), List.of("gitea-admins")))).andExpect(status().isForbidden());
+        mvc.perform(get("/api/iam/clients").with(https()).with(token(List.of("iam-login"), List.of("MixedCase")))).andExpect(status().isForbidden());
+        mvc.perform(get("/api/iam/clients").with(https()).with(token(List.of("iam-login"), List.of("gitea-admins")))).andExpect(status().isOk());
+    }
+
+    @Test void consoleIsAPublicClientWhoseTokensCarryTheApiAudience() throws Exception {
+        var console = clients.findByClientId("iam-console");
+        assertThat(console.getClientAuthenticationMethods()).containsExactly(ClientAuthenticationMethod.NONE);
+        assertThat(console.getRedirectUris()).containsExactly("https://localhost/console/callback");
+        mvc.perform(get("/console").with(https())).andExpect(status().isOk())
+            .andExpect(content().string(Matchers.containsString("\"clientId\":\"iam-console\"")));
+        // The real flow: password + passkey, PKCE, no secret, no consent page.
+        var session = login(); secondFactor(session);
+        var verifier = verifier();
+        var challenge = Base64.getUrlEncoder().withoutPadding().encodeToString(
+            MessageDigest.getInstance("SHA-256").digest(verifier.getBytes(StandardCharsets.US_ASCII)));
+        var authorize = UriComponentsBuilder.fromPath("/oauth2/authorize").queryParam("response_type", "code")
+            .queryParam("client_id", "iam-console").queryParam("redirect_uri", "https://localhost/console/callback")
+            .queryParam("scope", "openid groups").queryParam("state", "console-state")
+            .queryParam("code_challenge", challenge).queryParam("code_challenge_method", "S256").encode().build().toUriString();
+        var callback = location(session, authorize);
+        assertThat(callback).startsWith("https://localhost/console/callback");
+        var tokens = json(mvc.perform(post("/oauth2/token").with(https()).param("grant_type", "authorization_code")
+                .param("client_id", "iam-console").param("code", query(callback).get("code"))
+                .param("redirect_uri", "https://localhost/console/callback").param("code_verifier", verifier))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
+        var access = claims((String) tokens.get("access_token"));
+        assertThat(access.get("aud")).asInstanceOf(InstanceOfAssertFactories.LIST).contains("iam-console", "iam-login");
+        mvc.perform(get("/api/iam/clients").with(https()).header("Authorization", "Bearer " + tokens.get("access_token")))
+            .andExpect(status().isOk());
+    }
+
+    @Test void clientsAreManagedThroughTheApi(@Autowired OAuth2AuthorizationService authorizations) throws Exception {
+        var admin = token(List.of("iam-login"), List.of("gitea-admins"));
+        var body = """
+            {"id":"managed-app","name":"Managed","redirectUris":["https://rp.example/managed"],
+             "scopes":["openid","profile","offline_access"],"postLogoutRedirectUris":[],"loginEnabled":true}
+            """;
+        var created = json(mvc.perform(post("/api/iam/clients").with(https()).with(admin).contentType(MediaType.APPLICATION_JSON).content(body))
+            .andExpect(status().isCreated()).andExpect(header().string("Cache-Control", "no-store"))
+            .andReturn().getResponse().getContentAsString());
+        var secret = (String) created.get("secret");
+        assertThat(tokenError("managed-app", secret)).isEqualTo("invalid_grant");
+        mvc.perform(post("/api/iam/clients").with(https()).with(admin).contentType(MediaType.APPLICATION_JSON).content(body))
+            .andExpect(status().isConflict());
+        // offline_access brings the refresh_token grant (OIDC Core 11); the secret is stored encoded.
+        var registered = clients.findByClientId("managed-app");
+        assertThat(registered.getAuthorizationGrantTypes()).contains(AuthorizationGrantType.REFRESH_TOKEN);
+        assertThat(registered.getClientSecret()).startsWith("{bcrypt}").doesNotContain(secret);
+        mvc.perform(get("/api/iam/clients").with(https()).with(admin)).andExpect(status().isOk())
+            .andExpect(jsonPath("$[?(@.id=='managed-app')]").exists()).andExpect(jsonPath("$[?(@.id=='iam-console')]").doesNotExist());
+        // Missing loginEnabled is rejected rather than defaulted.
+        mvc.perform(post("/api/iam/clients").with(https()).with(admin).contentType(MediaType.APPLICATION_JSON)
+                .content(body.replace("managed-app", "no-flag").replace(",\"loginEnabled\":true", "")))
+            .andExpect(status().isBadRequest());
+
+        var rotated = (String) json(mvc.perform(post("/api/iam/clients/managed-app/secret").with(https()).with(admin))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString()).get("secret");
+        assertThat(tokenError("managed-app", secret)).isEqualTo("invalid_client");
+        assertThat(tokenError("managed-app", rotated)).isEqualTo("invalid_grant");
+
+        // Disabled: the client is refused authorization (after redirect URI verification).
+        mvc.perform(put("/api/iam/clients/managed-app").with(https()).with(admin).contentType(MediaType.APPLICATION_JSON)
+                .content(body.replace("\"loginEnabled\":true", "\"loginEnabled\":false"))).andExpect(status().isOk())
+            .andExpect(jsonPath("loginEnabled").value(false));
+        var session = login(); secondFactor(session);
+        var disabled = UriComponentsBuilder.fromPath("/oauth2/authorize").queryParam("response_type", "code")
+            .queryParam("client_id", "managed-app").queryParam("redirect_uri", "https://rp.example/managed")
+            .queryParam("scope", "openid").queryParam("state", "s").queryParam("code_challenge", "x".repeat(43))
+            .queryParam("code_challenge_method", "S256").encode().build().toUriString();
+        assertThat(query(location(session, disabled))).containsEntry("error", "unauthorized_client").doesNotContainKey("code");
+
+        // Deleting removes the client's authorizations with it.
+        var authorization = authorization(clients.findByClientId("managed-app"), Instant.now(), Instant.now().plusSeconds(600));
+        authorizations.save(authorization);
+        mvc.perform(delete("/api/iam/clients/managed-app").with(https()).with(admin)).andExpect(status().isNoContent());
+        mvc.perform(get("/api/iam/clients/managed-app").with(https()).with(admin)).andExpect(status().isNotFound());
+        assertThat(authorizations.findById(authorization.getId())).isNull();
+        // The console client is not managed through the API.
+        mvc.perform(delete("/api/iam/clients/iam-console").with(https()).with(admin)).andExpect(status().isConflict());
+    }
+
+    private String tokenError(String client, String secret) throws Exception {
+        return (String) json(mvc.perform(post("/oauth2/token").with(https()).with(httpBasic(client, secret))
+                .param("grant_type", "authorization_code").param("code", "invalid-code")
+                .param("redirect_uri", "https://rp.example/managed").param("code_verifier", verifier()))
+            .andReturn().getResponse().getContentAsString()).get("error");
+    }
+
+    private static RequestPostProcessor token(List<String> audience, List<String> groups) {
+        return jwt().jwt(jwt -> jwt.audience(audience).claim("groups", groups));
     }
 
     private String code(MockHttpSession session, String verifier) throws Exception {

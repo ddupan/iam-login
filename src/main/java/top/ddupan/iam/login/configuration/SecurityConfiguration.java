@@ -24,7 +24,6 @@ import org.springframework.security.web.util.matcher.AnyRequestMatcher;
 import top.ddupan.iam.login.authentication.application.VerifyPassword;
 import top.ddupan.iam.login.authentication.infrastructure.security.DirectoryAuthenticationProvider;
 import top.ddupan.iam.login.authentication.interfaces.web.PageRenderer;
-import top.ddupan.iam.login.authorization.application.port.HydraGateway;
 
 @Configuration(proxyBeanMethods = false)
 @EnableMultiFactorAuthentication(authorities = {})
@@ -49,41 +48,37 @@ class SecurityConfiguration {
     @Order(3)
     @ConditionalOnProperty(prefix = "iam.ad", name = "enabled", havingValue = "true")
     SecurityFilterChain browser(HttpSecurity http, VerifyPassword passwords,
-            ObjectProvider<WebAuthnBrowserConfigurer> webAuthn,
-            ObjectProvider<HydraGateway> logoutGateway) throws Exception {
+            ObjectProvider<WebAuthnBrowserConfigurer> webAuthn) throws Exception {
         var passwordFactor = AuthorizationManagerFactories.<RequestAuthorizationContext>multiFactor()
             .requireFactor(factor -> factor.passwordAuthority().validDuration(Duration.ofMinutes(10)))
             .build();
         var mfa = webAuthn.getIfAvailable();
-        http.securityMatcher("/signin", "/signin/**", "/assets/**", "/webauthn/**", "/login/webauthn", "/oauth2/**")
+        // /oauth2/** belongs to the authorization server's own chain.
+        http.securityMatcher("/signin", "/signin/**", "/assets/**", "/webauthn/**", "/login/webauthn")
             .redirectToHttps(Customizer.withDefaults())
             .authenticationManager(new ProviderManager(new DirectoryAuthenticationProvider(passwords)))
             .authorizeHttpRequests(auth -> {
                 if (mfa != null) {
-                    auth.requestMatchers("/signin/complete", "/oauth2/login", "/oauth2/consent").access(mfa.policy.complete);
+                    auth.requestMatchers("/signin/complete").access(mfa.policy.complete);
                     auth.requestMatchers(HttpMethod.POST, "/webauthn/register")
                         .access(mfa.policy.password);
                 }
-                auth.requestMatchers("/error", "/signin", "/signin/password", "/assets/**", "/oauth2/start", "/oauth2/logout").permitAll()
+                auth.requestMatchers("/error", "/signin", "/signin/password", "/assets/**").permitAll()
                 .requestMatchers("/signin/mfa").access(passwordFactor.authenticated())
                 // Credential deletion and all unimplemented routes remain closed.
                 .anyRequest().denyAll();
             })
             .formLogin(form -> form.loginPage("/signin").loginProcessingUrl("/signin/password")
                 .defaultSuccessUrl("/signin/mfa", true).failureUrl("/signin?error"))
-            .logout(logout -> logout.logoutRequestMatcher(request -> PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST,"/signin/restart").matches(request)
-                || PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST,"/signin/logout").matches(request))
-                .logoutSuccessHandler((request,response,authentication) -> {
-                    var gateway = logoutGateway.getIfAvailable();
+            // Signing out of this service only; relying parties use RP-initiated logout (/connect/logout).
+            .logout(logout -> logout.logoutRequestMatcher(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/signin/restart"))
+                .logoutSuccessHandler((request, response, authentication) -> {
                     response.setStatus(303);
-                    response.setHeader("Location",gateway!=null && PathPatternRequestMatcher.withDefaults().matcher("/signin/logout").matches(request)
-                        ? gateway.logoutUrl() : "/signin");
+                    response.setHeader("Location", "/signin");
                 }))
             .exceptionHandling(exceptions -> exceptions
                 .defaultAuthenticationEntryPointFor(new LoginUrlAuthenticationEntryPoint("/signin"),
                     PathPatternRequestMatcher.withDefaults().matcher("/signin/**"))
-                .defaultAuthenticationEntryPointFor(new LoginUrlAuthenticationEntryPoint("/signin"),
-                    PathPatternRequestMatcher.withDefaults().matcher("/oauth2/**"))
                 .defaultAuthenticationEntryPointFor(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED),
                     AnyRequestMatcher.INSTANCE))
             .requestCache(cache -> cache.disable())

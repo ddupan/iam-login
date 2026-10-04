@@ -1,105 +1,80 @@
 # OAuth2/OIDC 客户端管理
 
-本服务通过受限 API 管理 Hydra 中的第一方 confidential authorization-code 客户端。
-领域层定义 `ClientRepository`，基础设施的 `HydraClientRepository` 实现远端持久化。
-API 是主要交付物（为 IaC 等自动化准备）；`/console` 管理界面只是调用同一 API 的前端应用。
+本服务通过受限 API 管理内置授权服务器（见[内置授权服务器](authorization-server.md)）中的第一方
+confidential authorization-code 客户端。领域层定义 `ClientRepository`，基础设施的 `RegisteredClients`
+基于框架的 `RegisteredClientRepository`（JDBC）实现。API 是主要交付物（为 IaC 等自动化准备）；
+`/console` 管理界面只是调用同一 API 的前端应用。只在 `iam.authorization-server.enabled` 时提供。
 
-## 鉴权：只认 bearer token
+## 鉴权：audience + groups
 
-`/api/iam/**` 是 OAuth2 resource server，只接受 Hydra 签发的 access token：
-通过 Hydra Admin introspection 校验（`active`、`token_use=access_token`），并要求 scope
-`iam.clients.manage`。浏览器 session、cookie 与 CSRF 都不是 API 凭据；已完成 MFA 的管理员
-session 直接调用 API 同样返回 401。不支持 refresh token 调用。
+`/api/iam/**` 是普通 resource server，只接受本服务签发的 access token（以自身签名密钥验证）：
 
-**谁能拿到这个 scope，只在授权确认（consent）一处决定**，见 `AuthorizationPolicy`：
+1. **audience**：token 的 `aud` 须含 `iam-login`。签给其他应用的 token（例如管理员登录 Gitea 时
+   Gitea 拿到的 token）即使带着管理员组也被拒绝。框架没有 audience 参数，客户端可获得的额外 audience
+   登记在客户端设置 `settings.client.iam.audiences` 中，由 token 定制器写入；目前只有 `/console` 登记了它。
+2. **groups**：客户端申请 `groups` scope 时，用户的直接 AD 组名进入 access token。API 要求其中有
+   `iam.clients.admin-groups` 之一。
 
-- 只有 `iam.clients.admin-ui-client-id` 配置的客户端可以申请该 scope，普通应用申请会被拒绝；
-- 只发给直接属于 `iam.clients.admin-group-dns` 的用户（完整 DN 匹配，不展开嵌套组，
-  组成员来自本次目录登录快照）；非管理员在授权确认页即被拒绝；
-- 人类仍需经过 AD 密码 + passkey，consent 规则不绕过登录。
+浏览器 session、cookie 与 CSRF 都不是 API 凭据。匿名、token 无效返回 401；audience 不符或不是
+管理员返回 403。
 
 ```yaml
 iam:
   clients:
-    admin-group-dns:
-      - CN=IAM Administrators,CN=Users,DC=example,DC=test
-    admin-ui-client-id: iam-admin-ui
+    admin-groups:
+      - Domain Admins
+    console-client-id: iam-console   # 默认值
 ```
 
-未配置 `admin-ui-client-id` 时该 scope 不存在、`/console` 不提供，API 实际不可用（fail closed）。
-以后自动化（Terraform、平台其他组件）如何获取带该 scope 的 token 是独立决策；只要 token
-由 Hydra 签发并带有该 scope，API 行为不变。
+按组名匹配，与下游应用看到的 `groups` 一致；组名取 memberOf DN 的 CN，只含直接组。同一用户若有
+两个同名直接组，登录直接失败；他处的同名组需要 AD 建组权限才能伪造。组成员是登录时的快照，移出
+管理组后最长在 access token 有效期内仍可调用。以后自动化调用方如何取得 token 另行设计；只要 token
+由本服务签发、audience 与组满足要求，API 行为不变。
 
 ## 接口
 
 | 方法与路径 | 行为 |
 | --- | --- |
-| GET `/api/iam/clients?page=0&size=20` | 返回 Hydra 分页内支持的客户端，size 1–100 |
+| GET `/api/iam/clients?page=0&size=20` | 受管理客户端列表，size 1–100 |
 | POST `/api/iam/clients` | 创建，201 返回 `{client, secret}`，密钥仅此次返回 |
 | GET `/api/iam/clients/{id}` | 查询，不返回密钥 |
 | PUT `/api/iam/clients/{id}` | 替换可管理字段，保留现有密钥 |
-| DELETE `/api/iam/clients/{id}` | 删除，204 |
+| DELETE `/api/iam/clients/{id}` | 删除，204；该客户端的授权记录与 consent 一并删除 |
 | POST `/api/iam/clients/{id}/secret` | 轮换，200 返回 `{secret}`，**旧密钥立即失效** |
 
-匿名或 token 无效返回 401，scope 不足返回 403；输入无效 400，不存在 404，ID 冲突或
-非本服务可管理的客户端类型 409，Hydra 不可用 502。含密钥的响应带 `Cache-Control: no-store`。
-成功变更记录 action、client ID 和 token 的 subject，不记录密钥。
-
-POST/PUT 请求示例（PUT 的 id 必须等于路径）：
+输入无效 400，不存在 404，ID 冲突或非本 API 管理的客户端（如 `/console` 的 public 客户端）409。
+含密钥的响应带 `Cache-Control: no-store`。成功变更记录 action、client ID 和 token 的 subject，不记录密钥。
 
 ```json
 {
   "id": "example-app",
   "name": "示例应用",
   "redirectUris": ["https://app.example.test/oidc/callback"],
-  "scopes": ["openid", "profile", "email", "groups"],
+  "scopes": ["openid", "profile", "email", "groups", "offline_access"],
   "postLogoutRedirectUris": ["https://app.example.test/logged-out"],
-  "backchannelLogoutUri": "https://app.example.test/oidc/backchannel-logout",
-  "frontchannelLogoutUri": "",
   "loginEnabled": true
 }
 ```
 
-回调必须 HTTPS（隔离开发允许 loopback HTTP），不允许通配符、fragment 或 URL 用户信息。
-本轮固定 `authorization_code`、`code`、`client_secret_basic`、public subject；scope 限于上述
-四项且要求 openid。不接收任意 Hydra 字段、密钥、签名配置或授权类型，也没有通用 Admin API
-代理。不要为并不支持注销协议的应用登记虚构的端点。
-
-### 密钥轮换
-
-Hydra v26.2.0（当前最新正式版）没有 `/admin/clients/{id}/secrets/rotate`：该接口 2026-07-16
-才合入 master，尚无发布版本。目前由本服务生成 32 字节随机密钥并以 PUT 写回，属于硬切换，
-应用需同步更新。待 Hydra 发布原生轮换（支持新旧密钥并存），只需替换
-`HydraClientRepository.rotateSecret`，API 不变。
+- 回调必须 HTTPS（隔离开发允许 loopback HTTP），不允许通配符、fragment 或 URL 用户信息。
+- 固定 `authorization_code`、`client_secret_basic`，要求 PKCE；refresh token 轮换。
+- scope 可为任意符合 RFC 6749 的 scope-token（最多 50 个），必须含 `openid`；scope 不代表权限。
+  含 `offline_access` 时一并登记 `refresh_token` 授权类型（OIDC Core 11），去掉时移除。
+- `loginEnabled` 必填，缺失 400。`false` 时新的授权请求返回 `unauthorized_client`，refresh 也被拒绝；
+  已签发的 access token 在有效期内仍可用。
+- 框架不支持前/后通道注销，不提供相应字段。
+- 密钥为 32 字节随机值，以 `{bcrypt}` 编码存储，明文只在创建与轮换时返回一次。
 
 ## `/console` 管理界面
 
-`/console` 是 Hydra 的普通 **public** OIDC 客户端（授权码 + PKCE，无 secret），与本服务同源
-部署但不享有任何特权：页面外壳不含数据，所有数据经上面的 bearer API 获取。access token
-只保存在内存中，刷新页面即重新登录；不申请 refresh token，过期后提示重新登录。
+`/console` 是本服务的普通 **public** OIDC 客户端（授权码 + PKCE，无 secret，scope `openid groups`，
+audience `iam-login`），与授权端点同源，不需要 CORS。客户端在每次启动时按配置自动登记或更新
+（回调为 `<issuer>/console/callback`），无需带外引导。不显示授权确认页（第一方），但仍要求完整 MFA。
+access token 只保存在内存中，刷新页面即重新登录；过期后提示重新登录。
 
-部署前提（基础设施负责）：
+## 验证
 
-- 在 Hydra 登记该客户端：`token_endpoint_auth_method=none`，grant `authorization_code`，
-  scope `openid iam.clients.manage`，redirect `https://<本服务>/console/callback`，
-  metadata `iam_login_enabled=true`。它不是 confidential 客户端，因此不出现在本 API 的列表中，
-  也无法经本 API 删除自身；登记与恢复走 Hydra Admin 带外通道。
-- Hydra public 端口开启 CORS 并只允许本服务 origin：浏览器直接向 Hydra 换取 token。
-  页面 CSP 的 `connect-src` 仅额外放行 issuer origin。
-
-路径用 `/console` 而非 `/admin`，避免同源部署时与"不发布 Hydra `/admin/**`"的路由规则混淆。
-
-## 存储与范围
-
-客户端与生成的 secret 由 Hydra 持久化；本服务不复制或缓存它们。集成测试验证创建、
-重启后读取、更新后原密钥仍能认证、轮换后旧密钥被拒且新密钥可认证、删除。测试 PostgreSQL
-完全独立于真实开发 MFA 库。
-
-`loginEnabled` 是三态：`true`/`false` 写入 Hydra metadata；`null` 表示没有该标记的旧客户端
-（如带外登记的 `gitea`），其登录由 `iam.hydra.clients` 白名单决定。API 原样返回 `null`，PUT 时
-`null` 保持不写标记，不会把旧客户端误读或误存为禁用。新建客户端必须明确 `true` 或 `false`，
-否则 400。旧客户端显式标记后即可从白名单移除。
-
-列表按 Hydra 原始分页过滤不支持的授权类型，空页不表示之后必无客户端；本接口不是已有
-全部 Hydra 客户端类型的迁移工具。禁用写入 Hydra metadata，后续授权即时重读并拒绝，
-已签发 token 的生命周期另由 issuer 和应用控制。
+`AuthorizationServerIntegrationTests` 覆盖 API 鉴权（无凭据、session、错误 audience、非管理员）、
+`/console` 的真实授权码流程及其 token 的 audience、增删改查、轮换后新旧密钥、禁用后拒绝授权、
+删除级联授权记录；`OidcClientTests` 覆盖输入校验；`authorization-server.spec.ts` 在浏览器中走完
+`/console` 的登录与客户端增删、轮换。

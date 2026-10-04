@@ -17,7 +17,7 @@ import org.springframework.security.oauth2.server.authorization.authentication.O
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClient;
 import top.ddupan.iam.login.authentication.domain.User;
 import top.ddupan.iam.login.authentication.infrastructure.security.DirectoryPrincipal;
-import top.ddupan.iam.login.authorization.application.AuthorizationPolicy;
+import top.ddupan.iam.login.authorization.application.SubjectBindings;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
@@ -36,14 +36,14 @@ class RefreshPolicyTests {
                 .build());
         var request = new OAuth2RefreshTokenAuthenticationToken("refresh",
             new OAuth2ClientAuthenticationToken(client, ClientAuthenticationMethod.CLIENT_SECRET_BASIC, null), Set.of(), Map.of());
-        var bound = new AuthorizationConfigurationAccess(new AuthorizationPolicy(null, Map.of(user.id(), "human:sub")));
+        var bound = new AuthorizationConfigurationAccess(new SubjectBindings(Map.of(user.id(), "human:sub")));
         assertThat(bound.gate(authorizations).authenticate(request)).as("allowed: defer to the framework").isNull();
-        var withdrawn = new AuthorizationConfigurationAccess(new AuthorizationPolicy(null, Map.of(new User.UserId("example.test", "other"), "human:other")));
+        var withdrawn = new AuthorizationConfigurationAccess(new SubjectBindings(Map.of(new User.UserId("example.test", "other"), "human:other")));
         assertThatThrownBy(() -> withdrawn.gate(authorizations).authenticate(request))
             .isInstanceOfSatisfying(OAuth2AuthenticationException.class, ex -> assertThat(ex.getError().getErrorCode()).isEqualTo("invalid_grant"));
     }
 
-    private record AuthorizationConfigurationAccess(AuthorizationPolicy policy) {
+    private record AuthorizationConfigurationAccess(SubjectBindings policy) {
         AuthorizationServerConfiguration.RefreshPolicy gate(OAuth2AuthorizationService authorizations) {
             return new AuthorizationServerConfiguration.RefreshPolicy(authorizations, policy);
         }

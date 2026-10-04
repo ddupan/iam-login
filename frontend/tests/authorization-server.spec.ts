@@ -90,4 +90,38 @@ test("AD + passkey -> in-process authorization server: consent, tokens, userinfo
   await expect.poll(() => new URL(page.url()).origin + new URL(page.url()).pathname).toBe("http://localhost:14446/logged-out");
   await page.goto(authorize.toString());
   await expect(page.getByRole("heading", { name: "登录你的账号" })).toBeVisible();
+
+  // Console: a public client of this same server; the client API only accepts its bearer token.
+  expect((await context.request.get(`${ISSUER}/api/iam/clients`, { headers: { Authorization: `Bearer ${latest.access_token}` } })).status()).toBe(403);
+  await page.goto(`${ISSUER}/console`);
+  await page.getByLabel("用户名", { exact: true }).fill("alice");
+  await page.getByLabel("密码", { exact: true }).fill("fixture-password");
+  await page.getByRole("button", { name: "继续", exact: true }).click();
+  await page.getByRole("button", { name: "验证 Passkey", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "OIDC 客户端" })).toBeVisible();
+  expect(new URL(page.url()).pathname).toBe("/console");
+  await expect(page.getByRole("row", { name: /fixture-rp/ })).toBeVisible();
+  // The console's own (public) client is not a managed client.
+  await expect(page.getByRole("cell", { name: "iam-console", exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "新建客户端", exact: true }).click();
+  await page.getByLabel("Client ID").fill("e2e-app");
+  await page.getByLabel("名称").fill("E2E");
+  await page.getByLabel("回调地址（每行一个）").fill("https://app.example.test/callback");
+  await page.getByRole("button", { name: "创建", exact: true }).click();
+  const secret = page.locator(".secret output");
+  await expect(secret).not.toBeEmpty();
+  const created = (await secret.textContent())!;
+  page.once("dialog", dialog => dialog.accept());
+  await page.getByRole("row", { name: /e2e-app/ }).getByRole("button", { name: "轮换 secret" }).click();
+  await expect(secret).not.toHaveText(created);
+  const rotated = (await secret.textContent())!;
+  const tokenError = (value: string) => context.request.post(discovery.token_endpoint, {
+    headers: { Authorization: "Basic " + Buffer.from(`e2e-app:${value}`).toString("base64") },
+    form: { grant_type: "authorization_code", code: "invalid-code", redirect_uri: "https://app.example.test/callback" },
+  }).then(response => response.json()).then(body => body.error);
+  expect(await tokenError(created)).toBe("invalid_client");
+  expect(await tokenError(rotated)).not.toBe("invalid_client");
+  page.once("dialog", dialog => dialog.accept());
+  await page.getByRole("row", { name: /e2e-app/ }).getByRole("button", { name: "删除" }).click();
+  await expect(page.getByRole("cell", { name: "e2e-app", exact: true })).toHaveCount(0);
 });

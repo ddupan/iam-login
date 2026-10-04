@@ -1,24 +1,25 @@
 # iam-login
 
-独立 IAM 的登录与认证服务，以 Java、Spring Security 和 GraalVM Native 实现，作为
-Hydra 的 Login/Consent 应用。已实现 AD 密码与直接所属组查询，以及 WebAuthn 第二因素浏览器流程；已实现 Hydra Login/Consent 的隔离接入，生产切换仍待验收。
+独立 IAM 的登录、认证与 token 签发服务，以 Java、Spring Security 和 GraalVM Native 实现。
+已实现 AD 密码与直接所属组查询、WebAuthn 第二因素，以及进程内的 OAuth 2.0 / OIDC 授权服务器
+（Spring Security 7）与客户端管理；生产切换仍待验收。原 Hydra Login/Consent 方案存档于
+`archive/hydra` 分支，main 只保留本方案。
 
 ## 职责与边界
 
 - 首轮直接连接 Samba AD：验证人类凭据、查询用户与组，沿用已有组名。
-- 处理人类 MFA、认证事务及稳定主体映射，完成 Hydra Login/Consent。
-- OAuth2/OIDC 协议与下游 token 签发由 Hydra 提供。
+- 处理人类 MFA、认证事务及稳定主体映射（显式 subject 绑定）。
+- OAuth2/OIDC 协议与下游 token 签发由进程内授权服务器完成，见[内置授权服务器](docs/authorization-server.md)。
 - 独立于 Ayatori；Ayatori 是 IAM 消费者，不是本服务运行依赖。
 - AD 继续作为首轮用户与组权威；迁移目录、统一组模型及 machine/agent 入口留在后续。
 
 ```text
-应用 → Hydra → iam-login → Samba AD + MFA
-          ↑        │
-          └────────┘ 接受 Login/Consent
+应用 ──OIDC──→ iam-login（授权服务器 + 登录）──→ Samba AD
+                     └─ passkey（WebAuthn，PostgreSQL）
 ```
 
-现役 Gitea 人类登录仍使用 homelab-infra 中的 Go OIDC 上游适配器和 Authelia，已通过
-维护者验收。创建本仓库不表示切换生产认证入口，也不改变现有 Gitea 账号关联。
+现役 Gitea 人类登录在切换前仍由部署中的存档版本（Hydra 方案）提供；main 的部署即为切换，
+须同时迁移 Gitea 登录源（issuer、客户端密钥）。
 
 ## 代码与部署归属
 
@@ -69,7 +70,7 @@ JVM、AOT、Native 测试及原生应用 HTTP 检查已通过，实测范围与�
 [本地验证结果](docs/bootstrap.md#2026-09-25-本地验证结果)。
 新增 AD 路径本轮按维护者要求只进行 JVM 验证，不沿用基线的 Native 验收结论。
 重构前的真实目录密码与属性/直接所属组读取已通过维护者浏览器验收；Spring Data LDAP
-版本已通过 JVM 和浏览器回归，真实人类复验待反馈。WebAuthn 实现与验证边界见 [第二因素](docs/webauthn.md)，Hydra 接入方式与生产主体映射边界见 [Login/Consent](docs/hydra-login.md)。
+版本已通过 JVM 和浏览器回归，真实人类复验待反馈。WebAuthn 实现与验证边界见 [第二因素](docs/webauthn.md)，授权服务器与主体映射见 [内置授权服务器](docs/authorization-server.md)。
 
 ## 领域与代码组织
 
@@ -92,9 +93,8 @@ configuration → 装配上述实现
 - `authentication/infrastructure/webauthn`：凭据归属与注册策略、challenge 仓储扩展；密码学校验和 JDBC 存储交给 Spring Security。
 - `authentication/interfaces/web`：登录页面与上下文转换；不处理密码 POST、认证会话或退出。
 - `configuration`：Spring 组件装配、安全链、静态资源和 Native hints。
-- `authorization`：领域请求、应用授权用例与策略、Hydra Admin 基础设施、浏览器请求绑定分层维护；客户端注册与签发仍归 Hydra。
-- 内置授权服务器（`iam.authorization-server.enabled`，默认关闭，与 Hydra 模式互斥）：Spring Security 7 在进程内签发 token，见[内置授权服务器](docs/authorization-server.md)。
-- `clients/domain/ClientRepository`：客户端仓储契约，由 Hydra HTTP 实现；客户端 CRUD 与密钥轮换的 bearer API（scope `iam.clients.manage`，仅在 consent 时发给直接管理组成员），`/console` 为调用该 API 的 public 客户端前端；持久化与密钥由 Hydra 持有，见[管理接口](docs/client-management.md)。
+- `authorization`：subject 绑定（`SubjectBindings`）；授权服务器的装配、MFA 关卡、重新认证、refresh 策略与签名密钥在 `configuration`。由 `iam.authorization-server.enabled` 开启，见[内置授权服务器](docs/authorization-server.md)。
+- `clients`：客户端管理。领域契约 `ClientRepository` 由 `RegisteredClients`（内置授权服务器的客户端仓储）实现；bearer API 要求 audience `iam-login` 且 token 的 `groups` 含管理组，`/console` 为调用该 API 的 public 客户端前端，见[客户端管理](docs/client-management.md)。
 - `frontend/src`：入口、页面、表单组件和页面数据契约分别维护，只包含真实登录流程。
 
 测试覆盖应用用例、AD 仓储和完整 Spring Security 过滤器链，LDAP 夹具集中在测试 `support` 包。
@@ -106,5 +106,5 @@ React 只替换默认登录 UI，不增加前端路由器、模板引擎或 Node
 
 真实入口为 `/signin`，默认关闭且要求 HTTPS。密码验证通过后显示 AD 身份与直接所属组，
 保存仅含 `FACTOR_PASSWORD` 的认证结果，停在等待 MFA 状态。待 MFA 页要求十分钟内的密码因素；
-其他应用入口暂时全部拒绝，不能凭密码因素接受 Hydra challenge。监控 Basic 认证使用独立无状态安全链。
+仅凭密码因素不能取得授权码。监控 Basic 认证使用独立无状态安全链。
 配置、组语义、HTTPS 与验收边界见 [AD 接入](docs/ad-login.md)。
