@@ -7,7 +7,7 @@ plugins {
 
 group = 'top.ddupan.iam'
 version = '0.0.1-SNAPSHOT'
-description = 'Independent IAM login and authentication service for Hydra'
+description = 'Independent IAM: AD and passkey login with an in-process OAuth 2.0 / OIDC authorization server'
 
 java {
 	toolchain {
@@ -105,7 +105,7 @@ tasks.register('webauthnBrowserFixture', JavaExec) {
     mainClass = 'top.ddupan.iam.login.WebAuthnBrowserFixture'
 }
 
-// Spike: the in-process authorization server instead of Hydra, with one fixture client.
+// Test-only browser application with the authorization server and one fixture client.
 tasks.register('authorizationServerBrowserFixture', JavaExec) {
     dependsOn tasks.named('testClasses')
     classpath = sourceSets.test.runtimeClasspath
@@ -129,10 +129,3 @@ tasks.register('conformanceFixture', JavaExec) {
     systemProperty 'iam.fixture.conformance', 'true'
 }
 
-// Adds a loopback-only Hydra issuer and fixture client to the same test-only browser application.
-tasks.register('hydraBrowserFixture', JavaExec) {
-    dependsOn tasks.named('testClasses')
-    classpath = sourceSets.test.runtimeClasspath
-    mainClass = 'top.ddupan.iam.login.WebAuthnBrowserFixture'
-    systemProperty 'iam.fixture.hydra', 'true'
-}

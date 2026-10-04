@@ -2,7 +2,7 @@
 
 本服务可在进程内使用 Spring Security 7 的授权服务器（原 Spring Authorization Server，已并入
 Spring Security）签发 OAuth 2.0 / OIDC token，替代 Hydra。由 `iam.authorization-server.enabled`
-开启，**默认关闭**，与 `iam.hydra.enabled` 互斥（同时开启拒绝启动）。迁移决策与技术验证见
+开启，**默认关闭**。原 Hydra 方案存档于 `archive/hydra` 分支。迁移决策与技术验证见
 wiki《独立 IAM 草案》“决策：以 Spring Authorization Server 替换 Hydra”。
 
 ## 配置
@@ -12,7 +12,7 @@ iam:
   authorization-server:
     enabled: true
     issuer: https://auth.example.test
-    subjects:                      # 与 Hydra 模式相同的显式 subject 绑定，保持下游账号关联
+    subjects:                      # 显式 subject 绑定，沿用现役 sub，保持下游账号关联
       - authority: example.test
         directory-id: 00112233-4455-6677-8899-aabbccddeeff
         subject: human:existing-subject

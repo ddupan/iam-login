@@ -39,19 +39,12 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
 import top.ddupan.iam.login.authentication.infrastructure.persistence.JdbcCredentialRegistration;
-import top.ddupan.iam.login.authorization.application.port.HydraGateway;
-import top.ddupan.iam.login.authorization.domain.AuthorizationRequest;
-import top.ddupan.iam.login.authorization.interfaces.web.HydraBrowserRequests;
 import top.ddupan.iam.login.support.AdDirectoryFixture;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 @SpringBootTest(properties = {"iam.ad.enabled=true", "iam.ad.domain=example.test", "iam.ad.base-dn=dc=example,dc=test",
-    "spring.datasource.hikari.maximum-pool-size=3", "iam.hydra.enabled=true", "iam.hydra.admin-url=http://127.0.0.1:14445", "iam.hydra.public-url=http://localhost:14444",
-    "iam.hydra.clients[0]=gitea-fixture", "iam.hydra.subjects[0].authority=example.test",
-    "iam.hydra.subjects[0].directory-id=00112233-4455-6677-8899-aabbccddeeff",
-    "iam.hydra.subjects[0].subject=human:existing-subject",
-    "iam.webauthn.enabled=true", "iam.webauthn.rp-id=localhost", "iam.webauthn.origin=https://localhost",
+    "spring.datasource.hikari.maximum-pool-size=3",     "iam.webauthn.enabled=true", "iam.webauthn.rp-id=localhost", "iam.webauthn.origin=https://localhost",
     "management.otlp.metrics.export.enabled=false", "spring.security.user.password=fixture-monitor-password"})
 @AutoConfigureMockMvc
 class WebAuthnIntegrationTests {
@@ -72,8 +65,6 @@ class WebAuthnIntegrationTests {
     @AfterAll static void close() { Fixtures.DIRECTORY.close(); Fixtures.DATABASE.stop(); }
     @Autowired MockMvc mvc;
     @Autowired JdbcOperations jdbc;
-    @MockitoBean
-    HydraGateway hydra;
 
 
 
@@ -123,27 +114,6 @@ class WebAuthnIntegrationTests {
     }
 
     @Test
-    void logoutRequiresCsrfBrowserBindingAndInvalidatesLocalSession() throws Exception {
-        var session=login(); secondFactor(session);
-        var data=new HydraGateway.LogoutRequest(
-            "logout-challenge","human:existing-subject","sid","");
-        Mockito.when(hydra.logout("logout-challenge")).thenReturn(data);
-        Mockito.when(hydra.logoutUrl()).thenReturn("http://localhost:14444/oauth2/sessions/logout");
-        Mockito.when(hydra.acceptLogout("logout-challenge")).thenReturn("http://localhost:14444/oauth2/sessions/logout?logout_verifier=fixture");
-        var html=mvc.perform(get("/oauth2/logout").session(session).with(https()).param("logout_challenge","logout-challenge"))
-            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
-        var match=Pattern.compile("\"binding\":\"([^\"]+)\"").matcher(html);
-        assertThat(match.find()).isTrue(); var binding=match.group(1);
-        mvc.perform(post("/oauth2/logout").session(session).with(https()).param("binding",binding)).andExpect(status().isForbidden());
-        mvc.perform(post("/oauth2/logout").session(session).with(https()).with(csrf()).param("binding","other"))
-            .andExpect(status().isBadRequest());
-        mvc.perform(post("/oauth2/logout").session(session).with(https()).with(csrf()).param("binding",binding))
-            .andExpect(status().isSeeOther());
-        assertThat(session.isInvalid()).isTrue();
-        Mockito.verify(hydra).acceptLogout("logout-challenge");
-    }
-
-    @Test
     void passwordOnlyCanEnrollButCannotCompleteOrDelete() throws Exception {
         var session = login();
         mvc.perform(post("/webauthn/register/options").session(session).with(https()))
@@ -174,61 +144,12 @@ class WebAuthnIntegrationTests {
     }
 
     private static final String AUTH_URL = "http://localhost:14444/oauth2/auth?client_id=gitea-fixture&response_type=code";
-    private AuthorizationRequest hydraRequest(String challenge, String subject,
-            String login, String binding) {
-        return new AuthorizationRequest(challenge, "gitea-fixture",
-            List.of("openid", "profile", "groups"), List.of(), subject,
-            login == null ? null : AuthorizationRequest.digest(login), binding, AUTH_URL, false);
-    }
     private void secondFactor(MockHttpSession session) {
         var context = (SecurityContext) session.getAttribute("SPRING_SECURITY_CONTEXT");
         var previous = context.getAuthentication();
         var factors = new ArrayList<GrantedAuthority>(previous.getAuthorities());
         factors.add(FactorGrantedAuthority.withAuthority("FACTOR_WEBAUTHN").issuedAt(Instant.now()).build());
         context.setAuthentication(UsernamePasswordAuthenticationToken.authenticated(previous.getPrincipal(), null, factors));
-    }
-
-    @Test
-    void hydraRequiresMfaCsrfBrowserBindingAndConsumesBothChallengesOnce() throws Exception {
-        Mockito.when(hydra.login("login-challenge")).thenReturn(hydraRequest("login-challenge", "", null, null));
-        var session = login();
-        mvc.perform(get("/oauth2/start").with(https()).session(session).param("login_challenge", "login-challenge"))
-            .andExpect(redirectedUrl("/oauth2/login"));
-        var intent = HydraBrowserRequests.intent(
-            new MockHttpServletRequest() {{ setSession(session); }});
-        mvc.perform(post("/oauth2/login").with(https()).session(session).with(csrf()).param("binding", intent.binding()))
-            .andExpect(status().is3xxRedirection());
-        Mockito.verify(hydra, Mockito.never()).acceptLogin(ArgumentMatchers.anyString(),
-            ArgumentMatchers.anyString(), ArgumentMatchers.anyString(), ArgumentMatchers.any());
-        secondFactor(session);
-        mvc.perform(post("/oauth2/login").with(https()).session(session).param("binding", intent.binding()))
-            .andExpect(status().isForbidden());
-        mvc.perform(post("/oauth2/login").with(https()).session(session).with(csrf()).param("binding", "other-browser"))
-            .andExpect(status().isBadRequest());
-        Mockito.when(hydra.acceptLogin(ArgumentMatchers.eq("login-challenge"),
-            ArgumentMatchers.eq("human:existing-subject"), ArgumentMatchers.eq(intent.binding()),
-            ArgumentMatchers.any())).thenReturn("http://localhost:14444/oauth2/auth?login_verifier=fixture");
-        mvc.perform(post("/oauth2/login").with(https()).session(session).with(csrf()).param("binding", intent.binding()))
-            .andExpect(status().isSeeOther());
-        mvc.perform(post("/oauth2/login").with(https()).session(session).with(csrf()).param("binding", intent.binding()))
-            .andExpect(status().isBadRequest());
-        Mockito.when(hydra.consent("consent-challenge")).thenReturn(
-            hydraRequest("consent-challenge", "human:existing-subject", "login-challenge", intent.binding()));
-        Mockito.when(hydra.acceptConsent(ArgumentMatchers.eq("consent-challenge"),
-            ArgumentMatchers.anyList(), ArgumentMatchers.anyMap()))
-            .thenReturn("http://localhost:14444/oauth2/auth?consent_verifier=fixture");
-        mvc.perform(get("/oauth2/consent").with(https()).session(session).param("consent_challenge", "consent-challenge"))
-            .andExpect(status().isSeeOther());
-        mvc.perform(get("/oauth2/consent").with(https()).session(session).param("consent_challenge", "consent-challenge"))
-            .andExpect(status().isBadRequest());
-    }
-
-    @Test
-    void consentCannotStartInAnotherBrowserEvenAfterMfa() throws Exception {
-        var session = login(); secondFactor(session);
-        mvc.perform(get("/oauth2/consent").with(https()).session(session).param("consent_challenge", "stolen-challenge"))
-            .andExpect(status().isBadRequest());
-        Mockito.verifyNoInteractions(hydra);
     }
 
     private MockHttpSession login() throws Exception {
