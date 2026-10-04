@@ -12,13 +12,13 @@ try-with-resources 管理已认证用户仓储会话；基础设施的 `AdUserRe
 成功后重定向到 `/signin/mfa`，显示目录账号、objectGUID、邮箱、直接所属组及组 DN。
 **密码成功本身不是完整登录成功。** Spring Security 先保存仅含 `FACTOR_PASSWORD`
 的认证结果；启用 [WebAuthn](webauthn.md) 后在此继续第二因素，否则停留在等待页面。
-未实现的应用请求使用 `denyAll`，不调用 Hydra，
+未实现的应用请求使用 `denyAll`，
 不替换现役 Go/Authelia/Gitea 登录链路。
 
 ## 目录和组语义
 
 - AD 是身份和组权威。objectGUID 按 AD 混合字节序解析为标准 UUID，作为目录稳定键；
-  不是已确定的 Hydra `sub`。切换前仍须处理现役 issuer/sub 哈希的主体连续性。
+  不是 OIDC `sub`；`sub` 由显式 subject 绑定决定，以保持现役账号关联。
 - 从 `memberOf` 读取直接成员关系，保留原始 DN；CN 保留大小写，不添加 `ROLE_`，
   不把 Spring 的 `FACTOR_PASSWORD` 当作组。结果排序，不做应用专用组改写。
 - 此轮不展开嵌套组、不推导 primaryGroupID，也不宣称与 Authelia 的有效组集合完全一致。
@@ -95,12 +95,12 @@ React 只渲染登录页面与待 MFA 页面，原生表单 POST 由 Spring Secu
 `/signin/restart` 是框架 logout 地址；不再维护 LoginTransaction 或另一份浏览器认证状态。
 
 待 MFA 页通过框架的 `validDuration` 要求密码因素在十分钟内完成，过期后需要重新认证。
-这不是完整登录会话的过期策略。MFA 与 Hydra 尚未实现，其余应用入口当前拒绝所有访问。
+这不是完整登录会话的过期策略；签发 token 另须 passkey 因素（见 [WebAuthn](webauthn.md)）。
 `/actuator/**` 使用独立无状态 Basic 安全链，人类密码因素不能用于读取监控端点，
 监控账号也不能借 Basic 进入人类登录流程。
 
 移除原来事务内的两秒提交间隔；它不是有效的账号/IP 限流。此 PoC 仍仅供受控
-LAN/Tailscale 验收，生产发布前需完善入口限流、审计、MFA、Hydra challenge 和恢复策略。
+LAN/Tailscale 验收，生产发布前需完善入口限流、审计与恢复策略。
 页面禁止缓存，内联 JSON 转义 HTML 结束标记。错误页面只显示统一消息。
 
 基础存活检查使用 `/actuator/health/liveness`。Boot 自动配置的 LDAP 健康项并未连接这里
@@ -121,6 +121,6 @@ LAN/Tailscale 验收，生产发布前需完善入口限流、审计、MFA、Hyd
 复现：`IAM_AD_URL=https://验收域名:端口 npm --prefix frontend run test:browser -- ad-login.spec.ts`。
 重构前，维护者已在 HTTPS 页面完成真实密码验证，成功到达待 MFA 页面，并反馈目录标识、邮箱与
 六个直接所属组的查询结果。该验收覆盖 Samba AD 第一因素与属性读取，不表示 MFA、
-嵌套组/主组等价性或 Hydra 登录已完成。Spring Security 重构后的真实人类复验仍待反馈。
+嵌套组/主组等价性或经授权服务器的应用登录已完成。Spring Security 重构后的真实人类复验仍待反馈。
 不在聊天、命令行或日志中传递人类密码。
 新增 AD 路径尚未进行 Native 测试，不能复用旧 UI 原型的 Native 结论。

@@ -12,7 +12,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -74,13 +73,12 @@ import tools.jackson.databind.jsontype.BasicPolymorphicTypeValidator;
 import top.ddupan.iam.login.authentication.domain.User;
 import top.ddupan.iam.login.authentication.infrastructure.security.DirectoryPrincipal;
 import top.ddupan.iam.login.authentication.infrastructure.webauthn.MfaPolicy;
-import top.ddupan.iam.login.authorization.application.AuthorizationPolicy;
-import top.ddupan.iam.login.authorization.infrastructure.hydra.HydraProperties;
+import top.ddupan.iam.login.authorization.application.SubjectBindings;
 import top.ddupan.iam.login.clients.infrastructure.RegisteredClients;
 
 /**
- * Spring Security's own authorization server, in process, replacing Hydra. Mutually exclusive with
- * {@code iam.hydra.enabled}. Signing keys come from configuration (see {@link SigningKeys}).
+ * Spring Security's own authorization server, in process: the token issuer of this IAM. Signing keys come
+ * from configuration (see {@link SigningKeys}).
  */
 @Configuration(proxyBeanMethods = false)
 @ConditionalOnProperty(prefix = "iam.authorization-server", name = "enabled", havingValue = "true")
@@ -89,15 +87,15 @@ import top.ddupan.iam.login.clients.infrastructure.RegisteredClients;
 @EnableScheduling
 class AuthorizationServerConfiguration {
     @ConfigurationProperties("iam.authorization-server")
-    record Properties(boolean enabled, URI issuer, List<HydraProperties.SubjectBinding> subjects,
-            List<Resource> signingKeys) { }
+    record Properties(boolean enabled, URI issuer, List<SubjectBinding> subjects,
+            List<Resource> signingKeys) {
+        /** A reviewed binding of a directory identity (authority + immutable id) to its existing OIDC subject. */
+        record SubjectBinding(String authority, String directoryId, String subject) { }
+    }
 
     @Bean @Order(2)
     SecurityFilterChain authorizationServer(HttpSecurity http, MfaPolicy mfa,
-            AuthorizationPolicy policy, OAuth2AuthorizationService authorizations,
-            @Value("${iam.hydra.enabled:false}") boolean hydra) throws Exception {
-        // Both would serve /oauth2/**, and Hydra-mode login pages would hand out Hydra challenges.
-        if (hydra) throw new IllegalStateException("iam.authorization-server.enabled and iam.hydra.enabled are mutually exclusive");
+            SubjectBindings policy, OAuth2AuthorizationService authorizations) throws Exception {
         var requiredFactors = mfa.complete;
         // Registered at the authorization endpoint's position before the endpoint itself (added later, while
         // building); filters of equal order keep insertion order, so this runs first.
@@ -242,7 +240,7 @@ class AuthorizationServerConfiguration {
      * still be enabled for login, and the subject binding must still exist. Either change stops refresh
      * immediately (Hydra could not do this).
      */
-    record RefreshPolicy(OAuth2AuthorizationService authorizations, AuthorizationPolicy policy) implements AuthenticationProvider {
+    record RefreshPolicy(OAuth2AuthorizationService authorizations, SubjectBindings policy) implements AuthenticationProvider {
         @Override public Authentication authenticate(Authentication request) throws AuthenticationException {
             var refresh = (OAuth2RefreshTokenAuthenticationToken) request;
             if (refresh.getPrincipal() instanceof OAuth2ClientAuthenticationToken client && client.getRegisteredClient() != null
@@ -261,13 +259,13 @@ class AuthorizationServerConfiguration {
         @Override public boolean supports(Class<?> type) { return OAuth2RefreshTokenAuthenticationToken.class.isAssignableFrom(type); }
     }
 
-    @Bean AuthorizationPolicy authorizationServerPolicy(Properties properties) {
-        return new AuthorizationPolicy(null, properties.subjects().stream().collect(Collectors.toMap(
-            binding -> new User.UserId(binding.authority(), binding.directoryId()), HydraProperties.SubjectBinding::subject)));
+    @Bean SubjectBindings subjectBindings(Properties properties) {
+        return new SubjectBindings(properties.subjects().stream().collect(Collectors.toMap(
+            binding -> new User.UserId(binding.authority(), binding.directoryId()), Properties.SubjectBinding::subject)));
     }
 
     /** Existing subjects are preserved, so downstream account links survive the issuer change. */
-    @Bean OAuth2TokenCustomizer<JwtEncodingContext> claims(AuthorizationPolicy policy) {
+    @Bean OAuth2TokenCustomizer<JwtEncodingContext> claims(SubjectBindings policy) {
         return context -> {
             if (!(context.getPrincipal().getPrincipal() instanceof DirectoryPrincipal principal)) return;
             var user = principal.user();

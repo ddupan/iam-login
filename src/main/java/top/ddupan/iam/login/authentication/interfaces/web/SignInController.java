@@ -17,8 +17,6 @@ import org.springframework.web.bind.annotation.RestController;
 import top.ddupan.iam.login.authentication.domain.User.GroupMembership;
 import top.ddupan.iam.login.authentication.infrastructure.security.DirectoryPrincipal;
 import top.ddupan.iam.login.authentication.infrastructure.webauthn.MfaPolicy;
-import top.ddupan.iam.login.authorization.application.port.HydraGateway;
-import top.ddupan.iam.login.authorization.interfaces.web.HydraBrowserRequests;
 
 /** Renders Spring Security's login pages; form processing belongs to the security filters. */
 @RestController
@@ -27,10 +25,7 @@ public class SignInController {
     private final PageRenderer renderer;
     private final ObjectProvider<MfaPolicy> policies;
 
-    private final ObjectProvider<HydraGateway> logout;
-    public SignInController(PageRenderer renderer, ObjectProvider<MfaPolicy> policies,
-            ObjectProvider<HydraGateway> logout) {
-        this.logout=logout;
+    public SignInController(PageRenderer renderer, ObjectProvider<MfaPolicy> policies) {
         this.renderer = renderer;
         this.policies = policies;
     }
@@ -52,33 +47,24 @@ public class SignInController {
     @GetMapping(value = "/signin/complete", produces = MediaType.TEXT_HTML_VALUE)
     ResponseEntity<String> complete(@AuthenticationPrincipal DirectoryPrincipal principal, CsrfToken csrf,
             HttpServletRequest request, HttpServletResponse response) {
-        // An authorization request interrupted for login (in-process authorization server) resumes here.
+        // An authorization request interrupted for login resumes here.
         var cache = new HttpSessionRequestCache();
         var saved = cache.getRequest(request, response);
         if (saved != null) {
             cache.removeRequest(request, response);
             return ResponseEntity.status(303).header("Cache-Control", "no-store").location(URI.create(saved.getRedirectUrl())).build();
         }
-        if (HydraBrowserRequests.pending(request)) {
-            return ResponseEntity.status(303).header("Cache-Control", "no-store").location(URI.create("/oauth2/login")).build();
-        }
         return identity(principal, csrf, "mfa-complete", "authenticate");
     }
 
     private ResponseEntity<String> identity(DirectoryPrincipal principal, CsrfToken csrf, String step, String passkey) {
         var user = principal.user();
-        var page = renderer.render(Map.of("step", step, "passkey", passkey, "name", user.displayName(),
-            "error", "", "action", "/signin/restart", "logoutAction", logout.getIfAvailable()==null ? "" : "/signin/logout", "csrf", csrf(csrf),
+        return renderer.render(Map.of("step", step, "passkey", passkey, "name", user.displayName(),
+            "error", "", "action", "/signin/restart", "csrf", csrf(csrf),
             "identity", Map.of("username", user.username(), "subjectId", user.id().value(),
                 "email", user.email(),
                 "groups", user.memberships().stream().map(GroupMembership::name).toList(),
                 "groupDns", user.memberships().stream().map(GroupMembership::externalId).toList())));
-        var gateway = logout.getIfAvailable();
-        if (gateway == null) return page;
-        var uri = URI.create(gateway.logoutUrl());
-        return ResponseEntity.ok().headers(page.getHeaders()).header("Content-Security-Policy",
-            PageRenderer.CONTENT_SECURITY_POLICY.replace("form-action 'self'",
-                "form-action 'self' " + uri.getScheme() + "://" + uri.getRawAuthority())).body(page.getBody());
     }
 
     private static Map<String, String> csrf(CsrfToken token) {
