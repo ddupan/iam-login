@@ -18,6 +18,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.assertj.core.api.InstanceOfAssertFactories;
+import org.hamcrest.Matchers;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -259,10 +260,10 @@ class AuthorizationServerIntegrationTests {
 
     @Test void consoleIsAPublicClientWhoseTokensCarryTheApiAudience() throws Exception {
         var console = clients.findByClientId("iam-console");
-        assertThat(console.getClientAuthenticationMethods()).containsExactly(org.springframework.security.oauth2.core.ClientAuthenticationMethod.NONE);
+        assertThat(console.getClientAuthenticationMethods()).containsExactly(ClientAuthenticationMethod.NONE);
         assertThat(console.getRedirectUris()).containsExactly("https://localhost/console/callback");
         mvc.perform(get("/console").with(https())).andExpect(status().isOk())
-            .andExpect(content().string(org.hamcrest.Matchers.containsString("\"clientId\":\"iam-console\"")));
+            .andExpect(content().string(Matchers.containsString("\"clientId\":\"iam-console\"")));
         // The real flow: password + passkey, PKCE, no secret, no consent page.
         var session = login(); secondFactor(session);
         var verifier = verifier();
@@ -279,7 +280,7 @@ class AuthorizationServerIntegrationTests {
                 .param("redirect_uri", "https://localhost/console/callback").param("code_verifier", verifier))
             .andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
         var access = claims((String) tokens.get("access_token"));
-        assertThat(access.get("aud")).asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.LIST).contains("iam-console", "iam-login");
+        assertThat(access.get("aud")).asInstanceOf(InstanceOfAssertFactories.LIST).contains("iam-console", "iam-login");
         mvc.perform(get("/api/iam/clients").with(https()).header("Authorization", "Bearer " + tokens.get("access_token")))
             .andExpect(status().isOk());
     }

@@ -5,6 +5,7 @@ import java.util.Base64;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 import org.springframework.jdbc.core.JdbcOperations;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -115,7 +116,7 @@ public final class RegisteredClients implements ClientRepository {
     }
 
     private static boolean managed(RegisteredClient client) {
-        return client.getClientAuthenticationMethods().equals(java.util.Set.of(ClientAuthenticationMethod.CLIENT_SECRET_BASIC))
+        return client.getClientAuthenticationMethods().equals(Set.of(ClientAuthenticationMethod.CLIENT_SECRET_BASIC))
             && client.getAuthorizationGrantTypes().contains(AuthorizationGrantType.AUTHORIZATION_CODE)
             && client.getAuthorizationGrantTypes().stream().allMatch(grant -> grant.equals(AuthorizationGrantType.AUTHORIZATION_CODE)
                 || grant.equals(AuthorizationGrantType.REFRESH_TOKEN));
