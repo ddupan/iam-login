@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Packages the native binary that just passed the browser test and pushes it to zot, so the
+# image that ships is the binary CI tested (no separate release build). Runs on the iam-build
+# runner, whose SPIRE agent gives this job spiffe://ddupan.top/ci/panxiao81/iam-login/publish.
+# The JWT-SVID only travels through a pipe and a throwaway DOCKER_CONFIG.
+set -euo pipefail
+
+repo=zot-push.ad.ddupan.top/iam/iam-login
+tag=${GITHUB_SHA:?}
+socket=${SPIFFE_ENDPOINT_SOCKET:-unix:///run/spire-agent/agent.sock}
+
+docker build -q -t "$repo:$tag" .
+
+export DOCKER_CONFIG
+DOCKER_CONFIG=$(mktemp -d)
+trap 'rm -rf -- "$DOCKER_CONFIG"' EXIT
+/usr/local/bin/spire-agent api fetch jwt -audience zot -output json -socketPath "${socket#unix://}" | python3 -c '
+import json, sys
+blocks = json.load(sys.stdin)
+blocks = blocks if isinstance(blocks, list) else [blocks]
+tokens = [s["svid"] for b in blocks if isinstance(b, dict) for s in b.get("svids", []) if isinstance(s, dict) and "svid" in s]
+if len(tokens) != 1: sys.exit(f"expected one JWT-SVID, got {len(tokens)}")
+sys.stdout.write(tokens[0])' | docker login zot-push.ad.ddupan.top --username zot --password-stdin >/dev/null
+
+docker push -q "$repo:$tag" >/dev/null
+digest=$(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$repo:$tag" | grep -m1 "^$repo@")
+echo "Published ${digest/zot-push./zot.} (tag $tag)"
