@@ -2,10 +2,10 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 
 type Client = {
   id: string; name: string; redirectUris: string[]; scopes: string[]; postLogoutRedirectUris: string[];
-  loginEnabled: boolean;
+  loginEnabled: boolean; pkceRequired: boolean;
 };
 const blank: Client = { id: "", name: "", redirectUris: [], scopes: ["openid", "profile", "email", "groups"],
-  postLogoutRedirectUris: [], loginEnabled: true };
+  postLogoutRedirectUris: [], loginEnabled: true, pkceRequired: true };
 const ERRORS: Record<number, string> = { 400: "输入无效：检查 ID、回调地址（HTTPS、无通配符）与 scope（须含 openid）。",
   403: "当前登录没有客户端管理权限。", 404: "客户端不存在。", 409: "冲突：ID 已存在，或该客户端不是本服务可管理的类型。" };
 class Expired extends Error { }
@@ -51,6 +51,7 @@ export function ClientsPanel({ token, onExpired }: { token: string; onExpired: (
       scopes: [...new Set(["openid", ...String(form.get("scopes")).split(/\s+/).filter(Boolean)])],
       postLogoutRedirectUris: lines("postLogoutRedirectUris"),
       loginEnabled: form.get("loginEnabled") !== null,
+      pkceRequired: form.get("pkceRequired") !== null,
     };
     run(async () => {
       if (editing.isNew) {
@@ -90,6 +91,7 @@ export function ClientsPanel({ token, onExpired }: { token: string; onExpired: (
         defaultValue={editing.client.scopes.join(" ")} /></label>
       <label>注销后回跳地址（每行一个，可空）<textarea name="postLogoutRedirectUris" rows={2} defaultValue={editing.client.postLogoutRedirectUris.join("\n")} /></label>
       <label className="inline"><input type="checkbox" name="loginEnabled" defaultChecked={editing.client.loginEnabled} />允许登录</label>
+      <label className="inline"><input type="checkbox" name="pkceRequired" defaultChecked={editing.client.pkceRequired} />要求 PKCE（仅为不支持 PKCE 的应用关闭，如 Gitea）</label>
       <button className="primary" type="submit" disabled={busy}>{editing.isNew ? "创建" : "保存"}</button>
       <button type="button" onClick={() => setEditing(null)}>取消</button>
     </form> : <>

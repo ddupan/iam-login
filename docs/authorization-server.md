@@ -58,7 +58,7 @@ provider 再抛错。
 - `offline_access`：客户端须登记 `refresh_token` 授权类型。框架默认**复用** refresh token，客户端须设置
   `reuseRefreshTokens(false)` 以轮换。
 - refresh 前重新检查 subject 绑定，绑定撤销后拒绝续期。
-- 框架默认对所有客户端强制 PKCE；不发送 PKCE 的旧 RP 须按客户端设置 `requireProofKey(false)`。
+- 框架默认对所有客户端强制 PKCE；不发送 PKCE 的旧 RP 由客户端管理 API 的 `pkceRequired: false` 关闭（见[客户端管理](client-management.md)）。
 - `request` 参数返回 `request_not_supported`；`request_uri` 按 PAR 处理，未知引用 400 且不跳转。
   discovery 声明支持的 scope、claims，并明确不支持 request、request_uri、claims 参数。
 - 授权记录 token 列使用 hash 索引；`ExpiredAuthorizations` 定时删除所有 token 均已过期的记录，

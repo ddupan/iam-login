@@ -26,7 +26,12 @@ class OidcClientTests {
         assertThatIllegalArgumentException().isThrownBy(() -> client(List.of("https://rp.example/cb"), Set.of("openid"), null));
     }
 
+    @Test void pkceRequiredMustBeStated() {
+        assertThatIllegalArgumentException().isThrownBy(
+            () -> new OidcClient("id", "Name", List.of("https://rp.example/cb"), Set.of("openid"), List.of(), true, null));
+    }
+
     private static OidcClient client(List<String> callbacks, Set<String> scopes, Boolean enabled) {
-        return new OidcClient("id", "Name", callbacks, scopes, List.of(), enabled);
+        return new OidcClient("id", "Name", callbacks, scopes, List.of(), enabled, true);
     }
 }

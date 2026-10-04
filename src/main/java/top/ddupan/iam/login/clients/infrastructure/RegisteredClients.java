@@ -104,7 +104,8 @@ public final class RegisteredClients implements ClientRepository {
             .redirectUris(uris -> { uris.clear(); uris.addAll(client.redirectUris()); })
             .postLogoutRedirectUris(uris -> { uris.clear(); uris.addAll(client.postLogoutRedirectUris()); })
             .scopes(scopes -> { scopes.clear(); scopes.addAll(client.scopes()); })
-            .clientSettings(ClientSettings.withSettings(settings.getSettings()).setting(LOGIN_ENABLED, client.loginEnabled()).build());
+            .clientSettings(ClientSettings.withSettings(settings.getSettings()).setting(LOGIN_ENABLED, client.loginEnabled())
+                .requireProofKey(client.pkceRequired()).build());
     }
 
     private RegisteredClient managedClient(String id) {
@@ -124,7 +125,8 @@ public final class RegisteredClients implements ClientRepository {
 
     private static OidcClient view(RegisteredClient client) {
         return new OidcClient(client.getClientId(), client.getClientName(), List.copyOf(client.getRedirectUris()),
-            new HashSet<>(client.getScopes()), List.copyOf(client.getPostLogoutRedirectUris()), loginEnabled(client));
+            new HashSet<>(client.getScopes()), List.copyOf(client.getPostLogoutRedirectUris()), loginEnabled(client),
+            client.getClientSettings().isRequireProofKey());
     }
 
     private static String newSecret() {

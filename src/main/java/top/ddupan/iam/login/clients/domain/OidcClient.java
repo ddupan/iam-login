@@ -7,9 +7,11 @@ import java.util.Set;
 /**
  * First-party confidential authorization-code client. No caller-controlled grants or metadata.
  * {@code loginEnabled} is required: a request that omits it must not silently disable (or enable) a client.
+ * {@code pkceRequired} is required for the same reason; turning it off is only for confidential clients that
+ * cannot send PKCE (Gitea 1.27 sends neither PKCE nor nonce), which RFC 9700 2.1.1 still permits.
  */
 public record OidcClient(String id, String name, List<String> redirectUris, Set<String> scopes,
-        List<String> postLogoutRedirectUris, Boolean loginEnabled) {
+        List<String> postLogoutRedirectUris, Boolean loginEnabled, Boolean pkceRequired) {
     public OidcClient {
         requireId(id);
         if (name == null || name.isBlank() || name.length() > 200) throw new IllegalArgumentException("Invalid name");
@@ -25,6 +27,7 @@ public record OidcClient(String id, String name, List<String> redirectUris, Set<
         if (postLogoutRedirectUris.size() > 20) throw new IllegalArgumentException("Too many logout redirects");
         redirectUris.forEach(OidcClient::requireUri); postLogoutRedirectUris.forEach(OidcClient::requireUri);
         if (loginEnabled == null) throw new IllegalArgumentException("loginEnabled is required");
+        if (pkceRequired == null) throw new IllegalArgumentException("pkceRequired is required");
     }
     public static void requireId(String id) {
         if (id == null || !id.matches("[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}")) throw new IllegalArgumentException("Invalid client ID");

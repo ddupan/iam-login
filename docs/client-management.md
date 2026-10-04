@@ -52,12 +52,16 @@ iam:
   "redirectUris": ["https://app.example.test/oidc/callback"],
   "scopes": ["openid", "profile", "email", "groups", "offline_access"],
   "postLogoutRedirectUris": ["https://app.example.test/logged-out"],
-  "loginEnabled": true
+  "loginEnabled": true,
+  "pkceRequired": true
 }
 ```
 
 - 回调必须 HTTPS（隔离开发允许 loopback HTTP），不允许通配符、fragment 或 URL 用户信息。
-- 固定 `authorization_code`、`client_secret_basic`，要求 PKCE；refresh token 轮换。
+- 固定 `authorization_code`、`client_secret_basic`；refresh token 轮换。
+- `pkceRequired` 必填，缺失 400。只为不能发送 PKCE 的 confidential 客户端关闭（Gitea 1.27 的 OIDC
+  登录源既不发 PKCE 也不发 nonce，只有 `state`）；RFC 9700 2.1.1 允许 confidential 客户端如此，
+  但授权码注入防护随之变弱，能发 PKCE 的应用一律保持开启。
 - scope 可为任意符合 RFC 6749 的 scope-token（最多 50 个），必须含 `openid`；scope 不代表权限。
   含 `offline_access` 时一并登记 `refresh_token` 授权类型（OIDC Core 11），去掉时移除。
 - `loginEnabled` 必填，缺失 400。`false` 时新的授权请求返回 `unauthorized_client`，refresh 也被拒绝；
