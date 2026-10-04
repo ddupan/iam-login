@@ -15,8 +15,14 @@ fi
 
 "$repo_root/scripts/frontend-in-docker"
 
+# A fixed container name lets callers stop a long-running task (e.g. a fixture) precisely.
+name_args=()
+if [[ -n ${IAM_DOCKER_NAME:-} ]]; then
+  name_args=(--name "$IAM_DOCKER_NAME")
+fi
+
 # Linux host networking is needed for Testcontainers' published ports.
-exec "${docker_cmd[@]}" run --rm --network host \
+exec "${docker_cmd[@]}" run --rm "${name_args[@]}" --network host \
   --cpus "${IAM_BUILD_CPUS:-4}" --memory "${IAM_BUILD_MEMORY:-8g}" \
   --user "$(id -u):$(id -g)" \
   --group-add "$(stat -c %g /var/run/docker.sock)" \

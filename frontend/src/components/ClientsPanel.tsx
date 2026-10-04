@@ -2,14 +2,11 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 
 type Client = {
   id: string; name: string; redirectUris: string[]; scopes: string[]; postLogoutRedirectUris: string[];
-  backchannelLogoutUri: string; frontchannelLogoutUri: string;
-  /** null: legacy client without the flag; login follows the server's configured allowlist. */
-  loginEnabled: boolean | null;
+  loginEnabled: boolean;
 };
-const SCOPES = ["openid", "profile", "email", "groups"];
-const blank: Client = { id: "", name: "", redirectUris: [], scopes: ["openid"], postLogoutRedirectUris: [],
-  backchannelLogoutUri: "", frontchannelLogoutUri: "", loginEnabled: true };
-const ERRORS: Record<number, string> = { 400: "输入无效：检查 ID、回调地址（HTTPS、无通配符）与 scope。",
+const blank: Client = { id: "", name: "", redirectUris: [], scopes: ["openid", "profile", "email", "groups"],
+  postLogoutRedirectUris: [], loginEnabled: true };
+const ERRORS: Record<number, string> = { 400: "输入无效：检查 ID、回调地址（HTTPS、无通配符）与 scope（须含 openid）。",
   403: "当前登录没有客户端管理权限。", 404: "客户端不存在。", 409: "冲突：ID 已存在，或该客户端不是本服务可管理的类型。" };
 class Expired extends Error { }
 
@@ -51,11 +48,9 @@ export function ClientsPanel({ token, onExpired }: { token: string; onExpired: (
       id: editing.isNew ? String(form.get("id")).trim() : editing.client.id,
       name: String(form.get("name")).trim(),
       redirectUris: lines("redirectUris"),
-      scopes: SCOPES.filter(scope => scope === "openid" || form.get(`scope-${scope}`) !== null),
+      scopes: [...new Set(["openid", ...String(form.get("scopes")).split(/\s+/).filter(Boolean)])],
       postLogoutRedirectUris: lines("postLogoutRedirectUris"),
-      backchannelLogoutUri: String(form.get("backchannelLogoutUri")).trim(),
-      frontchannelLogoutUri: String(form.get("frontchannelLogoutUri")).trim(),
-      loginEnabled: ({ true: true, false: false } as Record<string, boolean>)[String(form.get("loginEnabled"))] ?? null,
+      loginEnabled: form.get("loginEnabled") !== null,
     };
     run(async () => {
       if (editing.isNew) {
@@ -91,17 +86,10 @@ export function ClientsPanel({ token, onExpired }: { token: string; onExpired: (
       {editing.isNew && <label>Client ID<input name="id" required pattern="[a-zA-Z0-9][a-zA-Z0-9._\-]{0,127}" /></label>}
       <label>名称<input name="name" required maxLength={200} defaultValue={editing.client.name} /></label>
       <label>回调地址（每行一个）<textarea name="redirectUris" required rows={3} defaultValue={editing.client.redirectUris.join("\n")} /></label>
-      <fieldset><legend>Scope</legend>{SCOPES.map(scope => <label key={scope} className="inline">
-        <input type="checkbox" name={`scope-${scope}`} disabled={scope === "openid"}
-          defaultChecked={editing.client.scopes.includes(scope)} />{scope}</label>)}</fieldset>
+      <label>Scope（空格分隔，openid 必含；offline_access 会签发 refresh token）<input name="scopes" required
+        defaultValue={editing.client.scopes.join(" ")} /></label>
       <label>注销后回跳地址（每行一个，可空）<textarea name="postLogoutRedirectUris" rows={2} defaultValue={editing.client.postLogoutRedirectUris.join("\n")} /></label>
-      <label>Back-channel 注销地址（应用不支持则留空）<input name="backchannelLogoutUri" defaultValue={editing.client.backchannelLogoutUri} /></label>
-      <label>Front-channel 注销地址（应用不支持则留空）<input name="frontchannelLogoutUri" defaultValue={editing.client.frontchannelLogoutUri} /></label>
-      <label>登录<select name="loginEnabled" defaultValue={String(editing.client.loginEnabled)}>
-        <option value="true">允许登录</option>
-        <option value="false">禁止登录</option>
-        {editing.client.loginEnabled === null && <option value="null">按服务端配置白名单（旧客户端）</option>}
-      </select></label>
+      <label className="inline"><input type="checkbox" name="loginEnabled" defaultChecked={editing.client.loginEnabled} />允许登录</label>
       <button className="primary" type="submit" disabled={busy}>{editing.isNew ? "创建" : "保存"}</button>
       <button type="button" onClick={() => setEditing(null)}>取消</button>
     </form> : <>
@@ -110,7 +98,7 @@ export function ClientsPanel({ token, onExpired }: { token: string; onExpired: (
       <table>
         <thead><tr><th>ID</th><th>名称</th><th>状态</th><th>操作</th></tr></thead>
         <tbody>{clients.map(client => <tr key={client.id}>
-          <td>{client.id}</td><td>{client.name}</td><td>{client.loginEnabled === null ? "按配置白名单" : client.loginEnabled ? "启用" : "已禁用"}</td>
+          <td>{client.id}</td><td>{client.name}</td><td>{client.loginEnabled ? "启用" : "已禁用"}</td>
           <td>
             <button type="button" onClick={() => setEditing({ client, isNew: false })}>编辑</button>
             <button type="button" onClick={() => rotate(client.id)}>轮换 secret</button>

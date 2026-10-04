@@ -3,13 +3,14 @@ import { InMemoryWebStorage, UserManager, WebStorageStateStore, type User } from
 import { ClientsPanel } from "../components/ClientsPanel";
 import type { AdminContext } from "../page-context";
 
-/** Ordinary OIDC public client of Hydra; it holds no privileges beyond the access token it is granted. */
+/** Ordinary OIDC public client of this server; it holds no privileges beyond the access token it is granted. */
 export function AdminApp({ context }: { context: AdminContext }) {
   const [manager] = useState(() => new UserManager({
     authority: context.authority,
     client_id: context.clientId,
     redirect_uri: `${window.location.origin}/console/callback`,
-    scope: "openid iam.clients.manage",
+    // groups carries the identity facts the API authorizes on; its audience is registered with this client.
+    scope: "openid groups",
     // Tokens stay in memory: a reload signs in again rather than leaving a bearer token in storage.
     userStore: new WebStorageStateStore({ store: new InMemoryWebStorage() }),
     automaticSilentRenew: false,

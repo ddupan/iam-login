@@ -1,0 +1,53 @@
+name: ci
+# Runs on the repository runner "iam-build" (temporary: a host-mode runner in a disposable LXC on pve1,
+# so that caches persist and native builds stay off the k3s laptop). JVM checks run for every change;
+# the native image (~11 min, ~5.5 GB peak) only after a merge to main, or on demand.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  IAM_GRADLE_CACHE: /srv/iam/ci/gradle
+  IAM_NPM_CACHE: /srv/iam/ci/npm
+  IAM_BUILD_CPUS: "4"
+
+jobs:
+  jvm:
+    runs-on: iam-build
+    steps:
+      - uses: actions/checkout@v4
+      - name: JVM tests and boot jar
+        env:
+          IAM_BUILD_MEMORY: 4g
+        # Test AOT is skipped until its fixture lifecycle issue is fixed (docs/native-validation.md).
+        run: scripts/gradle-in-docker test bootJar -x processTestAot -x compileAotTestJava -x processAotTestResources
+      - name: Failed tests
+        if: failure()
+        run: |
+          python3 - <<'PY'
+          import glob, xml.etree.ElementTree as E
+          for path in glob.glob("build/test-results/test/*.xml"):
+              for case in E.parse(path).getroot().iter("testcase"):
+                  for problem in case:
+                      if problem.tag in ("failure", "error"):
+                          print(f"{case.get('classname')}.{case.get('name')}: {(problem.get('message') or '')[:500]}")
+          PY
+
+  native:
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    needs: jvm
+    runs-on: iam-build
+    steps:
+      - uses: actions/checkout@v4
+      - name: Native image
+        env:
+          IAM_BUILD_MEMORY: 7g
+        run: >-
+          scripts/gradle-in-docker nativeCompile
+          "-PaotArgs=--iam.ad.enabled=true --iam.webauthn.enabled=true --iam.authorization-server.enabled=true"
+      - name: Native browser test
+        env:
+          IAM_BUILD_MEMORY: 3g
+        run: scripts/native-smoke
