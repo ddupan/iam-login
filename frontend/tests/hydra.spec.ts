@@ -114,42 +114,4 @@ test("AD + passkey -> Hydra authorization code -> signed OIDC token and coordina
   expect(notification.nonce).toBeUndefined();
   expect(Math.abs(notification.iat - Date.now() / 1000)).toBeLessThan(60);
   expect(notification.events).toEqual({ "http://schemas.openid.net/event/backchannel-logout": {} });
-  expect((await context.request.get("https://localhost:18083/api/iam/clients")).status()).toBe(401);
-
-  // Admin UI is an ordinary public client of the same issuer; the API only accepts its bearer token.
-  await page.goto("https://localhost:18083/console");
-  await expect(page.getByRole("heading", { name: "登录你的账号" })).toBeVisible();
-  await page.getByLabel("用户名", { exact: true }).fill("alice");
-  await page.getByLabel("密码", { exact: true }).fill("fixture-password");
-  await page.getByRole("button", { name: "继续", exact: true }).click();
-  await page.getByRole("button", { name: "验证 Passkey", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "继续登录 iam-admin-ui" })).toBeVisible();
-  await page.getByRole("button", { name: "继续至应用", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "OIDC 客户端" })).toBeVisible();
-  expect(new URL(page.url()).pathname).toBe("/console");
-  await expect(page.getByRole("row", { name: /gitea-fixture/ })).toBeVisible();
-  // The public admin client itself is not a manageable (confidential) client.
-  await expect(page.getByRole("cell", { name: "iam-admin-ui", exact: true })).toHaveCount(0);
-
-  await page.getByRole("button", { name: "新建客户端", exact: true }).click();
-  await page.getByLabel("Client ID").fill("e2e-app");
-  await page.getByLabel("名称").fill("E2E");
-  await page.getByLabel("回调地址（每行一个）").fill("https://app.example.test/callback");
-  await page.getByRole("button", { name: "创建", exact: true }).click();
-  const secret = page.locator(".secret output");
-  await expect(secret).not.toBeEmpty();
-  const created = (await secret.textContent())!;
-  page.once("dialog", dialog => dialog.accept());
-  await page.getByRole("row", { name: /e2e-app/ }).getByRole("button", { name: "轮换 secret" }).click();
-  await expect(secret).not.toHaveText(created);
-  const rotated = (await secret.textContent())!;
-  const tokenError = (value: string) => context.request.post("http://localhost:14444/oauth2/token", {
-    headers: { Authorization: "Basic " + Buffer.from(`e2e-app:${value}`).toString("base64") },
-    form: { grant_type: "authorization_code", code: "invalid-code", redirect_uri: "https://app.example.test/callback" },
-  }).then(response => response.json()).then(body => body.error);
-  expect(await tokenError(created)).toBe("invalid_client");
-  expect(await tokenError(rotated)).toBe("invalid_grant");
-  page.once("dialog", dialog => dialog.accept());
-  await page.getByRole("row", { name: /e2e-app/ }).getByRole("button", { name: "删除" }).click();
-  await expect(page.getByRole("cell", { name: "e2e-app", exact: true })).toHaveCount(0);
 });

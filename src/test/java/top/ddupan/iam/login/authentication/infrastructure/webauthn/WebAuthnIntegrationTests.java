@@ -21,7 +21,6 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import static org.assertj.core.api.Assertions.*;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
-import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.opaqueToken;
 import org.springframework.jdbc.core.JdbcOperations;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpSession;
@@ -43,13 +42,12 @@ import top.ddupan.iam.login.authentication.infrastructure.persistence.JdbcCreden
 import top.ddupan.iam.login.authorization.application.port.HydraGateway;
 import top.ddupan.iam.login.authorization.domain.AuthorizationRequest;
 import top.ddupan.iam.login.authorization.interfaces.web.HydraBrowserRequests;
-import top.ddupan.iam.login.clients.domain.ClientRepository;
 import top.ddupan.iam.login.support.AdDirectoryFixture;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 @SpringBootTest(properties = {"iam.ad.enabled=true", "iam.ad.domain=example.test", "iam.ad.base-dn=dc=example,dc=test",
-    "spring.datasource.hikari.maximum-pool-size=3", "iam.clients.admin-group-dns[0]=CN=gitea-admins,dc=example,dc=test", "iam.clients.admin-ui-client-id=iam-admin-ui", "iam.hydra.enabled=true", "iam.hydra.admin-url=http://127.0.0.1:14445", "iam.hydra.public-url=http://localhost:14444",
+    "spring.datasource.hikari.maximum-pool-size=3", "iam.hydra.enabled=true", "iam.hydra.admin-url=http://127.0.0.1:14445", "iam.hydra.public-url=http://localhost:14444",
     "iam.hydra.clients[0]=gitea-fixture", "iam.hydra.subjects[0].authority=example.test",
     "iam.hydra.subjects[0].directory-id=00112233-4455-6677-8899-aabbccddeeff",
     "iam.hydra.subjects[0].subject=human:existing-subject",
@@ -78,8 +76,6 @@ class WebAuthnIntegrationTests {
     HydraGateway hydra;
 
 
-    @MockitoBean
-    ClientRepository clients;
 
     @Autowired PlatformTransactionManager transactionManager;
     @Autowired DataSource dataSource;
@@ -124,38 +120,6 @@ class WebAuthnIntegrationTests {
         assertThat(jdbc.queryForObject("select display_name from user_entities where id=?",String.class,id))
             .isEqualTo("committed");
         jdbc.update("delete from user_entities where id=?",id);
-    }
-
-    @Test
-    void clientApiAcceptsOnlyBearerTokensCarryingTheManagementScope() throws Exception {
-        mvc.perform(get("/api/iam/clients").with(https())).andExpect(status().isUnauthorized());
-        // A fully authenticated administrator's browser session is not an API credential.
-        var session=login(); secondFactor(session);
-        mvc.perform(get("/api/iam/clients").session(session).with(https())).andExpect(status().isUnauthorized());
-        var ordinary=opaqueToken().authorities(new SimpleGrantedAuthority("SCOPE_openid"));
-        mvc.perform(get("/api/iam/clients").with(https()).with(ordinary)).andExpect(status().isForbidden());
-        var manage=opaqueToken().authorities(new SimpleGrantedAuthority("SCOPE_iam.clients.manage"));
-        Mockito.when(clients.list(0,20)).thenReturn(List.of());
-        mvc.perform(get("/api/iam/clients").with(https()).with(manage)).andExpect(status().isOk());
-        // Bearer requests carry no ambient cookie credential, so no CSRF token is involved.
-        mvc.perform(delete("/api/iam/clients/example").with(https()).with(manage)).andExpect(status().isNoContent());
-        Mockito.verify(clients).delete("example");
-        Mockito.when(clients.rotateSecret("example")).thenReturn("fixture-rotated-secret");
-        mvc.perform(post("/api/iam/clients/example/secret").with(https()).with(manage)).andExpect(status().isOk())
-            .andExpect(header().string("Cache-Control","no-store")).andExpect(jsonPath("secret").value("fixture-rotated-secret"));
-        mvc.perform(get("/api/iam/session").with(https()).with(manage)).andExpect(status().isNotFound());
-        mvc.perform(post("/api/iam/clients").with(https()).with(manage).contentType("application/json").content("""
-            {"id":"no-policy","name":"No policy","redirectUris":["https://app.example.test/cb"],"scopes":["openid"]}
-            """)).andExpect(status().isBadRequest());
-        Mockito.verify(clients,Mockito.never()).create(ArgumentMatchers.any());
-    }
-
-    @Test
-    void consolePageIsAPublicShellThatMayOnlyFetchFromTheIssuer() throws Exception {
-        mvc.perform(get("/console").with(https())).andExpect(status().isOk())
-            .andExpect(header().string("Content-Security-Policy",Matchers.containsString("connect-src 'self' http://localhost:14444;")))
-            .andExpect(content().string(Matchers.containsString("\"clientId\":\"iam-admin-ui\"")));
-        mvc.perform(get("/console/clients").with(https())).andExpect(status().isUnauthorized());
     }
 
     @Test
