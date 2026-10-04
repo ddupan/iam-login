@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+# Browser test against the native binary: simulated AD, disposable PostgreSQL, real (virtual) passkey.
+# Build the binary first with the features it serves switched on at AOT time:
+#   scripts/gradle-in-docker nativeCompile \
+#     -PaotArgs='--iam.ad.enabled=true --iam.webauthn.enabled=true --iam.authorization-server.enabled=true'
+# Test-only: everything listens on loopback and is removed on exit. Uses ports 18083, 14446 and 25432.
+set -euo pipefail
+
+repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+binary=$repo_root/build/native/nativeCompile/iam-login
+graalvm=ghcr.io/graalvm/native-image-community@sha256:0d936f32bb8acb5bc60c41b33e05f064d7a6aaf36b726538296c54949bd4a3c0
+postgres=postgres@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873
+playwright=mcr.microsoft.com/playwright:v1.63.0-noble   # matches @playwright/test in frontend/package.json
+docker_cmd=(docker)
+if [[ ${IAM_DOCKER_USE_SUDO:-0} == 1 ]]; then docker_cmd=(sudo -n docker); fi
+[[ -x $binary ]] || { echo "native binary missing: $binary" >&2; exit 1; }
+
+work=$(mktemp -d)
+binary_pid=
+cleanup() {
+  [[ -n $binary_pid ]] && kill "$binary_pid" 2>/dev/null || true
+  "${docker_cmd[@]}" rm -f iam-smoke-support iam-smoke-pg >/dev/null 2>&1 || true
+  rm -rf -- "$work"
+}
+trap cleanup EXIT
+
+wait_for() {  # wait_for <seconds> <description> <command...>
+  local limit=$1 what=$2; shift 2
+  for _ in $(seq "$limit"); do "$@" >/dev/null 2>&1 && return 0; sleep 1; done
+  echo "timed out waiting for $what" >&2; return 1
+}
+
+# Signing key as infrastructure would provide it, and a truststore for the fixture's LDAPS certificate.
+openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out "$work/signing-key.pem" 2>/dev/null
+"${docker_cmd[@]}" run --rm -v "$repo_root/src/test/resources/ldap:/in:ro" -v "$work:/out" --entrypoint sh "$graalvm" -c '
+  alias=$(keytool -list -keystore /in/fixture.p12 -storepass fixture-only -storetype PKCS12 | grep -i PrivateKeyEntry | cut -d, -f1)
+  keytool -exportcert -rfc -alias "$alias" -keystore /in/fixture.p12 -storepass fixture-only -storetype PKCS12 -file /out/fixture.crt
+  keytool -importcert -noprompt -alias fixture -file /out/fixture.crt -keystore /out/trust.p12 -storetype PKCS12 -storepass fixture-only
+  chmod a+r /out/trust.p12' >/dev/null 2>&1
+
+"${docker_cmd[@]}" run -d --name iam-smoke-pg -p 127.0.0.1:25432:5432 \
+  -e POSTGRES_USER=iam -e POSTGRES_PASSWORD=smoke-only -e POSTGRES_DB=iam "$postgres" >/dev/null
+wait_for 60 PostgreSQL "${docker_cmd[@]}" exec iam-smoke-pg psql -U iam -d iam -c 'select 1'
+
+# Simulated AD plus the fixture client, registered once the binary's Flyway has created the tables.
+IAM_DOCKER_NAME=iam-smoke-support "$repo_root/scripts/gradle-in-docker" nativeSmokeSupport \
+  -x processTestAot -x compileAotTestJava -x processAotTestResources \
+  "-PsmokeArgs=jdbc:postgresql://127.0.0.1:25432/iam iam smoke-only" > "$work/support.log" 2>&1 &
+wait_for 600 "simulated AD" grep -q LDAP_URL= "$work/support.log"
+ldap=$(grep -o 'LDAP_URL=.*' "$work/support.log" | cut -d= -f2)
+
+keystore=$repo_root/src/test/resources/ldap/fixture.p12
+"$binary" \
+  -Djavax.net.ssl.trustStore="$work/trust.p12" -Djavax.net.ssl.trustStorePassword=fixture-only -Djavax.net.ssl.trustStoreType=PKCS12 \
+  --server.address=127.0.0.1 --server.port=18083 --server.ssl.enabled=true \
+  --server.ssl.key-store="file:$keystore" --server.ssl.key-store-password=fixture-only \
+  --iam.ad.enabled=true --iam.ad.domain=example.test --iam.ad.base-dn=dc=example,dc=test --iam.ad.url="$ldap" \
+  --iam.webauthn.enabled=true --iam.webauthn.rp-id=localhost --iam.webauthn.origin=https://localhost:18083 \
+  --iam.authorization-server.enabled=true --iam.authorization-server.issuer=https://localhost:18083 \
+  --iam.authorization-server.signing-keys[0]="file:$work/signing-key.pem" \
+  --iam.authorization-server.subjects[0].authority=example.test \
+  --iam.authorization-server.subjects[0].directory-id=00112233-4455-6677-8899-aabbccddeeff \
+  --iam.authorization-server.subjects[0].subject=human:fixture-existing-oidc-subject \
+  --spring.datasource.url=jdbc:postgresql://127.0.0.1:25432/iam --spring.datasource.username=iam \
+  --spring.datasource.password=smoke-only --spring.security.user.password=smoke-monitor-password \
+  --management.otlp.metrics.export.enabled=false > "$work/native.log" 2>&1 &
+binary_pid=$!
+wait_for 90 "native binary" curl -sfk -o /dev/null https://localhost:18083/actuator/health/readiness
+wait_for 120 "fixture client" grep -q CLIENT_REGISTERED "$work/support.log"
+grep -oE 'Started IamLoginApplication in [0-9.]+ seconds' "$work/native.log" || true
+
+status=0
+"${docker_cmd[@]}" run --rm --network host --ipc=host -v "$repo_root/frontend:/w" -w /w \
+  -v "${IAM_NPM_CACHE:-$HOME/.cache/iam-login/npm}:/root/.npm" -e IAM_AUTHORIZATION_SERVER_FIXTURE=1 "$playwright" \
+  sh -c 'npm ci --no-audit --no-fund >/dev/null && npx playwright test authorization-server.spec.ts' || status=$?
+
+echo "native RSS: $(ps -o rss= -p "$binary_pid" 2>/dev/null | tr -d ' ') kB"
+if grep -q ' ERROR ' "$work/native.log"; then
+  echo "native binary logged errors:" >&2; grep -A5 ' ERROR ' "$work/native.log" | head -40 >&2; status=1
+fi
+exit "$status"
