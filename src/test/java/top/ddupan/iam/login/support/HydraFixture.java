@@ -1,5 +1,6 @@
 package top.ddupan.iam.login.support;
 
+import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -38,7 +39,7 @@ public final class HydraFixture implements AutoCloseable {
                                 var response = http.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:14445/health/ready"))
                                     .timeout(Duration.ofSeconds(1)).GET().build(), HttpResponse.BodyHandlers.discarding());
                                 if (response.statusCode() == 200) return;
-                            } catch (java.io.IOException ignored) { }
+                            } catch (IOException ignored) { }
                             Thread.sleep(200);
                         }
                         throw new IllegalStateException("Fixture Hydra did not become ready");

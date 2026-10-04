@@ -8,6 +8,7 @@ import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.LoginUrlAuthenticationEntryPoint;
+import org.springframework.security.web.authentication.session.SessionAuthenticationStrategy;
 import org.springframework.security.web.webauthn.authentication.PublicKeyCredentialRequestOptionsFilter;
 import org.springframework.security.web.webauthn.authentication.WebAuthnAuthenticationFilter;
 import top.ddupan.iam.login.authentication.infrastructure.webauthn.*;
@@ -47,7 +48,7 @@ final class WebAuthnBrowserConfigurer {
             if (filter instanceof WebAuthnAuthenticationFilter authentication) {
                 authentication.setRequestOptionsRepository(repository);
                 authentication.setSessionAuthenticationStrategy(http.getSharedObject(
-                    org.springframework.security.web.authentication.session.SessionAuthenticationStrategy.class));
+                    SessionAuthenticationStrategy.class));
             }
         }
         return chain;

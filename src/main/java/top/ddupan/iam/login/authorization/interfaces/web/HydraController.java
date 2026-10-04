@@ -1,11 +1,13 @@
 package top.ddupan.iam.login.authorization.interfaces.web;
 
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import java.net.URI;
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.Map;
 import java.util.Set;
-import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
@@ -14,6 +16,7 @@ import org.springframework.security.core.authority.FactorGrantedAuthority;
 import org.springframework.security.web.authentication.logout.SecurityContextLogoutHandler;
 import org.springframework.security.web.csrf.CsrfToken;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.util.UriComponentsBuilder;
 import top.ddupan.iam.login.authentication.infrastructure.security.DirectoryPrincipal;
 import top.ddupan.iam.login.authentication.interfaces.web.PageRenderer;
 import top.ddupan.iam.login.authorization.application.AuthorizeApplication;
@@ -30,7 +33,7 @@ public class HydraController {
     ResponseEntity<Void> start(@RequestParam("login_challenge") String challenge,
             HttpServletRequest request, HttpServletResponse response, Authentication authentication) {
         var login = policy.start(challenge);
-        var query = org.springframework.web.util.UriComponentsBuilder.fromUriString(login.requestUrl()).build().getQueryParams();
+        var query = UriComponentsBuilder.fromUriString(login.requestUrl()).build().getQueryParams();
         if (query.containsKey("prompt") || query.containsKey("max_age")) {
             new SecurityContextLogoutHandler().logout(request, response, authentication);
         }
@@ -48,10 +51,10 @@ public class HydraController {
                 "headerName", csrf.getHeaderName()), "binding", intent.binding(),
             "client", intent.request().clientId(), "scopes", intent.request().scopes()));
         var authorization = URI.create(intent.request().requestUrl());
-        var rawCallback = org.springframework.web.util.UriComponentsBuilder.fromUri(authorization).build()
+        var rawCallback = UriComponentsBuilder.fromUri(authorization).build()
             .getQueryParams().getFirst("redirect_uri");
         if (rawCallback == null) throw new IllegalArgumentException("Explicit callback is required");
-        var callback = URI.create(java.net.URLDecoder.decode(rawCallback, java.nio.charset.StandardCharsets.UTF_8));
+        var callback = URI.create(URLDecoder.decode(rawCallback, StandardCharsets.UTF_8));
         var targets = formOrigin(authorization) + " " + formOrigin(callback);
         return ResponseEntity.ok().headers(page.getHeaders()).header("Content-Security-Policy",
             PageRenderer.CONTENT_SECURITY_POLICY.replace("form-action 'self'", "form-action 'self' " + targets))

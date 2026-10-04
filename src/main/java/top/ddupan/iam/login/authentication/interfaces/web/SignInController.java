@@ -1,8 +1,9 @@
 package top.ddupan.iam.login.authentication.interfaces.web;
 
+import jakarta.servlet.http.HttpServletRequest;
+import java.net.URI;
 import java.util.Map;
 import org.springframework.beans.factory.ObjectProvider;
-import top.ddupan.iam.login.authentication.infrastructure.webauthn.MfaPolicy;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -13,6 +14,9 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import top.ddupan.iam.login.authentication.domain.User.GroupMembership;
 import top.ddupan.iam.login.authentication.infrastructure.security.DirectoryPrincipal;
+import top.ddupan.iam.login.authentication.infrastructure.webauthn.MfaPolicy;
+import top.ddupan.iam.login.authorization.application.port.HydraGateway;
+import top.ddupan.iam.login.authorization.interfaces.web.HydraBrowserRequests;
 
 /** Renders Spring Security's login pages; form processing belongs to the security filters. */
 @RestController
@@ -21,9 +25,9 @@ public class SignInController {
     private final PageRenderer renderer;
     private final ObjectProvider<MfaPolicy> policies;
 
-    private final ObjectProvider<top.ddupan.iam.login.authorization.application.port.HydraGateway> logout;
+    private final ObjectProvider<HydraGateway> logout;
     public SignInController(PageRenderer renderer, ObjectProvider<MfaPolicy> policies,
-            ObjectProvider<top.ddupan.iam.login.authorization.application.port.HydraGateway> logout) {
+            ObjectProvider<HydraGateway> logout) {
         this.logout=logout;
         this.renderer = renderer;
         this.policies = policies;
@@ -45,9 +49,9 @@ public class SignInController {
 
     @GetMapping(value = "/signin/complete", produces = MediaType.TEXT_HTML_VALUE)
     ResponseEntity<String> complete(@AuthenticationPrincipal DirectoryPrincipal principal, CsrfToken csrf,
-            jakarta.servlet.http.HttpServletRequest request) {
-        if (top.ddupan.iam.login.authorization.interfaces.web.HydraBrowserRequests.pending(request)) {
-            return ResponseEntity.status(303).header("Cache-Control", "no-store").location(java.net.URI.create("/oauth2/login")).build();
+            HttpServletRequest request) {
+        if (HydraBrowserRequests.pending(request)) {
+            return ResponseEntity.status(303).header("Cache-Control", "no-store").location(URI.create("/oauth2/login")).build();
         }
         return identity(principal, csrf, "mfa-complete", "authenticate");
     }
@@ -62,7 +66,7 @@ public class SignInController {
                 "groupDns", user.memberships().stream().map(GroupMembership::externalId).toList())));
         var gateway = logout.getIfAvailable();
         if (gateway == null) return page;
-        var uri = java.net.URI.create(gateway.logoutUrl());
+        var uri = URI.create(gateway.logoutUrl());
         return ResponseEntity.ok().headers(page.getHeaders()).header("Content-Security-Policy",
             PageRenderer.CONTENT_SECURITY_POLICY.replace("form-action 'self'",
                 "form-action 'self' " + uri.getScheme() + "://" + uri.getRawAuthority())).body(page.getBody());

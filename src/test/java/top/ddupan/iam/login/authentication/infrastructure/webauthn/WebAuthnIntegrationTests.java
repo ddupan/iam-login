@@ -1,28 +1,50 @@
 package top.ddupan.iam.login.authentication.infrastructure.webauthn;
 
+import com.zaxxer.hikari.HikariDataSource;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.regex.Pattern;
+import javax.sql.DataSource;
+import org.hamcrest.Matchers;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentMatchers;
+import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
-import org.springframework.mock.web.MockHttpSession;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import org.springframework.security.core.authority.FactorGrantedAuthority;
-import org.springframework.security.core.context.SecurityContext;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
-import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.test.web.servlet.request.RequestPostProcessor;
-import org.springframework.jdbc.core.JdbcOperations;
-import org.testcontainers.postgresql.PostgreSQLContainer;
-import org.testcontainers.utility.DockerImageName;
-import top.ddupan.iam.login.support.AdDirectoryFixture;
 import static org.assertj.core.api.Assertions.*;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.opaqueToken;
+import org.springframework.jdbc.core.JdbcOperations;
+import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.mock.web.MockHttpSession;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.authority.FactorGrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.context.SecurityContext;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
+import org.testcontainers.postgresql.PostgreSQLContainer;
+import org.testcontainers.utility.DockerImageName;
+import top.ddupan.iam.login.authentication.infrastructure.persistence.JdbcCredentialRegistration;
+import top.ddupan.iam.login.authorization.application.port.HydraGateway;
+import top.ddupan.iam.login.authorization.domain.AuthorizationRequest;
+import top.ddupan.iam.login.authorization.interfaces.web.HydraBrowserRequests;
+import top.ddupan.iam.login.clients.domain.ClientRepository;
+import top.ddupan.iam.login.support.AdDirectoryFixture;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
@@ -52,47 +74,47 @@ class WebAuthnIntegrationTests {
     @AfterAll static void close() { Fixtures.DIRECTORY.close(); Fixtures.DATABASE.stop(); }
     @Autowired MockMvc mvc;
     @Autowired JdbcOperations jdbc;
-    @org.springframework.test.context.bean.override.mockito.MockitoBean
-    top.ddupan.iam.login.authorization.application.port.HydraGateway hydra;
+    @MockitoBean
+    HydraGateway hydra;
 
 
-    @org.springframework.test.context.bean.override.mockito.MockitoBean
-    top.ddupan.iam.login.clients.domain.ClientRepository clients;
+    @MockitoBean
+    ClientRepository clients;
 
-    @Autowired org.springframework.transaction.PlatformTransactionManager transactionManager;
-    @Autowired javax.sql.DataSource dataSource;
+    @Autowired PlatformTransactionManager transactionManager;
+    @Autowired DataSource dataSource;
 
     @Test void registrationLockSerializesAndRollsBackOnFailure() throws Exception {
-        assertThat(((com.zaxxer.hikari.HikariDataSource)dataSource).getMaximumPoolSize()).isEqualTo(3);
-        var registrations = new top.ddupan.iam.login.authentication.infrastructure.persistence.JdbcCredentialRegistration(
-            jdbc, new org.springframework.transaction.support.TransactionTemplate(transactionManager));
-        String id = java.util.UUID.randomUUID().toString();
+        assertThat(((HikariDataSource)dataSource).getMaximumPoolSize()).isEqualTo(3);
+        var registrations = new JdbcCredentialRegistration(
+            jdbc, new TransactionTemplate(transactionManager));
+        String id = UUID.randomUUID().toString();
         jdbc.update("insert into user_entities(id,name,display_name) values (?,?,?)", id,id,"before");
-        var locked = new java.util.concurrent.CountDownLatch(1);
-        var release = new java.util.concurrent.CountDownLatch(1);
-        var started = new java.util.concurrent.CountDownLatch(1);
-        try (var executor = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
+        var locked = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        var started = new CountDownLatch(1);
+        try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
             var first = executor.submit(() -> registrations.register(id, () -> {
                 jdbc.update("update user_entities set display_name='committed' where id=?",id);
                 locked.countDown();
                 try {
-                    if (!release.await(5,java.util.concurrent.TimeUnit.SECONDS)) throw new IllegalStateException("Test timed out");
+                    if (!release.await(5,TimeUnit.SECONDS)) throw new IllegalStateException("Test timed out");
                 } catch (InterruptedException ex) { Thread.currentThread().interrupt(); throw new IllegalStateException(ex); }
                 return true;
             }));
             try {
-                assertThat(locked.await(5,java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+                assertThat(locked.await(5,TimeUnit.SECONDS)).isTrue();
                 var second = executor.submit(() -> {
                     started.countDown();
                     return registrations.register(id, () -> jdbc.queryForObject(
                         "select display_name from user_entities where id=?",String.class,id));
                 });
-                assertThat(started.await(5,java.util.concurrent.TimeUnit.SECONDS)).isTrue();
-                assertThatThrownBy(() -> second.get(200,java.util.concurrent.TimeUnit.MILLISECONDS))
-                    .isInstanceOf(java.util.concurrent.TimeoutException.class);
+                assertThat(started.await(5,TimeUnit.SECONDS)).isTrue();
+                assertThatThrownBy(() -> second.get(200,TimeUnit.MILLISECONDS))
+                    .isInstanceOf(TimeoutException.class);
                 release.countDown();
-                assertThat(first.get(5,java.util.concurrent.TimeUnit.SECONDS)).isTrue();
-                assertThat(second.get(5,java.util.concurrent.TimeUnit.SECONDS)).isEqualTo("committed");
+                assertThat(first.get(5,TimeUnit.SECONDS)).isTrue();
+                assertThat(second.get(5,TimeUnit.SECONDS)).isEqualTo("committed");
             } finally { release.countDown(); }
         }
         assertThatThrownBy(() -> registrations.register(id, () -> {
@@ -113,40 +135,40 @@ class WebAuthnIntegrationTests {
         var ordinary=opaqueToken().authorities(new SimpleGrantedAuthority("SCOPE_openid"));
         mvc.perform(get("/api/iam/clients").with(https()).with(ordinary)).andExpect(status().isForbidden());
         var manage=opaqueToken().authorities(new SimpleGrantedAuthority("SCOPE_iam.clients.manage"));
-        org.mockito.Mockito.when(clients.list(0,20)).thenReturn(List.of());
+        Mockito.when(clients.list(0,20)).thenReturn(List.of());
         mvc.perform(get("/api/iam/clients").with(https()).with(manage)).andExpect(status().isOk());
         // Bearer requests carry no ambient cookie credential, so no CSRF token is involved.
         mvc.perform(delete("/api/iam/clients/example").with(https()).with(manage)).andExpect(status().isNoContent());
-        org.mockito.Mockito.verify(clients).delete("example");
-        org.mockito.Mockito.when(clients.rotateSecret("example")).thenReturn("fixture-rotated-secret");
+        Mockito.verify(clients).delete("example");
+        Mockito.when(clients.rotateSecret("example")).thenReturn("fixture-rotated-secret");
         mvc.perform(post("/api/iam/clients/example/secret").with(https()).with(manage)).andExpect(status().isOk())
             .andExpect(header().string("Cache-Control","no-store")).andExpect(jsonPath("secret").value("fixture-rotated-secret"));
         mvc.perform(get("/api/iam/session").with(https()).with(manage)).andExpect(status().isNotFound());
         mvc.perform(post("/api/iam/clients").with(https()).with(manage).contentType("application/json").content("""
             {"id":"no-policy","name":"No policy","redirectUris":["https://app.example.test/cb"],"scopes":["openid"]}
             """)).andExpect(status().isBadRequest());
-        org.mockito.Mockito.verify(clients,org.mockito.Mockito.never()).create(org.mockito.ArgumentMatchers.any());
+        Mockito.verify(clients,Mockito.never()).create(ArgumentMatchers.any());
     }
 
     @Test
     void consolePageIsAPublicShellThatMayOnlyFetchFromTheIssuer() throws Exception {
         mvc.perform(get("/console").with(https())).andExpect(status().isOk())
-            .andExpect(header().string("Content-Security-Policy",org.hamcrest.Matchers.containsString("connect-src 'self' http://localhost:14444;")))
-            .andExpect(content().string(org.hamcrest.Matchers.containsString("\"clientId\":\"iam-admin-ui\"")));
+            .andExpect(header().string("Content-Security-Policy",Matchers.containsString("connect-src 'self' http://localhost:14444;")))
+            .andExpect(content().string(Matchers.containsString("\"clientId\":\"iam-admin-ui\"")));
         mvc.perform(get("/console/clients").with(https())).andExpect(status().isUnauthorized());
     }
 
     @Test
     void logoutRequiresCsrfBrowserBindingAndInvalidatesLocalSession() throws Exception {
         var session=login(); secondFactor(session);
-        var data=new top.ddupan.iam.login.authorization.application.port.HydraGateway.LogoutRequest(
+        var data=new HydraGateway.LogoutRequest(
             "logout-challenge","human:existing-subject","sid","");
-        org.mockito.Mockito.when(hydra.logout("logout-challenge")).thenReturn(data);
-        org.mockito.Mockito.when(hydra.logoutUrl()).thenReturn("http://localhost:14444/oauth2/sessions/logout");
-        org.mockito.Mockito.when(hydra.acceptLogout("logout-challenge")).thenReturn("http://localhost:14444/oauth2/sessions/logout?logout_verifier=fixture");
+        Mockito.when(hydra.logout("logout-challenge")).thenReturn(data);
+        Mockito.when(hydra.logoutUrl()).thenReturn("http://localhost:14444/oauth2/sessions/logout");
+        Mockito.when(hydra.acceptLogout("logout-challenge")).thenReturn("http://localhost:14444/oauth2/sessions/logout?logout_verifier=fixture");
         var html=mvc.perform(get("/oauth2/logout").session(session).with(https()).param("logout_challenge","logout-challenge"))
             .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
-        var match=java.util.regex.Pattern.compile("\"binding\":\"([^\"]+)\"").matcher(html);
+        var match=Pattern.compile("\"binding\":\"([^\"]+)\"").matcher(html);
         assertThat(match.find()).isTrue(); var binding=match.group(1);
         mvc.perform(post("/oauth2/logout").session(session).with(https()).param("binding",binding)).andExpect(status().isForbidden());
         mvc.perform(post("/oauth2/logout").session(session).with(https()).with(csrf()).param("binding","other"))
@@ -154,7 +176,7 @@ class WebAuthnIntegrationTests {
         mvc.perform(post("/oauth2/logout").session(session).with(https()).with(csrf()).param("binding",binding))
             .andExpect(status().isSeeOther());
         assertThat(session.isInvalid()).isTrue();
-        org.mockito.Mockito.verify(hydra).acceptLogout("logout-challenge");
+        Mockito.verify(hydra).acceptLogout("logout-challenge");
     }
 
     @Test
@@ -188,48 +210,48 @@ class WebAuthnIntegrationTests {
     }
 
     private static final String AUTH_URL = "http://localhost:14444/oauth2/auth?client_id=gitea-fixture&response_type=code";
-    private top.ddupan.iam.login.authorization.domain.AuthorizationRequest hydraRequest(String challenge, String subject,
+    private AuthorizationRequest hydraRequest(String challenge, String subject,
             String login, String binding) {
-        return new top.ddupan.iam.login.authorization.domain.AuthorizationRequest(challenge, "gitea-fixture",
+        return new AuthorizationRequest(challenge, "gitea-fixture",
             List.of("openid", "profile", "groups"), List.of(), subject,
-            login == null ? null : top.ddupan.iam.login.authorization.domain.AuthorizationRequest.digest(login), binding, AUTH_URL, false);
+            login == null ? null : AuthorizationRequest.digest(login), binding, AUTH_URL, false);
     }
     private void secondFactor(MockHttpSession session) {
         var context = (SecurityContext) session.getAttribute("SPRING_SECURITY_CONTEXT");
         var previous = context.getAuthentication();
-        var factors = new java.util.ArrayList<org.springframework.security.core.GrantedAuthority>(previous.getAuthorities());
+        var factors = new ArrayList<GrantedAuthority>(previous.getAuthorities());
         factors.add(FactorGrantedAuthority.withAuthority("FACTOR_WEBAUTHN").issuedAt(Instant.now()).build());
         context.setAuthentication(UsernamePasswordAuthenticationToken.authenticated(previous.getPrincipal(), null, factors));
     }
 
     @Test
     void hydraRequiresMfaCsrfBrowserBindingAndConsumesBothChallengesOnce() throws Exception {
-        org.mockito.Mockito.when(hydra.login("login-challenge")).thenReturn(hydraRequest("login-challenge", "", null, null));
+        Mockito.when(hydra.login("login-challenge")).thenReturn(hydraRequest("login-challenge", "", null, null));
         var session = login();
         mvc.perform(get("/oauth2/start").with(https()).session(session).param("login_challenge", "login-challenge"))
             .andExpect(redirectedUrl("/oauth2/login"));
-        var intent = top.ddupan.iam.login.authorization.interfaces.web.HydraBrowserRequests.intent(
-            new org.springframework.mock.web.MockHttpServletRequest() {{ setSession(session); }});
+        var intent = HydraBrowserRequests.intent(
+            new MockHttpServletRequest() {{ setSession(session); }});
         mvc.perform(post("/oauth2/login").with(https()).session(session).with(csrf()).param("binding", intent.binding()))
             .andExpect(status().is3xxRedirection());
-        org.mockito.Mockito.verify(hydra, org.mockito.Mockito.never()).acceptLogin(org.mockito.ArgumentMatchers.anyString(),
-            org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any());
+        Mockito.verify(hydra, Mockito.never()).acceptLogin(ArgumentMatchers.anyString(),
+            ArgumentMatchers.anyString(), ArgumentMatchers.anyString(), ArgumentMatchers.any());
         secondFactor(session);
         mvc.perform(post("/oauth2/login").with(https()).session(session).param("binding", intent.binding()))
             .andExpect(status().isForbidden());
         mvc.perform(post("/oauth2/login").with(https()).session(session).with(csrf()).param("binding", "other-browser"))
             .andExpect(status().isBadRequest());
-        org.mockito.Mockito.when(hydra.acceptLogin(org.mockito.ArgumentMatchers.eq("login-challenge"),
-            org.mockito.ArgumentMatchers.eq("human:existing-subject"), org.mockito.ArgumentMatchers.eq(intent.binding()),
-            org.mockito.ArgumentMatchers.any())).thenReturn("http://localhost:14444/oauth2/auth?login_verifier=fixture");
+        Mockito.when(hydra.acceptLogin(ArgumentMatchers.eq("login-challenge"),
+            ArgumentMatchers.eq("human:existing-subject"), ArgumentMatchers.eq(intent.binding()),
+            ArgumentMatchers.any())).thenReturn("http://localhost:14444/oauth2/auth?login_verifier=fixture");
         mvc.perform(post("/oauth2/login").with(https()).session(session).with(csrf()).param("binding", intent.binding()))
             .andExpect(status().isSeeOther());
         mvc.perform(post("/oauth2/login").with(https()).session(session).with(csrf()).param("binding", intent.binding()))
             .andExpect(status().isBadRequest());
-        org.mockito.Mockito.when(hydra.consent("consent-challenge")).thenReturn(
+        Mockito.when(hydra.consent("consent-challenge")).thenReturn(
             hydraRequest("consent-challenge", "human:existing-subject", "login-challenge", intent.binding()));
-        org.mockito.Mockito.when(hydra.acceptConsent(org.mockito.ArgumentMatchers.eq("consent-challenge"),
-            org.mockito.ArgumentMatchers.anyList(), org.mockito.ArgumentMatchers.anyMap()))
+        Mockito.when(hydra.acceptConsent(ArgumentMatchers.eq("consent-challenge"),
+            ArgumentMatchers.anyList(), ArgumentMatchers.anyMap()))
             .thenReturn("http://localhost:14444/oauth2/auth?consent_verifier=fixture");
         mvc.perform(get("/oauth2/consent").with(https()).session(session).param("consent_challenge", "consent-challenge"))
             .andExpect(status().isSeeOther());
@@ -242,7 +264,7 @@ class WebAuthnIntegrationTests {
         var session = login(); secondFactor(session);
         mvc.perform(get("/oauth2/consent").with(https()).session(session).param("consent_challenge", "stolen-challenge"))
             .andExpect(status().isBadRequest());
-        org.mockito.Mockito.verifyNoInteractions(hydra);
+        Mockito.verifyNoInteractions(hydra);
     }
 
     private MockHttpSession login() throws Exception {
