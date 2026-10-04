@@ -3,27 +3,31 @@ package top.ddupan.iam.login.support;
 import com.unboundid.ldap.listener.InMemoryDirectoryServer;
 import com.unboundid.ldap.listener.InMemoryDirectoryServerConfig;
 import com.unboundid.ldap.listener.InMemoryListenerConfig;
-import com.unboundid.ldap.listener.interceptor.InMemoryInterceptedSimpleBindRequest;
 import com.unboundid.ldap.listener.interceptor.InMemoryInterceptedSearchResult;
-import com.unboundid.ldap.sdk.SearchResultReference;
+import com.unboundid.ldap.listener.interceptor.InMemoryInterceptedSimpleBindRequest;
 import com.unboundid.ldap.listener.interceptor.InMemoryOperationInterceptor;
+import com.unboundid.ldap.sdk.Attribute;
 import com.unboundid.ldap.sdk.Entry;
 import com.unboundid.ldap.sdk.LDAPException;
 import com.unboundid.ldap.sdk.ResultCode;
+import com.unboundid.ldap.sdk.SearchResultReference;
 import com.unboundid.ldap.sdk.SimpleBindRequest;
 import java.net.InetAddress;
 import java.security.KeyStore;
+import java.util.HexFormat;
+import java.util.concurrent.atomic.AtomicInteger;
 import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.TrustManagerFactory;
+
 /** Lazily initialized LDAPS fixture: loading test metadata must not start a server. */
 public final class AdDirectoryFixture implements AutoCloseable {
     static final String BASE = "dc=example,dc=test";
     static final String USER_DN = "cn=Alice," + BASE;
-    static final byte[] GUID = java.util.HexFormat.of().parseHex("33221100554477668899aabbccddeeff");
+    static final byte[] GUID = HexFormat.of().parseHex("33221100554477668899aabbccddeeff");
     private final SSLContext original;
     private final InMemoryDirectoryServer ldap;
-    public final java.util.concurrent.atomic.AtomicInteger binds = new java.util.concurrent.atomic.AtomicInteger();
+    public final AtomicInteger binds = new AtomicInteger();
     public volatile long bindConnection;
     public volatile long searchConnection;
     public AdDirectoryFixture() {
@@ -80,26 +84,26 @@ public final class AdDirectoryFixture implements AutoCloseable {
             });
             ldap = new InMemoryDirectoryServer(config);
             ldap.startListening();
-            ldap.add(new Entry(BASE, new com.unboundid.ldap.sdk.Attribute("objectClass", "domain"),
-                new com.unboundid.ldap.sdk.Attribute("dc", "example")));
+            ldap.add(new Entry(BASE, new Attribute("objectClass", "domain"),
+                new Attribute("dc", "example")));
             ldap.add(new Entry(USER_DN,
-                new com.unboundid.ldap.sdk.Attribute("objectClass", "user"),
-                new com.unboundid.ldap.sdk.Attribute("cn", "Alice"),
-                new com.unboundid.ldap.sdk.Attribute("sAMAccountName", "alice"),
-                new com.unboundid.ldap.sdk.Attribute("userPrincipalName", "alice@example.test"),
-                new com.unboundid.ldap.sdk.Attribute("userPassword", "fixture-password"),
-                new com.unboundid.ldap.sdk.Attribute("displayName", "Alice </script><script>attack()</script>"),
-                new com.unboundid.ldap.sdk.Attribute("mail", "alice@example.test"),
-                new com.unboundid.ldap.sdk.Attribute("objectGUID", GUID),
-                new com.unboundid.ldap.sdk.Attribute("memberOf", "CN=gitea-admins," + BASE, "CN=MixedCase," + BASE)));
+                new Attribute("objectClass", "user"),
+                new Attribute("cn", "Alice"),
+                new Attribute("sAMAccountName", "alice"),
+                new Attribute("userPrincipalName", "alice@example.test"),
+                new Attribute("userPassword", "fixture-password"),
+                new Attribute("displayName", "Alice </script><script>attack()</script>"),
+                new Attribute("mail", "alice@example.test"),
+                new Attribute("objectGUID", GUID),
+                new Attribute("memberOf", "CN=gitea-admins," + BASE, "CN=MixedCase," + BASE)));
             ldap.add(new Entry("cn=Bob," + BASE,
-                new com.unboundid.ldap.sdk.Attribute("objectClass", "user"),
-                new com.unboundid.ldap.sdk.Attribute("cn", "Bob"),
-                new com.unboundid.ldap.sdk.Attribute("sAMAccountName", "bob"),
-                new com.unboundid.ldap.sdk.Attribute("userPrincipalName", "bob@example.test"),
-                new com.unboundid.ldap.sdk.Attribute("userPassword", "fixture-password"),
-                new com.unboundid.ldap.sdk.Attribute("displayName", "Bob"),
-                new com.unboundid.ldap.sdk.Attribute("objectGUID", new byte[16])));
+                new Attribute("objectClass", "user"),
+                new Attribute("cn", "Bob"),
+                new Attribute("sAMAccountName", "bob"),
+                new Attribute("userPrincipalName", "bob@example.test"),
+                new Attribute("userPassword", "fixture-password"),
+                new Attribute("displayName", "Bob"),
+                new Attribute("objectGUID", new byte[16])));
         } catch (Exception ex) { throw new ExceptionInInitializerError(ex); }
     }
 

@@ -5,15 +5,18 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.regex.Pattern;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.dao.DataAccessException;
 import org.springframework.data.ldap.repository.support.SimpleLdapRepository;
+import org.springframework.ldap.AuthenticationException;
+import org.springframework.ldap.NamingException;
 import org.springframework.ldap.core.LdapTemplate;
 import org.springframework.ldap.core.support.LdapContextSource;
 import org.springframework.ldap.core.support.SingleContextSource;
 import org.springframework.stereotype.Component;
 import top.ddupan.iam.login.authentication.application.port.AuthenticatedUserSession;
 import top.ddupan.iam.login.authentication.application.port.PasswordAuthenticator;
-import top.ddupan.iam.login.authentication.application.port.PasswordVerificationException;
 import top.ddupan.iam.login.authentication.application.port.PasswordVerificationException.Reason;
+import top.ddupan.iam.login.authentication.application.port.PasswordVerificationException;
 
 /** Bind authenticates; the scoped Spring Data repository owns all user and membership reads. */
 @Component
@@ -69,14 +72,14 @@ public final class AdPasswordAuthenticator implements PasswordAuthenticator {
                 connection.destroy();
                 throw ex;
             }
-        } catch (org.springframework.ldap.AuthenticationException ex) {
+        } catch (AuthenticationException ex) {
             throw new PasswordVerificationException(reason(ex));
-        } catch (org.springframework.ldap.NamingException | org.springframework.dao.DataAccessException ex) {
+        } catch (NamingException | DataAccessException ex) {
             throw new PasswordVerificationException(Reason.UNAVAILABLE);
         }
     }
 
-    private static Reason reason(org.springframework.ldap.AuthenticationException exception) {
+    private static Reason reason(AuthenticationException exception) {
         // Translate AD's diagnostic codes; never expose the diagnostic or credentials to the use case.
         var matcher = AD_SUBCODE.matcher(exception.getMessage() == null ? "" : exception.getMessage());
         if (!matcher.find()) return Reason.REJECTED;

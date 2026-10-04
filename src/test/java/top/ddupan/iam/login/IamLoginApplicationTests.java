@@ -11,7 +11,9 @@ import org.springframework.boot.opentelemetry.autoconfigure.logging.otlp.Transpo
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
 import org.testcontainers.grafana.LgtmStackContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -47,8 +49,8 @@ class IamLoginApplicationTests {
     @Test
     void signInIsDisabledUntilDirectoryIsConfigured() throws Exception {
         mvc.perform(get("/signin").secure(true)).andExpect(status().isUnauthorized());
-        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/signin/password")
-            .secure(true).with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf()))
+        mvc.perform(MockMvcRequestBuilders.post("/signin/password")
+            .secure(true).with(SecurityMockMvcRequestPostProcessors.csrf()))
             .andExpect(status().isUnauthorized());
     }
 

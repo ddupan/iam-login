@@ -4,28 +4,44 @@ import com.nimbusds.jose.jwk.JWKSet;
 import com.nimbusds.jose.jwk.source.ImmutableJWKSet;
 import com.nimbusds.jose.jwk.source.JWKSource;
 import com.nimbusds.jose.proc.SecurityContext;
+import jakarta.servlet.http.HttpServletRequest;
 import java.net.URI;
+import java.security.Principal;
+import java.time.Clock;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.ImportRuntimeHints;
 import org.springframework.core.annotation.Order;
+import org.springframework.core.io.Resource;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcOperations;
+import org.springframework.scheduling.annotation.EnableScheduling;
+import org.springframework.security.authentication.AnonymousAuthenticationToken;
 import org.springframework.security.authentication.AuthenticationProvider;
+import org.springframework.security.authentication.InternalAuthenticationServiceException;
 import org.springframework.security.authorization.AuthorizationManager;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.annotation.web.configuration.OAuth2AuthorizationServerConfiguration;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.AuthenticationException;
+import org.springframework.security.core.authority.AuthorityUtils;
 import org.springframework.security.core.authority.FactorGrantedAuthority;
 import org.springframework.security.jackson.SecurityJacksonModules;
 import org.springframework.security.oauth2.core.OAuth2AuthenticationException;
+import org.springframework.security.oauth2.core.OAuth2Error;
 import org.springframework.security.oauth2.core.OAuth2ErrorCodes;
 import org.springframework.security.oauth2.core.oidc.endpoint.OidcParameterNames;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.security.oauth2.jwt.JwtEncoder;
+import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
 import org.springframework.security.oauth2.server.authorization.JdbcOAuth2AuthorizationConsentService;
 import org.springframework.security.oauth2.server.authorization.JdbcOAuth2AuthorizationService;
 import org.springframework.security.oauth2.server.authorization.OAuth2AuthorizationConsentService;
@@ -34,12 +50,8 @@ import org.springframework.security.oauth2.server.authorization.OAuth2TokenType;
 import org.springframework.security.oauth2.server.authorization.authentication.OAuth2AuthorizationCodeRequestAuthenticationContext;
 import org.springframework.security.oauth2.server.authorization.authentication.OAuth2AuthorizationCodeRequestAuthenticationException;
 import org.springframework.security.oauth2.server.authorization.authentication.OAuth2AuthorizationCodeRequestAuthenticationProvider;
-import org.springframework.security.oauth2.server.authorization.web.authentication.OAuth2AuthorizationCodeRequestAuthenticationConverter;
 import org.springframework.security.oauth2.server.authorization.authentication.OAuth2AuthorizationCodeRequestAuthenticationToken;
 import org.springframework.security.oauth2.server.authorization.authentication.OAuth2AuthorizationCodeRequestAuthenticationValidator;
-import org.springframework.security.authentication.AnonymousAuthenticationToken;
-import org.springframework.security.core.authority.AuthorityUtils;
-import org.springframework.security.oauth2.core.OAuth2Error;
 import org.springframework.security.oauth2.server.authorization.authentication.OAuth2AuthorizationConsentAuthenticationToken;
 import org.springframework.security.oauth2.server.authorization.authentication.OAuth2RefreshTokenAuthenticationToken;
 import org.springframework.security.oauth2.server.authorization.client.JdbcRegisteredClientRepository;
@@ -47,10 +59,14 @@ import org.springframework.security.oauth2.server.authorization.client.Registere
 import org.springframework.security.oauth2.server.authorization.settings.AuthorizationServerSettings;
 import org.springframework.security.oauth2.server.authorization.token.JwtEncodingContext;
 import org.springframework.security.oauth2.server.authorization.token.OAuth2TokenCustomizer;
+import org.springframework.security.oauth2.server.authorization.web.authentication.OAuth2AuthorizationCodeRequestAuthenticationConverter;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.AuthenticationConverter;
 import org.springframework.security.web.authentication.LoginUrlAuthenticationEntryPoint;
+import org.springframework.security.web.authentication.preauth.AbstractPreAuthenticatedProcessingFilter;
 import org.springframework.security.web.savedrequest.HttpSessionRequestCache;
 import org.springframework.security.web.util.matcher.MediaTypeRequestMatcher;
+import org.springframework.security.web.webauthn.authentication.WebAuthnAuthentication;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.jsontype.BasicPolymorphicTypeValidator;
 import top.ddupan.iam.login.authentication.domain.User;
@@ -66,24 +82,24 @@ import top.ddupan.iam.login.authorization.infrastructure.hydra.HydraProperties;
 @Configuration(proxyBeanMethods = false)
 @ConditionalOnProperty(prefix = "iam.authorization-server", name = "enabled", havingValue = "true")
 @EnableConfigurationProperties(AuthorizationServerConfiguration.Properties.class)
-@org.springframework.context.annotation.ImportRuntimeHints(SecurityJacksonHints.class)
-@org.springframework.scheduling.annotation.EnableScheduling
+@ImportRuntimeHints(SecurityJacksonHints.class)
+@EnableScheduling
 class AuthorizationServerConfiguration {
     @ConfigurationProperties("iam.authorization-server")
     record Properties(boolean enabled, URI issuer, List<HydraProperties.SubjectBinding> subjects,
-            List<org.springframework.core.io.Resource> signingKeys) { }
+            List<Resource> signingKeys) { }
 
     @Bean @Order(2)
     SecurityFilterChain authorizationServer(HttpSecurity http, MfaPolicy mfa,
             AuthorizationPolicy policy, OAuth2AuthorizationService authorizations,
-            @org.springframework.beans.factory.annotation.Value("${iam.hydra.enabled:false}") boolean hydra) throws Exception {
+            @Value("${iam.hydra.enabled:false}") boolean hydra) throws Exception {
         // Both would serve /oauth2/**, and Hydra-mode login pages would hand out Hydra challenges.
         if (hydra) throw new IllegalStateException("iam.authorization-server.enabled and iam.hydra.enabled are mutually exclusive");
         var requiredFactors = mfa.complete;
         // Registered at the authorization endpoint's position before the endpoint itself (added later, while
         // building); filters of equal order keep insertion order, so this runs first.
-        http.addFilterBefore(new Reauthentication(java.time.Clock.systemUTC()),
-            org.springframework.security.web.authentication.preauth.AbstractPreAuthenticatedProcessingFilter.class);
+        http.addFilterBefore(new Reauthentication(Clock.systemUTC()),
+            AbstractPreAuthenticatedProcessingFilter.class);
         http.oauth2AuthorizationServer(as -> {
             http.securityMatcher(as.getEndpointsMatcher());
             as.oidc(oidc -> oidc.providerConfigurationEndpoint(discovery -> discovery.providerConfigurationCustomizer(metadata -> {
@@ -157,7 +173,7 @@ class AuthorizationServerConfiguration {
             if (decision != null && decision.isGranted()) return null;
             if (request instanceof OAuth2AuthorizationCodeRequestAuthenticationToken code && prompts(code).contains("none")) {
                 if (principal instanceof AnonymousAuthenticationToken) return null;
-                throw new org.springframework.security.authentication.InternalAuthenticationServiceException(
+                throw new InternalAuthenticationServiceException(
                     "prompt=none reached the MFA gate with an authenticated principal lacking factors");
             }
             return request;
@@ -166,11 +182,11 @@ class AuthorizationServerConfiguration {
     }
 
     /** See MfaGate: converts prompt=none requests as anonymous unless the principal already holds full MFA. */
-    record PromptNoneWithoutMfa(org.springframework.security.web.authentication.AuthenticationConverter delegate,
-            AuthorizationManager<Object> requiredFactors) implements org.springframework.security.web.authentication.AuthenticationConverter {
+    record PromptNoneWithoutMfa(AuthenticationConverter delegate,
+            AuthorizationManager<Object> requiredFactors) implements AuthenticationConverter {
         private static final Authentication ANONYMOUS = new AnonymousAuthenticationToken("iam-login", "anonymousUser",
             AuthorityUtils.createAuthorityList("ROLE_ANONYMOUS"));
-        @Override public Authentication convert(jakarta.servlet.http.HttpServletRequest request) {
+        @Override public Authentication convert(HttpServletRequest request) {
             var converted = delegate.convert(request);
             if (!(converted instanceof OAuth2AuthorizationCodeRequestAuthenticationToken code) || !prompts(code).contains("none")) {
                 return converted;
@@ -183,15 +199,15 @@ class AuthorizationServerConfiguration {
         }
     }
 
-    private static boolean promptNone(jakarta.servlet.http.HttpServletRequest request) {
+    private static boolean promptNone(HttpServletRequest request) {
         var prompt = request.getParameter("prompt");
         return "/oauth2/authorize".equals(request.getRequestURI()) && request.getParameter("response_type") != null
-            && prompt != null && java.util.Set.of(prompt.trim().split("\\s+")).contains("none");
+            && prompt != null && Set.of(prompt.trim().split("\\s+")).contains("none");
     }
 
-    static java.util.Set<String> prompts(OAuth2AuthorizationCodeRequestAuthenticationToken code) {
+    static Set<String> prompts(OAuth2AuthorizationCodeRequestAuthenticationToken code) {
         return code.getAdditionalParameters().get("prompt") instanceof String prompt
-            ? java.util.Set.of(prompt.trim().split("\\s+")) : java.util.Set.of();
+            ? Set.of(prompt.trim().split("\\s+")) : Set.of();
     }
 
     /**
@@ -219,7 +235,7 @@ class AuthorizationServerConfiguration {
         @Override public Authentication authenticate(Authentication request) throws AuthenticationException {
             var refresh = (OAuth2RefreshTokenAuthenticationToken) request;
             var authorization = authorizations.findByToken(refresh.getRefreshToken(), OAuth2TokenType.REFRESH_TOKEN);
-            var stored = authorization == null ? null : authorization.<Authentication>getAttribute(java.security.Principal.class.getName());
+            var stored = authorization == null ? null : authorization.<Authentication>getAttribute(Principal.class.getName());
             try {
                 if (stored != null && stored.getPrincipal() instanceof DirectoryPrincipal principal) policy.subject(principal.user());
             } catch (IllegalArgumentException withdrawn) {
@@ -268,10 +284,10 @@ class AuthorizationServerConfiguration {
             .addModules(SecurityJacksonModules.getModules(getClass().getClassLoader(),
                 // After a real passkey step the session holds WebAuthnAuthentication, not the password token.
                 allowlist(BasicPolymorphicTypeValidator.builder().allowIfSubType(DirectoryPrincipal.class)
-                    .allowIfSubType(org.springframework.security.web.webauthn.authentication.WebAuthnAuthentication.class))))
+                    .allowIfSubType(WebAuthnAuthentication.class))))
             .addMixIn(User.class, PrincipalJson.UserMixin.class)
             .addMixIn(DirectoryPrincipal.class, PrincipalJson.DirectoryPrincipalMixin.class)
-            .addMixIn(org.springframework.security.web.webauthn.authentication.WebAuthnAuthentication.class, PrincipalJson.WebAuthnAuthenticationMixin.class)
+            .addMixIn(WebAuthnAuthentication.class, PrincipalJson.WebAuthnAuthenticationMixin.class)
             .build();
         var rows = new JdbcOAuth2AuthorizationService.JsonMapperOAuth2AuthorizationRowMapper(clients, json);
         service.setAuthorizationRowMapper(rows);
@@ -285,7 +301,7 @@ class AuthorizationServerConfiguration {
     }
 
     @Bean ExpiredAuthorizations expiredAuthorizations(JdbcOperations jdbc) {
-        return new ExpiredAuthorizations(jdbc, java.time.Clock.systemUTC());
+        return new ExpiredAuthorizations(jdbc, Clock.systemUTC());
     }
 
     @Bean OAuth2AuthorizationConsentService consents(JdbcOperations jdbc, RegisteredClientRepository clients) {
@@ -298,13 +314,13 @@ class AuthorizationServerConfiguration {
     }
 
     // Signing uses the first key only; the framework takes a JwtEncoder bean over building one from all keys.
-    @Bean org.springframework.security.oauth2.jwt.JwtEncoder jwtEncoder(Properties properties) {
-        return new org.springframework.security.oauth2.jwt.NimbusJwtEncoder(
+    @Bean JwtEncoder jwtEncoder(Properties properties) {
+        return new NimbusJwtEncoder(
             new ImmutableJWKSet<>(new JWKSet(SigningKeys.load(properties.signingKeys()).getFirst())));
     }
 
-    @Bean org.springframework.security.oauth2.jwt.JwtDecoder jwtDecoder(JWKSource<SecurityContext> keys) {
-        return org.springframework.security.config.annotation.web.configuration.OAuth2AuthorizationServerConfiguration.jwtDecoder(keys);
+    @Bean JwtDecoder jwtDecoder(JWKSource<SecurityContext> keys) {
+        return OAuth2AuthorizationServerConfiguration.jwtDecoder(keys);
     }
 
     @Bean AuthorizationServerSettings authorizationServerSettings(Properties properties) {

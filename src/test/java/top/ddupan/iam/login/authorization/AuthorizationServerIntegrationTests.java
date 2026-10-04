@@ -1,12 +1,23 @@
 package top.ddupan.iam.login.authorization;
 
+import com.nimbusds.jose.jwk.RSAKey;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.security.KeyFactory;
 import java.security.MessageDigest;
+import java.security.interfaces.RSAPrivateCrtKey;
+import java.security.interfaces.RSAPublicKey;
+import java.security.spec.PKCS8EncodedKeySpec;
+import java.security.spec.RSAPublicKeySpec;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import org.assertj.core.api.InstanceOfAssertFactories;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -16,13 +27,18 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockHttpSession;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.FactorGrantedAuthority;
 import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.oauth2.core.AuthorizationGrantType;
 import org.springframework.security.oauth2.core.ClientAuthenticationMethod;
+import org.springframework.security.oauth2.core.OAuth2AccessToken;
+import org.springframework.security.oauth2.server.authorization.OAuth2Authorization;
+import org.springframework.security.oauth2.server.authorization.OAuth2AuthorizationService;
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClient;
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClientRepository;
 import org.springframework.security.oauth2.server.authorization.settings.ClientSettings;
+import org.springframework.security.oauth2.server.authorization.settings.TokenSettings;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
@@ -31,8 +47,9 @@ import org.springframework.web.util.UriComponentsBuilder;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
 import tools.jackson.databind.json.JsonMapper;
-import org.springframework.security.oauth2.server.authorization.OAuth2AuthorizationService;
+import top.ddupan.iam.login.configuration.ExpiredAuthorizations;
 import top.ddupan.iam.login.support.AdDirectoryFixture;
+import top.ddupan.iam.login.support.SigningKeyFixture;
 import static org.assertj.core.api.Assertions.*;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.httpBasic;
@@ -56,8 +73,8 @@ class AuthorizationServerIntegrationTests {
             "postgres@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873")
             .asCompatibleSubstituteFor("postgres"));
         static { DATABASE.start(); }
-        static final java.nio.file.Path ACTIVE_KEY = top.ddupan.iam.login.support.SigningKeyFixture.write();
-        static final java.nio.file.Path PREVIOUS_KEY = top.ddupan.iam.login.support.SigningKeyFixture.write();
+        static final Path ACTIVE_KEY = SigningKeyFixture.write();
+        static final Path PREVIOUS_KEY = SigningKeyFixture.write();
     }
     @DynamicPropertySource
     static void properties(DynamicPropertyRegistry r) {
@@ -83,17 +100,17 @@ class AuthorizationServerIntegrationTests {
             .redirectUri(CALLBACK).scope("openid").scope("profile").scope("groups").scope("offline_access")
             .clientSettings(ClientSettings.builder().requireProofKey(true).requireAuthorizationConsent(false).build())
             // The framework reuses refresh tokens by default; rotation must be set per client.
-            .tokenSettings(org.springframework.security.oauth2.server.authorization.settings.TokenSettings.builder()
+            .tokenSettings(TokenSettings.builder()
                 .reuseRefreshTokens(false).build())
             .build());
     }
 
     @Test void noCodeIsIssuedUntilBothFactorsAreFresh() throws Exception {
         var verifier = verifier();
-        mvc.perform(get(java.net.URI.create(authorize(verifier))).with(https()).accept(MediaType.TEXT_HTML))
+        mvc.perform(get(URI.create(authorize(verifier))).with(https()).accept(MediaType.TEXT_HTML))
             .andExpect(status().is3xxRedirection()).andExpect(redirectedUrl("/signin"));
         var session = login();
-        var passwordOnly = mvc.perform(get(java.net.URI.create(authorize(verifier))).with(https()).session(session).accept(MediaType.TEXT_HTML))
+        var passwordOnly = mvc.perform(get(URI.create(authorize(verifier))).with(https()).session(session).accept(MediaType.TEXT_HTML))
             .andExpect(status().is3xxRedirection()).andReturn().getResponse().getRedirectedUrl();
         assertThat(passwordOnly).startsWith("/signin/mfa").doesNotContain("code=");
         secondFactor(session);
@@ -113,7 +130,7 @@ class AuthorizationServerIntegrationTests {
             .andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
         var idToken = claims((String) tokens.get("id_token"));
         assertThat(idToken).containsEntry("sub", "human:existing-subject").containsEntry("preferred_username", "alice");
-        assertThat(idToken.get("groups")).asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.LIST).contains("gitea-admins");
+        assertThat(idToken.get("groups")).asInstanceOf(InstanceOfAssertFactories.LIST).contains("gitea-admins");
         assertThat(claims((String) tokens.get("access_token"))).containsEntry("sub", "human:existing-subject");
         assertThat(tokens.get("refresh_token")).as("offline_access was granted").isNotNull();
         // Refresh reloads the stored principal from the database (Jackson allowlist round trip).
@@ -140,7 +157,7 @@ class AuthorizationServerIntegrationTests {
         // The error goes to the client only once its redirect URI is verified.
         var foreign = none.replace("redirect_uri=" + CALLBACK, "redirect_uri=https://attacker.example/cb");
         assertThat(foreign).isNotEqualTo(none);
-        mvc.perform(get(java.net.URI.create(foreign)).with(https()).accept(MediaType.TEXT_HTML)).andExpect(status().isBadRequest());
+        mvc.perform(get(URI.create(foreign)).with(https()).accept(MediaType.TEXT_HTML)).andExpect(status().isBadRequest());
     }
 
     @Test void promptLoginAndMaxAgeDemandAFreshAuthentication() throws Exception {
@@ -166,18 +183,18 @@ class AuthorizationServerIntegrationTests {
             .containsEntry("error", "request_not_supported").doesNotContainKey("code");
         // request_uri is read as a pushed authorization request reference; an unknown one is refused without
         // redirecting anywhere.
-        mvc.perform(get(java.net.URI.create(authorize(verifier(), Map.of("request_uri", "urn:ietf:params:oauth:request_uri:unknown"))))
+        mvc.perform(get(URI.create(authorize(verifier(), Map.of("request_uri", "urn:ietf:params:oauth:request_uri:unknown"))))
             .with(https()).session(session).accept(MediaType.TEXT_HTML)).andExpect(status().isBadRequest());
     }
 
     @Test void discoveryDescribesWhatIsSupported() throws Exception {
         var metadata = json(mvc.perform(get("/.well-known/openid-configuration").with(https()))
             .andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
-        assertThat(metadata.get("scopes_supported")).asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.LIST)
+        assertThat(metadata.get("scopes_supported")).asInstanceOf(InstanceOfAssertFactories.LIST)
             .contains("openid", "profile", "email", "groups", "offline_access").doesNotHaveDuplicates();
         assertThat(metadata).containsEntry("request_parameter_supported", false)
             .containsEntry("request_uri_parameter_supported", false).containsEntry("claims_parameter_supported", false);
-        assertThat(metadata.get("claims_supported")).asInstanceOf(org.assertj.core.api.InstanceOfAssertFactories.LIST).contains("groups", "auth_time");
+        assertThat(metadata.get("claims_supported")).asInstanceOf(InstanceOfAssertFactories.LIST).contains("groups", "auth_time");
     }
 
     @Test void tokensAreSignedByTheFirstKeyAndAllKeysArePublished() throws Exception {
@@ -198,7 +215,7 @@ class AuthorizationServerIntegrationTests {
     }
 
     @Test void expiredAuthorizationsArePurged(@Autowired OAuth2AuthorizationService authorizations,
-            @Autowired top.ddupan.iam.login.configuration.ExpiredAuthorizations expired) {
+            @Autowired ExpiredAuthorizations expired) {
         var client = clients.findByClientId("spike-rp");
         var now = Instant.now();
         var stale = authorization(client, now.minusSeconds(7200), now.minusSeconds(3600));
@@ -209,26 +226,26 @@ class AuthorizationServerIntegrationTests {
         assertThat(authorizations.findById(live.getId())).isNotNull();
     }
 
-    private static org.springframework.security.oauth2.server.authorization.OAuth2Authorization authorization(
+    private static OAuth2Authorization authorization(
             RegisteredClient client, Instant issued, Instant expires) {
-        return org.springframework.security.oauth2.server.authorization.OAuth2Authorization.withRegisteredClient(client)
+        return OAuth2Authorization.withRegisteredClient(client)
             .principalName("purge-test").authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
-            .token(new org.springframework.security.oauth2.core.OAuth2AccessToken(
-                org.springframework.security.oauth2.core.OAuth2AccessToken.TokenType.BEARER, UUID.randomUUID().toString(), issued, expires))
+            .token(new OAuth2AccessToken(
+                OAuth2AccessToken.TokenType.BEARER, UUID.randomUUID().toString(), issued, expires))
             .build();
     }
 
-    private static String thumbprint(java.nio.file.Path pem) throws Exception {
-        var der = Base64.getMimeDecoder().decode(java.nio.file.Files.readString(pem).replaceAll("-----(BEGIN|END) PRIVATE KEY-----", ""));
-        var key = (java.security.interfaces.RSAPrivateCrtKey) java.security.KeyFactory.getInstance("RSA")
-            .generatePrivate(new java.security.spec.PKCS8EncodedKeySpec(der));
-        return new com.nimbusds.jose.jwk.RSAKey.Builder((java.security.interfaces.RSAPublicKey) java.security.KeyFactory.getInstance("RSA")
-            .generatePublic(new java.security.spec.RSAPublicKeySpec(key.getModulus(), key.getPublicExponent())))
+    private static String thumbprint(Path pem) throws Exception {
+        var der = Base64.getMimeDecoder().decode(Files.readString(pem).replaceAll("-----(BEGIN|END) PRIVATE KEY-----", ""));
+        var key = (RSAPrivateCrtKey) KeyFactory.getInstance("RSA")
+            .generatePrivate(new PKCS8EncodedKeySpec(der));
+        return new RSAKey.Builder((RSAPublicKey) KeyFactory.getInstance("RSA")
+            .generatePublic(new RSAPublicKeySpec(key.getModulus(), key.getPublicExponent())))
             .build().computeThumbprint().toString();
     }
 
     private String code(MockHttpSession session, String verifier) throws Exception {
-        var location = mvc.perform(get(java.net.URI.create(authorize(verifier))).with(https()).session(session).accept(MediaType.TEXT_HTML))
+        var location = mvc.perform(get(URI.create(authorize(verifier))).with(https()).session(session).accept(MediaType.TEXT_HTML))
             .andExpect(status().is3xxRedirection()).andReturn().getResponse().getRedirectedUrl();
         assertThat(location).startsWith(CALLBACK);
         return UriComponentsBuilder.fromUriString(location).build().getQueryParams().getFirst("code");
@@ -262,7 +279,7 @@ class AuthorizationServerIntegrationTests {
     private static void secondFactor(MockHttpSession session, Instant at) {
         var context = (SecurityContext) session.getAttribute("SPRING_SECURITY_CONTEXT");
         var previous = context.getAuthentication();
-        var factors = new java.util.ArrayList<org.springframework.security.core.GrantedAuthority>();
+        var factors = new ArrayList<GrantedAuthority>();
         for (var authority : previous.getAuthorities()) {
             factors.add(authority instanceof FactorGrantedAuthority factor
                 ? FactorGrantedAuthority.withAuthority(factor.getAuthority()).issuedAt(at).build() : authority);
@@ -271,7 +288,7 @@ class AuthorizationServerIntegrationTests {
         context.setAuthentication(UsernamePasswordAuthenticationToken.authenticated(previous.getPrincipal(), null, factors));
     }
     private String location(MockHttpSession session, String url) throws Exception {
-        var request = get(java.net.URI.create(url)).with(https()).accept(MediaType.TEXT_HTML);
+        var request = get(URI.create(url)).with(https()).accept(MediaType.TEXT_HTML);
         if (session != null) request.session(session);
         return mvc.perform(request).andExpect(status().is3xxRedirection()).andReturn().getResponse().getRedirectedUrl();
     }

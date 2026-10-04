@@ -1,24 +1,28 @@
 package top.ddupan.iam.login.authentication.interfaces.web;
 
-import top.ddupan.iam.login.support.AdDirectoryFixture;
-import org.springframework.aot.hint.RuntimeHints;
-import org.springframework.aot.hint.RuntimeHintsRegistrar;
-import org.springframework.context.annotation.ImportRuntimeHints;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
-import org.springframework.http.MediaType;
 import java.time.Instant;
 import java.util.List;
+import org.hamcrest.Matchers;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.Test;
+import org.springframework.aot.hint.RuntimeHints;
+import org.springframework.aot.hint.RuntimeHintsRegistrar;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.micrometer.metrics.test.autoconfigure.AutoConfigureMetrics;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.context.annotation.ImportRuntimeHints;
+import org.springframework.http.MediaType;
+import org.springframework.mock.web.MockHttpSession;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.FactorGrantedAuthority;
 import org.springframework.security.core.context.SecurityContext;
-import org.springframework.mock.web.MockHttpSession;
+import org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
+import top.ddupan.iam.login.support.AdDirectoryFixture;
 import static org.assertj.core.api.Assertions.*;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
@@ -28,7 +32,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest(properties = {"spring.autoconfigure.exclude=org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration", "iam.ad.enabled=true", "iam.ad.domain=example.test", "iam.ad.base-dn=dc=example,dc=test",
     "management.otlp.metrics.export.enabled=false", "spring.security.user.name=fixture-monitor", "spring.security.user.password=fixture-monitor-password"})
 @AutoConfigureMockMvc
-@org.springframework.boot.micrometer.metrics.test.autoconfigure.AutoConfigureMetrics
+@AutoConfigureMetrics
 @ImportRuntimeHints(SignInIntegrationTests.FixtureHints.class)
 class SignInIntegrationTests {
     static class FixtureHints implements RuntimeHintsRegistrar {
@@ -92,7 +96,7 @@ class SignInIntegrationTests {
             .andExpect(redirectedUrl("/signin?error"));
         assertThat(session.getAttribute("SPRING_SECURITY_CONTEXT")).isNull();
         mvc.perform(get("/signin").with(https()).param("error", "").session(session))
-            .andExpect(content().string(org.hamcrest.Matchers.containsString("无法验证账号")));
+            .andExpect(content().string(Matchers.containsString("无法验证账号")));
         mvc.perform(post("/signin/restart").with(https()).session(session).with(csrf()))
             .andExpect(redirectedUrl("/signin"));
         assertThat(session.isInvalid()).isTrue();
@@ -136,16 +140,16 @@ class SignInIntegrationTests {
     @Test
     void managementBasicCredentialsCannotAuthenticateBrowserLogin() throws Exception {
         mvc.perform(get("/actuator/prometheus").with(https()).with(
-            org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors
+            SecurityMockMvcRequestPostProcessors
                 .httpBasic("fixture-monitor", "fixture-monitor-password")))
             .andExpect(status().isOk());
         mvc.perform(get("/signin/mfa").with(https()).with(
-            org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors
+            SecurityMockMvcRequestPostProcessors
                 .httpBasic("fixture-monitor", "fixture-monitor-password")))
             .andExpect(status().is3xxRedirection());
     }
 
-    private static org.springframework.test.web.servlet.request.RequestPostProcessor https() {
+    private static RequestPostProcessor https() {
         return request -> {
             request.setScheme("https");
             request.setSecure(true);

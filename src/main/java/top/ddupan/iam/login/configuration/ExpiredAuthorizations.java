@@ -2,6 +2,7 @@ package top.ddupan.iam.login.configuration;
 
 import java.sql.Timestamp;
 import java.time.Clock;
+import java.util.Arrays;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcOperations;
@@ -33,7 +34,7 @@ public final class ExpiredAuthorizations {
     public int purge() {
         var now = Timestamp.from(clock.instant());
         var args = new Object[TOKENS.length];
-        java.util.Arrays.fill(args, now);
+        Arrays.fill(args, now);
         int deleted = jdbc.update(DELETE, args);
         if (deleted > 0) LOG.info("Removed {} expired authorizations", deleted);
         return deleted;

@@ -1,10 +1,16 @@
 package top.ddupan.iam.login.configuration;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.util.Arrays;
+import java.util.stream.Stream;
 import org.springframework.aot.hint.BindingReflectionHintsRegistrar;
 import org.springframework.aot.hint.MemberCategory;
 import org.springframework.aot.hint.RuntimeHints;
 import org.springframework.aot.hint.RuntimeHintsRegistrar;
 import org.springframework.aot.hint.TypeReference;
+import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
+import org.springframework.core.type.classreading.SimpleMetadataReaderFactory;
 import top.ddupan.iam.login.authentication.domain.User;
 import top.ddupan.iam.login.authentication.infrastructure.security.DirectoryPrincipal;
 
@@ -46,26 +52,26 @@ final class SecurityJacksonHints implements RuntimeHintsRegistrar {
         // modules' mix-ins and deserializers are read reflectively. Scanned at build time so an upgrade
         // that adds one cannot silently leave it out.
         try {
-            var resolver = new org.springframework.core.io.support.PathMatchingResourcePatternResolver(classLoader);
-            var readers = new org.springframework.core.type.classreading.SimpleMetadataReaderFactory(classLoader);
+            var resolver = new PathMatchingResourcePatternResolver(classLoader);
+            var readers = new SimpleMetadataReaderFactory(classLoader);
             // WebAuthn's JSON in both directions: API types written to the browser (without their getters,
             // fields such as "challenge" silently disappear) and the filters' request DTOs read back from it
             // (registration fails with a bare 400). Includes nested classes.
-            var patterns = java.util.stream.Stream.of("classpath*:org/springframework/security/**/jackson/*.class",
+            var patterns = Stream.of("classpath*:org/springframework/security/**/jackson/*.class",
                 "classpath*:org/springframework/security/web/webauthn/**/*.class",
                 // WebAuthn4J parses client data, attestation objects and (polymorphic) attestation statements
                 // with Jackson as well, and ships no native metadata for it.
                 "classpath*:com/webauthn4j/**/*.class");
             for (var resource : patterns.flatMap(pattern -> {
-                    try { return java.util.Arrays.stream(resolver.getResources(pattern)); }
-                    catch (java.io.IOException ex) { throw new java.io.UncheckedIOException(ex); }
+                    try { return Arrays.stream(resolver.getResources(pattern)); }
+                    catch (IOException ex) { throw new UncheckedIOException(ex); }
                 }).toList()) {
                 var name = readers.getMetadataReader(resource).getClassMetadata().getClassName();
                 if (name.endsWith("package-info")) continue;
                 hints.reflection().registerTypeIfPresent(classLoader, name, MemberCategory.INVOKE_DECLARED_CONSTRUCTORS,
                     MemberCategory.INVOKE_DECLARED_METHODS, MemberCategory.ACCESS_DECLARED_FIELDS);
             }
-        } catch (java.io.IOException | java.io.UncheckedIOException ex) {
+        } catch (IOException | UncheckedIOException ex) {
             throw new IllegalStateException("Cannot scan Spring Security Jackson classes", ex);
         }
         for (var type : STORED_TYPES) {

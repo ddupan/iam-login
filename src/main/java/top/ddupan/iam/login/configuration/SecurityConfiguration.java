@@ -6,19 +6,25 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.annotation.Order;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.authentication.ProviderManager;
 import org.springframework.security.authorization.AuthorizationManagerFactories;
 import org.springframework.security.config.Customizer;
-import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.authorization.EnableMultiFactorAuthentication;
+import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.intercept.RequestAuthorizationContext;
 import org.springframework.security.web.authentication.HttpStatusEntryPoint;
 import org.springframework.security.web.authentication.LoginUrlAuthenticationEntryPoint;
+import org.springframework.security.web.context.NullSecurityContextRepository;
 import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
+import org.springframework.security.web.util.matcher.AnyRequestMatcher;
 import top.ddupan.iam.login.authentication.application.VerifyPassword;
 import top.ddupan.iam.login.authentication.infrastructure.security.DirectoryAuthenticationProvider;
+import top.ddupan.iam.login.authentication.interfaces.web.PageRenderer;
+import top.ddupan.iam.login.authorization.application.port.HydraGateway;
 
 @Configuration(proxyBeanMethods = false)
 @EnableMultiFactorAuthentication(authorities = {})
@@ -32,9 +38,9 @@ class SecurityConfiguration {
                 .requestMatchers("/actuator/health/**").permitAll()
                 .anyRequest().authenticated())
             .securityContext(context -> context.securityContextRepository(
-                new org.springframework.security.web.context.NullSecurityContextRepository()))
+                new NullSecurityContextRepository()))
             .sessionManagement(session -> session.sessionCreationPolicy(
-                org.springframework.security.config.http.SessionCreationPolicy.STATELESS))
+                SessionCreationPolicy.STATELESS))
             .httpBasic(Customizer.withDefaults())
             .build();
     }
@@ -44,7 +50,7 @@ class SecurityConfiguration {
     @ConditionalOnProperty(prefix = "iam.ad", name = "enabled", havingValue = "true")
     SecurityFilterChain browser(HttpSecurity http, VerifyPassword passwords,
             ObjectProvider<WebAuthnBrowserConfigurer> webAuthn,
-            ObjectProvider<top.ddupan.iam.login.authorization.application.port.HydraGateway> logoutGateway) throws Exception {
+            ObjectProvider<HydraGateway> logoutGateway) throws Exception {
         var passwordFactor = AuthorizationManagerFactories.<RequestAuthorizationContext>multiFactor()
             .requireFactor(factor -> factor.passwordAuthority().validDuration(Duration.ofMinutes(10)))
             .build();
@@ -55,7 +61,7 @@ class SecurityConfiguration {
             .authorizeHttpRequests(auth -> {
                 if (mfa != null) {
                     auth.requestMatchers("/signin/complete", "/oauth2/login", "/oauth2/consent").access(mfa.policy.complete);
-                    auth.requestMatchers(org.springframework.http.HttpMethod.POST, "/webauthn/register")
+                    auth.requestMatchers(HttpMethod.POST, "/webauthn/register")
                         .access(mfa.policy.password);
                 }
                 auth.requestMatchers("/error", "/signin", "/signin/password", "/assets/**", "/oauth2/start", "/oauth2/logout").permitAll()
@@ -65,8 +71,8 @@ class SecurityConfiguration {
             })
             .formLogin(form -> form.loginPage("/signin").loginProcessingUrl("/signin/password")
                 .defaultSuccessUrl("/signin/mfa", true).failureUrl("/signin?error"))
-            .logout(logout -> logout.logoutRequestMatcher(request -> PathPatternRequestMatcher.withDefaults().matcher(org.springframework.http.HttpMethod.POST,"/signin/restart").matches(request)
-                || PathPatternRequestMatcher.withDefaults().matcher(org.springframework.http.HttpMethod.POST,"/signin/logout").matches(request))
+            .logout(logout -> logout.logoutRequestMatcher(request -> PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST,"/signin/restart").matches(request)
+                || PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST,"/signin/logout").matches(request))
                 .logoutSuccessHandler((request,response,authentication) -> {
                     var gateway = logoutGateway.getIfAvailable();
                     response.setStatus(303);
@@ -79,10 +85,10 @@ class SecurityConfiguration {
                 .defaultAuthenticationEntryPointFor(new LoginUrlAuthenticationEntryPoint("/signin"),
                     PathPatternRequestMatcher.withDefaults().matcher("/oauth2/**"))
                 .defaultAuthenticationEntryPointFor(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED),
-                    org.springframework.security.web.util.matcher.AnyRequestMatcher.INSTANCE))
+                    AnyRequestMatcher.INSTANCE))
             .requestCache(cache -> cache.disable())
             .headers(headers -> headers.contentSecurityPolicy(csp -> csp.policyDirectives(
-                top.ddupan.iam.login.authentication.interfaces.web.PageRenderer.CONTENT_SECURITY_POLICY)));
+                PageRenderer.CONTENT_SECURITY_POLICY)));
         if (mfa != null) mfa.configure(http);
         var chain = http.build();
         return mfa == null ? chain : mfa.finish(http, chain);
