@@ -1,10 +1,13 @@
 package top.ddupan.iam.login.clients;
 
+import java.io.IOException;
 import java.net.URI;
 import java.net.http.*;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.*;
 import org.junit.jupiter.api.Test;
+import org.springframework.web.client.RestClient;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.startupcheck.OneShotStartupCheckStrategy;
 import org.testcontainers.postgresql.PostgreSQLContainer;
@@ -32,7 +35,7 @@ class HydraRepositoryIntegrationTests {
                     .withEnv("URLS_SELF_ISSUER","http://localhost:14844/").withEnv("LOG_LEVEL","error")
                     .withEnv("SECRETS_SYSTEM","fixture-only-stable-system-secret-32-characters").withCommand("serve","all","--dev")) {
                 hydra.start(); ready();
-                var registry=new HydraClientRepository(org.springframework.web.client.RestClient.builder().baseUrl(ADMIN.toString()).build());
+                var registry=new HydraClientRepository(RestClient.builder().baseUrl(ADMIN.toString()).build());
                 var client=new OidcClient("managed-fixture","Fixture",List.of("https://rp.example/callback"),Set.of("openid","groups"),
                     List.of("https://rp.example/bye"),"https://rp.example/backchannel","",true);
                 var created=registry.create(client);
@@ -66,7 +69,7 @@ class HydraRepositoryIntegrationTests {
     }
     private static String tokenError(String id,String secret) throws Exception {
         try (var http=HttpClient.newHttpClient()) {
-            String basic=Base64.getEncoder().encodeToString((id+":"+secret).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            String basic=Base64.getEncoder().encodeToString((id+":"+secret).getBytes(StandardCharsets.UTF_8));
             var response=http.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:14844/oauth2/token"))
                 .header("Authorization","Basic "+basic).header("Content-Type","application/x-www-form-urlencoded")
                 .POST(HttpRequest.BodyPublishers.ofString("grant_type=authorization_code&code=invalid-code&redirect_uri=https%3A%2F%2Frp.example%2Fnew-callback"))
@@ -81,7 +84,7 @@ class HydraRepositoryIntegrationTests {
                 try {
                     if(http.send(HttpRequest.newBuilder(ADMIN.resolve("/health/ready")).timeout(Duration.ofSeconds(1)).GET().build(),
                         HttpResponse.BodyHandlers.discarding()).statusCode()==200) return;
-                } catch (java.io.IOException ignored) { }
+                } catch (IOException ignored) { }
                 Thread.sleep(200);
             }
         }

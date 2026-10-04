@@ -15,6 +15,7 @@ import org.springframework.security.web.webauthn.api.UserVerificationRequirement
 import org.springframework.security.web.webauthn.management.*;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
+import top.ddupan.iam.login.authentication.infrastructure.persistence.JdbcCredentialRegistration;
 import top.ddupan.iam.login.authentication.infrastructure.webauthn.*;
 
 @Configuration(proxyBeanMethods = false)
@@ -55,7 +56,7 @@ class WebAuthnConfiguration {
         delegate.setCustomizeRequestOptions(options -> options.timeout(Duration.ofMinutes(5))
             .userVerification(UserVerificationRequirement.REQUIRED));
         return new DirectoryRelyingPartyOperations(delegate, policy, users, credentials,
-            new top.ddupan.iam.login.authentication.infrastructure.persistence.JdbcCredentialRegistration(
+            new JdbcCredentialRegistration(
                 jdbc, new TransactionTemplate(transactions)));
     }
 

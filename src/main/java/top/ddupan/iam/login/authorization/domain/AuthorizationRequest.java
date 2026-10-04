@@ -1,5 +1,9 @@
 package top.ddupan.iam.login.authorization.domain;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
 import java.util.List;
 
 /** Verified metadata read from the issuer's private administrative API. */
@@ -17,8 +21,8 @@ public record AuthorizationRequest(String challenge, String clientId, List<Strin
     public String challengeDigest() { return digest(challenge); }
     public static String digest(String challenge) {
         try {
-            return java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
-                .digest(challenge.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
-        } catch (java.security.NoSuchAlgorithmException ex) { throw new IllegalStateException("SHA-256 unavailable", ex); }
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                .digest(challenge.getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException ex) { throw new IllegalStateException("SHA-256 unavailable", ex); }
     }
 }

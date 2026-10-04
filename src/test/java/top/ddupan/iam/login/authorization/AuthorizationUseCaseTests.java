@@ -1,5 +1,6 @@
 package top.ddupan.iam.login.authorization;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -34,7 +35,7 @@ class AuthorizationUseCaseTests {
         var gateway = mock(HydraGateway.class);
         var user = new User(new User.UserId("directory", "id"), "alice", "Alice", "", List.of());
         var useCase = new AuthorizeApplication(new AuthorizationPolicy(Set.of("gitea"), Map.of(user.id(), "old-sub")), gateway);
-        var at = java.time.Instant.now();
+        var at = Instant.now();
         for (String subject : List.of("other-sub", "")) {
             var request = new AuthorizationRequest("challenge", "gitea", List.of("openid"), List.of(),
                 subject, null, null, "https://issuer/oauth2/auth", true);
