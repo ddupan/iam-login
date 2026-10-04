@@ -35,7 +35,7 @@ export function ClientsPanel({ token, onExpired }: { token: string; onExpired: (
     finally { setBusy(false); }
   }, [onExpired]);
 
-  // ponytail: first page only (Hydra paginates before filtering); add paging when there are >100 clients.
+  // ponytail: first page only (the API pages before dropping unmanaged clients); add paging past 100 clients.
   const reload = useCallback(() => run(async () => setClients(await api("GET", "/api/iam/clients?page=0&size=100"))), [api, run]);
   useEffect(() => { reload(); }, [reload]);
 

@@ -9,7 +9,7 @@ AD 仍为用户与组权威；凭据按目录 authority + objectGUID 关联，�
 1. `/signin` 使用原生表单 POST 验证 AD 密码，建立 `FACTOR_PASSWORD`。
 2. `/signin/mfa`：没有凭据时注册 passkey；已有凭据时验证 passkey。
 3. 注册只保存凭据，必须再次实际验证，才取得 `FACTOR_WEBAUTHN`。
-4. `/signin/complete` 要求两种因素均在 10 分钟内有效；单独访问显示验证结果；存在 Hydra 请求时继续 [Login/Consent](hydra-login.md)。
+4. `/signin/complete` 要求两种因素均在 10 分钟内有效；单独访问显示验证结果；存在被打断的授权请求时恢复该请求（见[内置授权服务器](authorization-server.md)）。
 
 首次注册信任近期 AD 密码验证。已有凭据后的新增注册同时要求密码与 WebAuthn 因素；
 本轮 UI 只提供首次注册与验证，不提供新增管理、删除或自助恢复入口。按维护者确认的

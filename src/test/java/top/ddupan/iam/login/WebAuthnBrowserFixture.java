@@ -13,7 +13,6 @@ import org.springframework.security.oauth2.server.authorization.settings.TokenSe
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
 import top.ddupan.iam.login.support.AdDirectoryFixture;
-import top.ddupan.iam.login.support.HydraFixture;
 import top.ddupan.iam.login.support.SigningKeyFixture;
 
 /** Test-only HTTPS application with simulated AD and disposable PostgreSQL. Never connects to real AD. */
@@ -38,15 +37,6 @@ public final class WebAuthnBrowserFixture {
             Map.entry("spring.datasource.password", database.getPassword()),
             Map.entry("spring.security.user.password", "fixture-monitor-password"),
             Map.entry("management.otlp.metrics.export.enabled", "false")));
-        var hydra = Boolean.getBoolean("iam.fixture.hydra") ? new HydraFixture() : null;
-        if (hydra != null) {
-            properties.put("iam.hydra.enabled", "true");
-            properties.put("iam.hydra.admin-url", "http://127.0.0.1:14445");
-            properties.put("iam.hydra.public-url", "http://localhost:14444");
-            properties.put("iam.hydra.subjects[0].authority", "example.test");
-            properties.put("iam.hydra.subjects[0].directory-id", "00112233-4455-6677-8899-aabbccddeeff");
-            properties.put("iam.hydra.subjects[0].subject", "human:fixture-existing-oidc-subject");
-        }
         var conformance = Boolean.getBoolean("iam.fixture.conformance");
         var authorizationServer = conformance || Boolean.getBoolean("iam.fixture.authorization-server");
         if (authorizationServer) {
@@ -98,7 +88,6 @@ public final class WebAuthnBrowserFixture {
         }
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             context.close(); directory.close(); database.stop();
-            if (hydra != null) hydra.close();
         }));
     }
 }
