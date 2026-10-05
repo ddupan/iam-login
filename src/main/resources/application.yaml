@@ -10,3 +10,10 @@ management:
     health:
       probes:
         enabled: true
+  # Boot's LDAP indicator probes its own auto-configured ContextSource (spring.ldap.urls, default
+  # localhost:389), which this app never uses: AD is reached through per-login binds. It must be
+  # off HERE, not in deployment config: Native fixes @ConditionalOnEnabledHealthIndicator at AOT
+  # time, so a runtime management.health.ldap.enabled=false is ignored and /actuator/health is 503.
+  health:
+    ldap:
+      enabled: false
