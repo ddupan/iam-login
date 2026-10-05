@@ -13,6 +13,10 @@ docker_cmd=(docker)
 if [[ ${IAM_DOCKER_USE_SUDO:-0} == 1 ]]; then docker_cmd=(sudo -n docker); fi
 [[ -x $binary ]] || { echo "native binary missing: $binary" >&2; exit 1; }
 
+# Under CI, label every container so the next job can remove what a cancelled run left behind
+# (cancelling a host-mode job kills this script, not the container). Manual runs stay unlabelled.
+ci_label=()
+[[ ${GITHUB_ACTIONS:-} == true ]] && ci_label=(--label iam-login.ci=1)
 work=$(mktemp -d)
 binary_pid=
 cleanup() {
@@ -39,13 +43,13 @@ wait_for() {  # wait_for <seconds> <description> <command...>
 
 # Signing key as infrastructure would provide it, and a truststore for the fixture's LDAPS certificate.
 openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out "$work/signing-key.pem" 2>/dev/null
-"${docker_cmd[@]}" run --rm -v "$repo_root/src/test/resources/ldap:/in:ro" -v "$work:/out" --entrypoint sh "$graalvm" -c '
+"${docker_cmd[@]}" run "${ci_label[@]}" --rm -v "$repo_root/src/test/resources/ldap:/in:ro" -v "$work:/out" --entrypoint sh "$graalvm" -c '
   alias=$(keytool -list -keystore /in/fixture.p12 -storepass fixture-only -storetype PKCS12 | grep -i PrivateKeyEntry | cut -d, -f1)
   keytool -exportcert -rfc -alias "$alias" -keystore /in/fixture.p12 -storepass fixture-only -storetype PKCS12 -file /out/fixture.crt
   keytool -importcert -noprompt -alias fixture -file /out/fixture.crt -keystore /out/trust.p12 -storetype PKCS12 -storepass fixture-only
   chmod a+r /out/trust.p12' >/dev/null 2>&1
 
-"${docker_cmd[@]}" run -d --name iam-smoke-pg -p 127.0.0.1:25432:5432 \
+"${docker_cmd[@]}" run "${ci_label[@]}" -d --name iam-smoke-pg -p 127.0.0.1:25432:5432 \
   -e POSTGRES_USER=iam -e POSTGRES_PASSWORD=smoke-only -e POSTGRES_DB=iam "$postgres" >/dev/null
 wait_for 60 PostgreSQL "${docker_cmd[@]}" exec iam-smoke-pg psql -U iam -d iam -c 'select 1'
 
@@ -90,7 +94,7 @@ wait_for 120 "fixture client" grep -q CLIENT_REGISTERED "$work/support.log"
 grep -oE 'Started IamLoginApplication in [0-9.]+ seconds' "$work/native.log" || true
 
 status=0
-"${docker_cmd[@]}" run --rm --network host --ipc=host -v "$repo_root/frontend:/w" -w /w \
+"${docker_cmd[@]}" run "${ci_label[@]}" --rm --network host --ipc=host -v "$repo_root/frontend:/w" -w /w \
   -v "${IAM_NPM_CACHE:-$HOME/.cache/iam-login/npm}:/root/.npm" -e IAM_AUTHORIZATION_SERVER_FIXTURE=1 "$playwright" \
   sh -c 'npm ci --no-audit --no-fund >/dev/null && npx playwright test authorization-server.spec.ts' || status=$?
 
