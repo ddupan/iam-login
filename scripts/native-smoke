@@ -16,6 +16,15 @@ if [[ ${IAM_DOCKER_USE_SUDO:-0} == 1 ]]; then docker_cmd=(sudo -n docker); fi
 work=$(mktemp -d)
 binary_pid=
 cleanup() {
+  local status=$?
+  # The logs live in $work, removed below: on failure they are the only explanation, so print them first.
+  if ((status != 0)); then
+    for log in native support; do
+      [[ -f $work/$log.log ]] || continue
+      echo "--- $log.log (last 60 lines)" >&2
+      tail -n 60 "$work/$log.log" | sed 's/SPIFFE_SVID=.*/SPIFFE_SVID=<redacted>/' >&2
+    done
+  fi
   [[ -n $binary_pid ]] && kill "$binary_pid" 2>/dev/null || true
   "${docker_cmd[@]}" rm -f iam-smoke-support iam-smoke-pg >/dev/null 2>&1 || true
   rm -rf -- "$work"
@@ -44,7 +53,9 @@ wait_for 60 PostgreSQL "${docker_cmd[@]}" exec iam-smoke-pg psql -U iam -d iam -
 IAM_DOCKER_NAME=iam-smoke-support "$repo_root/scripts/gradle-in-docker" nativeSmokeSupport \
   -x processTestAot -x compileAotTestJava -x processAotTestResources \
   "-PsmokeArgs=jdbc:postgresql://127.0.0.1:25432/iam iam smoke-only" > "$work/support.log" 2>&1 &
-wait_for 600 "simulated AD" grep -q LDAP_URL= "$work/support.log"
+# SPIFFE_SVID is the last line the support prints (after generating a key); waiting only for LDAP_URL
+# raced the greps below, and with pipefail + set -e a miss ended the script without a word.
+wait_for 600 "simulated AD and SPIRE stand-in" grep -q SPIFFE_SVID= "$work/support.log"
 ldap=$(grep -o 'LDAP_URL=.*' "$work/support.log" | cut -d= -f2)
 jwks=$(grep -o 'SPIFFE_JWKS=.*' "$work/support.log" | cut -d= -f2)
 
@@ -70,10 +81,11 @@ binary_pid=$!
 wait_for 90 "native binary" curl -sfk -o /dev/null https://localhost:18083/actuator/health/readiness
 # Overall health too: readiness skips most indicators, so a broken one (e.g. a probe of an unused
 # LDAP default) would otherwise only show up as a 503 in production.
-curl -sfk -o /dev/null https://localhost:18083/actuator/health
+curl -sSfk -o /dev/null https://localhost:18083/actuator/health || { echo "overall health is not UP" >&2; exit 1; }
 # Machine path: a JWT-SVID on the allowlist manages clients (remote JWKS fetch and validation, natively).
 svid=$(grep -o 'SPIFFE_SVID=.*' "$work/support.log" | cut -d= -f2)
-curl -sfk -o /dev/null -H "Authorization: Bearer $svid" https://localhost:18083/api/iam/clients
+curl -sSfk -o /dev/null -H "Authorization: Bearer $svid" https://localhost:18083/api/iam/clients \
+  || { echo "JWT-SVID call to the client API failed" >&2; exit 1; }
 wait_for 120 "fixture client" grep -q CLIENT_REGISTERED "$work/support.log"
 grep -oE 'Started IamLoginApplication in [0-9.]+ seconds' "$work/native.log" || true
 

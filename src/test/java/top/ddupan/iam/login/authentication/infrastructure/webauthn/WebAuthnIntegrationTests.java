@@ -1,9 +1,14 @@
 package top.ddupan.iam.login.authentication.infrastructure.webauthn;
 
-import com.zaxxer.hikari.HikariDataSource;
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.io.ObjectInputStream;
+import java.io.ObjectStreamClass;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
@@ -11,17 +16,19 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.regex.Pattern;
 import javax.sql.DataSource;
+import com.zaxxer.hikari.HikariDataSource;
 import org.hamcrest.Matchers;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentMatchers;
 import org.mockito.Mockito;
+import org.springframework.aot.hint.RuntimeHints;
+import org.springframework.aot.hint.RuntimeHintsRegistrar;
+import org.springframework.aot.hint.TypeReference;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
-import static org.assertj.core.api.Assertions.*;
-import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import org.springframework.core.convert.ConversionService;
 import org.springframework.jdbc.core.JdbcOperations;
 import org.springframework.mock.web.MockHttpServletRequest;
@@ -31,6 +38,15 @@ import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.FactorGrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContext;
+import org.springframework.security.web.webauthn.api.AuthenticatorTransport;
+import org.springframework.security.web.webauthn.api.Bytes;
+import org.springframework.security.web.webauthn.api.ImmutableCredentialRecord;
+import org.springframework.security.web.webauthn.api.ImmutablePublicKeyCose;
+import org.springframework.security.web.webauthn.api.PublicKeyCredentialCreationOptions;
+import org.springframework.security.web.webauthn.api.PublicKeyCredentialRequestOptions;
+import org.springframework.security.web.webauthn.api.PublicKeyCredentialType;
+import org.springframework.security.web.webauthn.management.PublicKeyCredentialUserEntityRepository;
+import org.springframework.security.web.webauthn.management.UserCredentialRepository;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -40,6 +56,8 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
+import static org.assertj.core.api.Assertions.*;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import top.ddupan.iam.login.authentication.infrastructure.persistence.JdbcCredentialRegistration;
 import top.ddupan.iam.login.support.AdDirectoryFixture;
 import top.ddupan.iam.login.support.SessionRoundTrip;
@@ -74,6 +92,47 @@ class WebAuthnIntegrationTests {
 
     @Autowired PlatformTransactionManager transactionManager;
     @Autowired DataSource dataSource;
+
+    // Pending ceremonies are stored with Java serialization, which a native image allows only for registered
+    // classes. Real options (registration and authentication, with credentials listed) are read back here
+    // recording every class in them; each must be registered by SecurityJacksonHints, or the native login
+    // fails with "SerializationConstructorAccessor class not found" (it did, for Arrays$ArrayList).
+    @Test void everyClassInStoredCeremoniesIsRegisteredForNativeSerialization(
+            @Autowired PublicKeyCredentialUserEntityRepository users, @Autowired UserCredentialRepository credentials) throws Exception {
+        var session = login();
+        mvc.perform(post("/webauthn/register/options").session(session).with(https()).with(csrf())).andExpect(status().isOk());
+        var name = ((SecurityContext) session.getAttribute("SPRING_SECURITY_CONTEXT")).getAuthentication().getName();
+        credentials.save(ImmutableCredentialRecord.builder().credentialType(PublicKeyCredentialType.PUBLIC_KEY)
+            .credentialId(Bytes.random()).userEntityUserId(users.findByUsername(name).getId())
+            .publicKey(new ImmutablePublicKeyCose(Bytes.random().getBytes())).signatureCount(0).uvInitialized(true)
+            .transports(Set.of(AuthenticatorTransport.INTERNAL, AuthenticatorTransport.HYBRID))
+            .backupEligible(false).backupState(false).attestationObject(Bytes.random()).attestationClientDataJSON(Bytes.random())
+            .created(Instant.now()).lastUsed(Instant.now()).label("fixture").build());
+        secondFactor(session);
+        mvc.perform(post("/webauthn/register/options").session(session).with(https()).with(csrf())).andExpect(status().isOk());
+        mvc.perform(post("/webauthn/authenticate/options").session(session).with(https()).with(csrf())).andExpect(status().isOk());
+
+        var classes = new TreeSet<String>();
+        for (var bytes : jdbc.queryForList("SELECT options FROM webauthn_challenge", byte[].class)) {
+            try (var in = new ObjectInputStream(new ByteArrayInputStream(bytes)) {
+                @Override protected Class<?> resolveClass(ObjectStreamClass type) throws IOException, ClassNotFoundException {
+                    classes.add(type.getName());
+                    return super.resolveClass(type);
+                }
+            }) {
+                in.readObject();
+            }
+        }
+        assertThat(classes).contains(PublicKeyCredentialCreationOptions.class.getName(), PublicKeyCredentialRequestOptions.class.getName());
+        var hints = new RuntimeHints();
+        var registrar = Class.forName("top.ddupan.iam.login.configuration.SecurityJacksonHints").getDeclaredConstructor();
+        registrar.setAccessible(true);
+        ((RuntimeHintsRegistrar) registrar.newInstance()).registerHints(hints, getClass().getClassLoader());
+        assertThat(classes).allSatisfy(type -> {
+            var hint = hints.reflection().getTypeHint(TypeReference.of(Class.forName(type)));
+            assertThat(hint != null && hint.hasJavaSerialization()).as(type).isTrue();
+        });
+    }
 
     @Test void registrationLockSerializesAndRollsBackOnFailure() throws Exception {
         assertThat(((HikariDataSource)dataSource).getMaximumPoolSize()).isEqualTo(3);
