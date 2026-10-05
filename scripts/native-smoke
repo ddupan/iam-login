@@ -54,7 +54,7 @@ keystore=$repo_root/src/test/resources/ldap/fixture.p12
   -Djavax.net.ssl.trustStore="$work/trust.p12" -Djavax.net.ssl.trustStorePassword=fixture-only -Djavax.net.ssl.trustStoreType=PKCS12 \
   --server.address=127.0.0.1 --server.port=18083 --server.ssl.enabled=true \
   --server.ssl.key-store="file:$keystore" --server.ssl.key-store-password=fixture-only \
-  --iam.ad.enabled=true --iam.ad.domain=example.test --iam.ad.base-dn=dc=example,dc=test --iam.ad.url="$ldap" \
+  --iam.ad.enabled=true --iam.ad.domain=example.test --spring.ldap.base=dc=example,dc=test --spring.ldap.urls="$ldap" \
   --iam.webauthn.enabled=true --iam.webauthn.rp-id=localhost --iam.webauthn.origin=https://localhost:18083 \
   --iam.authorization-server.enabled=true --iam.authorization-server.issuer=https://localhost:18083 \
   --iam.authorization-server.signing-keys[0]="file:$work/signing-key.pem" \
@@ -67,6 +67,9 @@ keystore=$repo_root/src/test/resources/ldap/fixture.p12
   --management.otlp.metrics.export.enabled=false > "$work/native.log" 2>&1 &
 binary_pid=$!
 wait_for 90 "native binary" curl -sfk -o /dev/null https://localhost:18083/actuator/health/readiness
+# Overall health too: readiness skips most indicators, so a broken one (e.g. a probe of an unused
+# LDAP default) would otherwise only show up as a 503 in production.
+curl -sfk -o /dev/null https://localhost:18083/actuator/health
 wait_for 120 "fixture client" grep -q CLIENT_REGISTERED "$work/support.log"
 grep -oE 'Started IamLoginApplication in [0-9.]+ seconds' "$work/native.log" || true
 

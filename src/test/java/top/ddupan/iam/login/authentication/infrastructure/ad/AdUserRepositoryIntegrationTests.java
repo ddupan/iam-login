@@ -1,8 +1,11 @@
 package top.ddupan.iam.login.authentication.infrastructure.ad;
 
+import java.util.Map;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.ldap.autoconfigure.LdapProperties;
+import org.springframework.ldap.core.support.LdapContextSource;
 import top.ddupan.iam.login.authentication.application.port.PasswordVerificationException;
 import top.ddupan.iam.login.authentication.application.port.PasswordVerificationException.Reason;
 import top.ddupan.iam.login.authentication.domain.User.GroupMembership;
@@ -15,8 +18,7 @@ class AdUserRepositoryIntegrationTests {
 
     @BeforeAll static void start() {
         directory = new AdDirectoryFixture();
-        authenticator = new AdPasswordAuthenticator(new AdProperties(true,
-            directory.url(), "example.test", "dc=example,dc=test"));
+        authenticator = authenticator(directory.url());
     }
     @AfterAll static void close() { directory.close(); }
 
@@ -61,14 +63,26 @@ class AdUserRepositoryIntegrationTests {
 
     @Test
     void rejectsWrongTlsHostnameAndPlainLdapConfiguration() {
-        var wrongName = new AdPasswordAuthenticator(new AdProperties(true,
-            directory.mismatchedHostnameUrl(), "example.test", "dc=example,dc=test"));
+        var wrongName = authenticator(directory.mismatchedHostnameUrl());
         assertThatThrownBy(() -> wrongName.authenticate("alice", "fixture-password"))
             .isInstanceOfSatisfying(PasswordVerificationException.class,
                 ex -> assertThat(ex.reason()).isEqualTo(Reason.UNAVAILABLE));
-        assertThatThrownBy(() -> new AdPasswordAuthenticator(new AdProperties(true,
-            "ldap://localhost:389", "example.test", "dc=example,dc=test")))
-            .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> authenticator("ldap://localhost:389")).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    /** The same ContextSource Boot builds from spring.ldap.* with the application.yaml defaults. */
+    private static AdPasswordAuthenticator authenticator(String url) {
+        var ldap = new LdapProperties();
+        ldap.setUrls(new String[] {url});
+        ldap.setBase("dc=example,dc=test");
+        var contexts = new LdapContextSource();
+        contexts.setUrl(url);
+        contexts.setBase(ldap.getBase());
+        contexts.setAnonymousReadOnly(true);
+        contexts.setBaseEnvironmentProperties(Map.of("java.naming.referral", "ignore",
+            "java.naming.ldap.attributes.binary", "objectGUID"));
+        contexts.afterPropertiesSet();
+        return new AdPasswordAuthenticator(new AdProperties(true, "example.test"), ldap, contexts);
     }
 
     private static void rejected(String username, String password, Reason reason) {
