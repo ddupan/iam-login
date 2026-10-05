@@ -51,6 +51,7 @@ import tools.jackson.databind.json.JsonMapper;
 import top.ddupan.iam.login.configuration.ExpiredAuthorizations;
 import top.ddupan.iam.login.support.AdDirectoryFixture;
 import top.ddupan.iam.login.support.SigningKeyFixture;
+import top.ddupan.iam.login.support.SpiffeFixture;
 import static org.assertj.core.api.Assertions.*;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.httpBasic;
@@ -67,7 +68,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
     "iam.authorization-server.subjects[0].directory-id=00112233-4455-6677-8899-aabbccddeeff",
     "iam.authorization-server.subjects[0].subject=human:existing-subject",
     "management.otlp.metrics.export.enabled=false", "spring.security.user.password=fixture-monitor-password",
-    "iam.clients.admin-groups[0]=gitea-admins"})
+    "iam.clients.admin-groups[0]=gitea-admins",
+    "iam.clients.spiffe.issuer=" + SpiffeFixture.ISSUER, "iam.clients.spiffe.admin-ids[0]=spiffe://example.test/ci/terraform"})
 @AutoConfigureMockMvc
 class AuthorizationServerIntegrationTests {
     static class Fixtures {
@@ -78,6 +80,7 @@ class AuthorizationServerIntegrationTests {
         static { DATABASE.start(); }
         static final Path ACTIVE_KEY = SigningKeyFixture.write();
         static final Path PREVIOUS_KEY = SigningKeyFixture.write();
+        static final SpiffeFixture SPIRE = new SpiffeFixture();
     }
     @DynamicPropertySource
     static void properties(DynamicPropertyRegistry r) {
@@ -87,8 +90,9 @@ class AuthorizationServerIntegrationTests {
         r.add("spring.datasource.password", () -> Fixtures.DATABASE.getPassword());
         r.add("iam.authorization-server.signing-keys[0]", () -> "file:" + Fixtures.ACTIVE_KEY);
         r.add("iam.authorization-server.signing-keys[1]", () -> "file:" + Fixtures.PREVIOUS_KEY);
+        r.add("iam.clients.spiffe.jwk-set-uri", () -> Fixtures.SPIRE.jwkSetUri());
     }
-    @AfterAll static void close() { Fixtures.DIRECTORY.close(); Fixtures.DATABASE.stop(); }
+    @AfterAll static void close() { Fixtures.DIRECTORY.close(); Fixtures.DATABASE.stop(); Fixtures.SPIRE.close(); }
 
     private static final String CALLBACK = "https://rp.example/cb";
     @Autowired MockMvc mvc;
@@ -289,6 +293,23 @@ class AuthorizationServerIntegrationTests {
         assertThat(access.get("aud")).asInstanceOf(InstanceOfAssertFactories.LIST).contains("iam-console", "iam-login");
         mvc.perform(get("/api/iam/clients").with(https()).header("Authorization", "Bearer " + tokens.get("access_token")))
             .andExpect(status().isOk());
+    }
+
+    // Machines (IaC) present a SPIFFE JWT-SVID: allowed only for listed SPIFFE IDs, for audience iam-login,
+    // from the SPIRE issuer, and still valid. Groups play no part.
+    @Test void spiffeIdentitiesOnTheAllowlistManageClients() throws Exception {
+        var spire = Fixtures.SPIRE;
+        mvc.perform(get("/api/iam/clients").with(https()).header("Authorization", "Bearer " + spire.svid("spiffe://example.test/ci/terraform")))
+            .andExpect(status().isOk());
+        mvc.perform(get("/api/iam/clients").with(https()).header("Authorization", "Bearer " + spire.svid("spiffe://example.test/ci/other")))
+            .andExpect(status().isForbidden());
+        for (var rejected : List.of(
+                spire.svid("spiffe://example.test/ci/terraform", List.of("zot"), SpiffeFixture.ISSUER, Instant.now().plusSeconds(600)),
+                spire.svid("spiffe://example.test/ci/terraform", List.of("iam-login"), SpiffeFixture.ISSUER, Instant.now().minusSeconds(600)),
+                spire.svid("spiffe://example.test/ci/terraform", List.of("iam-login"), "https://elsewhere.example", Instant.now().plusSeconds(600)))) {
+            mvc.perform(get("/api/iam/clients").with(https()).header("Authorization", "Bearer " + rejected))
+                .andExpect(status().isUnauthorized());
+        }
     }
 
     @Test void clientsAreManagedThroughTheApi(@Autowired OAuth2AuthorizationService authorizations) throws Exception {

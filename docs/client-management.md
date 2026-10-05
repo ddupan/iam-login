@@ -15,6 +15,10 @@ confidential authorization-code 客户端。领域层定义 `ClientRepository`�
 2. **groups**：客户端申请 `groups` scope 时，用户的直接 AD 组名进入 access token。API 要求其中有
    `iam.clients.admin-groups` 之一。
 
+3. **机器（IaC）**：也可用 SPIFFE JWT-SVID 调用。token 须由配置的 SPIRE OIDC issuer 签发（按其 JWKS 验签）、
+   `aud` 含 `iam-login`、未过期，且 `sub`（SPIFFE ID）在 `iam.clients.spiffe.admin-ids` 中精确列出；groups 不参与。
+   按 token 的 `iss` 选择验证方式，其他 issuer 一律拒绝。未配置 issuer 时不接受 JWT-SVID。
+
 浏览器 session、cookie 与 CSRF 都不是 API 凭据。匿名、token 无效返回 401；audience 不符或不是
 管理员返回 403。
 
@@ -24,6 +28,11 @@ iam:
     admin-groups:
       - Domain Admins
     console-client-id: iam-console   # 默认值
+    spiffe:                          # 可选；机器调用方
+      issuer: https://spire-oidc.ad.ddupan.top
+      jwk-set-uri: https://spire-oidc.ad.ddupan.top/keys
+      admin-ids:
+        - spiffe://ddupan.top/ci/panxiao81/homelab-infra/terraform-apply
 ```
 
 按组名匹配，与下游应用看到的 `groups` 一致；组名取 memberOf DN 的 CN，只含直接组。同一用户若有

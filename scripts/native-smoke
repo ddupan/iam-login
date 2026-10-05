@@ -46,6 +46,7 @@ IAM_DOCKER_NAME=iam-smoke-support "$repo_root/scripts/gradle-in-docker" nativeSm
   "-PsmokeArgs=jdbc:postgresql://127.0.0.1:25432/iam iam smoke-only" > "$work/support.log" 2>&1 &
 wait_for 600 "simulated AD" grep -q LDAP_URL= "$work/support.log"
 ldap=$(grep -o 'LDAP_URL=.*' "$work/support.log" | cut -d= -f2)
+jwks=$(grep -o 'SPIFFE_JWKS=.*' "$work/support.log" | cut -d= -f2)
 
 keystore=$repo_root/src/test/resources/ldap/fixture.p12
 "$binary" \
@@ -55,6 +56,8 @@ keystore=$repo_root/src/test/resources/ldap/fixture.p12
   --iam.ad.domain=example.test --spring.ldap.base=dc=example,dc=test --spring.ldap.urls="$ldap" \
   --iam.webauthn.rp-id=localhost --iam.webauthn.origin=https://localhost:18083 \
   --iam.authorization-server.issuer=https://localhost:18083 \
+  --iam.clients.spiffe.issuer=https://spire-oidc.example.test --iam.clients.spiffe.jwk-set-uri="$jwks" \
+  --iam.clients.spiffe.admin-ids[0]=spiffe://example.test/ci/terraform \
   --iam.authorization-server.signing-keys[0]="file:$work/signing-key.pem" \
   --iam.authorization-server.subjects[0].authority=example.test \
   --iam.authorization-server.subjects[0].directory-id=00112233-4455-6677-8899-aabbccddeeff \
@@ -68,6 +71,9 @@ wait_for 90 "native binary" curl -sfk -o /dev/null https://localhost:18083/actua
 # Overall health too: readiness skips most indicators, so a broken one (e.g. a probe of an unused
 # LDAP default) would otherwise only show up as a 503 in production.
 curl -sfk -o /dev/null https://localhost:18083/actuator/health
+# Machine path: a JWT-SVID on the allowlist manages clients (remote JWKS fetch and validation, natively).
+svid=$(grep -o 'SPIFFE_SVID=.*' "$work/support.log" | cut -d= -f2)
+curl -sfk -o /dev/null -H "Authorization: Bearer $svid" https://localhost:18083/api/iam/clients
 wait_for 120 "fixture client" grep -q CLIENT_REGISTERED "$work/support.log"
 grep -oE 'Started IamLoginApplication in [0-9.]+ seconds' "$work/native.log" || true
 
