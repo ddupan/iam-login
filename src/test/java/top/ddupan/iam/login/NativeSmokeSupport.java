@@ -9,16 +9,21 @@ import org.springframework.security.oauth2.server.authorization.client.Registere
 import org.springframework.security.oauth2.server.authorization.settings.ClientSettings;
 import org.springframework.security.oauth2.server.authorization.settings.TokenSettings;
 import top.ddupan.iam.login.support.AdDirectoryFixture;
+import top.ddupan.iam.login.support.SpiffeFixture;
 
 /**
  * Test-only companion for running the browser test against a native binary: simulated AD for the binary
- * to bind to, and the fixture client written once the binary's Flyway has created the tables.
+ * to bind to, a stand-in SPIRE JWKS with one JWT-SVID, and the fixture client written once the binary's Flyway has created the tables.
  * Args: JDBC URL, user, password. Runs until killed.
  */
 public final class NativeSmokeSupport {
     public static void main(String[] args) throws Exception {
         var directory = new AdDirectoryFixture();
         System.out.println("LDAP_URL=" + directory.url());
+        // A stand-in SPIRE OIDC provider: the binary trusts its JWKS; the SVID (fixture key, test-only) calls the API.
+        var spire = new SpiffeFixture();
+        System.out.println("SPIFFE_JWKS=" + spire.jwkSetUri());
+        System.out.println("SPIFFE_SVID=" + spire.svid("spiffe://example.test/ci/terraform"));
         System.out.flush();
         var jdbc = new JdbcTemplate(new DriverManagerDataSource(args[0], args[1], args[2]));
         for (int attempt = 0; ; attempt++) {
