@@ -33,6 +33,12 @@ final class SecurityJacksonHints implements RuntimeHintsRegistrar {
         "org.springframework.security.web.authentication.WebAuthenticationDetails",
         "org.springframework.security.web.webauthn.authentication.WebAuthnAuthentication",
         "org.springframework.security.web.webauthn.api.Bytes",
+        // HTTP session attributes (database session store, SessionConfiguration).
+        "org.springframework.security.core.context.SecurityContextImpl",
+        "org.springframework.security.web.savedrequest.DefaultSavedRequest",
+        "org.springframework.security.web.savedrequest.DefaultSavedRequest$Builder",
+        "org.springframework.security.web.savedrequest.SavedCookie",
+        "org.springframework.security.web.csrf.DefaultCsrfToken",
         "java.time.Duration", "java.time.Instant",
         "java.util.Collections$UnmodifiableMap", "java.util.Collections$UnmodifiableSet",
         "java.util.Collections$UnmodifiableRandomAccessList", "java.util.Collections$UnmodifiableCollection",
@@ -70,10 +76,25 @@ final class SecurityJacksonHints implements RuntimeHintsRegistrar {
                 if (name.endsWith("package-info")) continue;
                 hints.reflection().registerTypeIfPresent(classLoader, name, MemberCategory.INVOKE_DECLARED_CONSTRUCTORS,
                     MemberCategory.INVOKE_DECLARED_METHODS, MemberCategory.ACCESS_DECLARED_FIELDS);
+                // Pending WebAuthn ceremonies are stored with Java serialization (SessionChallenges).
+                if (name.startsWith("org.springframework.security.web.webauthn.api.")) {
+                    hints.reflection().registerType(TypeReference.of(name), type -> type.withJavaSerialization(true));
+                }
             }
         } catch (IOException | UncheckedIOException ex) {
             throw new IllegalStateException("Cannot scan Spring Security Jackson classes", ex);
         }
+        // The JDK types inside serialized WebAuthn options (collections write themselves via CollSer/Ser).
+        for (var type : new String[] {"java.util.ArrayList", "java.util.HashSet", "java.util.LinkedHashSet",
+                "java.util.ImmutableCollections$List12", "java.util.ImmutableCollections$ListN",
+                "java.util.ImmutableCollections$Set12", "java.util.ImmutableCollections$SetN", "java.util.CollSer",
+                "java.util.Collections$UnmodifiableList", "java.util.Collections$UnmodifiableRandomAccessList",
+                "java.util.Collections$UnmodifiableCollection", "java.util.Collections$EmptyList",
+                "java.time.Duration", "java.time.Ser", "java.lang.String", "java.lang.Long", "java.lang.Integer",
+                "java.lang.Number"}) {
+            hints.reflection().registerType(TypeReference.of(type), hint -> hint.withJavaSerialization(true));
+        }
+        hints.reflection().registerType(byte[].class, hint -> hint.withJavaSerialization(true));
         for (var type : STORED_TYPES) {
             hints.reflection().registerType(TypeReference.of(type), MemberCategory.INVOKE_DECLARED_CONSTRUCTORS,
                 MemberCategory.INVOKE_DECLARED_METHODS, MemberCategory.INVOKE_PUBLIC_METHODS, MemberCategory.ACCESS_DECLARED_FIELDS);

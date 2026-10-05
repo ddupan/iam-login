@@ -38,8 +38,8 @@ class WebAuthnConfiguration {
     }
 
     @Bean
-    SessionChallenges challenges(MfaPolicy policy) {
-        return new SessionChallenges(Clock.systemUTC(), policy);
+    SessionChallenges challenges(MfaPolicy policy, JdbcOperations jdbc) {
+        return new SessionChallenges(Clock.systemUTC(), policy, jdbc);
     }
 
     @Bean

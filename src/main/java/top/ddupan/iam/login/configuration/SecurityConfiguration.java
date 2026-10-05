@@ -69,7 +69,10 @@ class SecurityConfiguration {
                 .anyRequest().denyAll();
             })
             .formLogin(form -> form.loginPage("/signin").loginProcessingUrl("/signin/password")
-                .defaultSuccessUrl("/signin/mfa", true).failureUrl("/signin?error"))
+                .defaultSuccessUrl("/signin/mfa", true).failureHandler((request, response, exception) ->
+                    // No exception in the session: the page shows one generic message, and session
+                    // attributes must be JSON (SessionConfiguration).
+                    response.sendRedirect(request.getContextPath() + "/signin?error")))
             // Signing out of this service only; relying parties use RP-initiated logout (/connect/logout).
             .logout(logout -> logout.logoutRequestMatcher(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/signin/restart"))
                 .logoutSuccessHandler((request, response, authentication) -> {

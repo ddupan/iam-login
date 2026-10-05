@@ -20,6 +20,10 @@ AD 用户、密码和组继续通过 RSAT 或目录命令行管理，不在本�
 
 Spring Security 负责因素合并、会话轮换、退出和 CSRF。应用仅补目录主体与凭据所有权
 限制、首次注册并发检查，以及 challenge 的 5 分钟服务端有效期和单次消费。
+HTTP session 存在数据库（Spring Session JDBC，属性为 JSON），重启或多副本不丢登录；进行中的 WebAuthn
+challenge 不放 session，存于 `webauthn_challenge` 表，session 只持有其 id，消费是一条
+`DELETE ... RETURNING`，并发请求中只有一个能取得（options 以 Java 序列化保存，读回只允许 WebAuthn API
+与基本 JDK 类型）。
 没有应用自建登录状态机或认证 Filter。上游 options Filter 位于授权 Filter 前，因而
 这些检查在 RelyingPartyOperations 扩展点执行，不能仅靠 URL 授权规则。
 

@@ -6,12 +6,34 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.Collection;
 import java.util.List;
 import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.jackson.SecurityJacksonModules;
 import org.springframework.security.web.webauthn.api.PublicKeyCredentialUserEntity;
+import org.springframework.security.web.webauthn.authentication.WebAuthnAuthentication;
 import top.ddupan.iam.login.authentication.domain.User;
+import top.ddupan.iam.login.authentication.infrastructure.security.DirectoryPrincipal;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.jsontype.BasicPolymorphicTypeValidator;
 
-/** Jackson mappings kept out of the domain: the directory snapshot stored with an authorization. */
+/**
+ * Jackson mappings kept out of the domain: the directory snapshot stored with an authorization and in the
+ * HTTP session. Polymorphic types are restricted to Spring Security's own allowlist plus ours.
+ */
 final class PrincipalJson {
     private PrincipalJson() { }
+
+    /** The mapper for authorizations and session attributes. */
+    static JsonMapper mapper(ClassLoader classLoader) {
+        var allowed = BasicPolymorphicTypeValidator.builder()
+            // After a real passkey step the session holds WebAuthnAuthentication, not the password token.
+            .allowIfSubType(DirectoryPrincipal.class).allowIfSubType(WebAuthnAuthentication.class);
+        for (var type : immutableLists()) allowed.allowIfSubType(type);
+        return JsonMapper.builder()
+            .addModules(SecurityJacksonModules.getModules(classLoader, allowed))
+            .addMixIn(User.class, UserMixin.class)
+            .addMixIn(DirectoryPrincipal.class, DirectoryPrincipalMixin.class)
+            .addMixIn(WebAuthnAuthentication.class, WebAuthnAuthenticationMixin.class)
+            .build();
+    }
 
     /** The concrete types List.copyOf produces, which default typing records for the memberships list. */
     static Class<?>[] immutableLists() {

@@ -17,10 +17,12 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentMatchers;
 import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import static org.assertj.core.api.Assertions.*;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
+import org.springframework.core.convert.ConversionService;
 import org.springframework.jdbc.core.JdbcOperations;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpSession;
@@ -40,10 +42,12 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
 import top.ddupan.iam.login.authentication.infrastructure.persistence.JdbcCredentialRegistration;
 import top.ddupan.iam.login.support.AdDirectoryFixture;
+import top.ddupan.iam.login.support.SessionRoundTrip;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
-@SpringBootTest(properties = {"iam.ad.enabled=true", "iam.ad.domain=example.test", "spring.ldap.base=dc=example,dc=test",
+// Container sessions, see AuthorizationServerIntegrationTests.
+@SpringBootTest(properties = {"spring.autoconfigure.exclude=org.springframework.boot.session.jdbc.autoconfigure.JdbcSessionAutoConfiguration", "iam.ad.enabled=true", "iam.ad.domain=example.test", "spring.ldap.base=dc=example,dc=test",
     "spring.datasource.hikari.maximum-pool-size=3",     "iam.webauthn.enabled=true", "iam.webauthn.rp-id=localhost", "iam.webauthn.origin=https://localhost",
     "management.otlp.metrics.export.enabled=false", "spring.security.user.password=fixture-monitor-password"})
 @AutoConfigureMockMvc
@@ -114,7 +118,8 @@ class WebAuthnIntegrationTests {
     }
 
     @Test
-    void passwordOnlyCanEnrollButCannotCompleteOrDelete() throws Exception {
+    void passwordOnlyCanEnrollButCannotCompleteOrDelete(
+            @Autowired @Qualifier("springSessionConversionService") ConversionService store) throws Exception {
         var session = login();
         mvc.perform(post("/webauthn/register/options").session(session).with(https()))
             .andExpect(status().isForbidden());
@@ -127,6 +132,8 @@ class WebAuthnIntegrationTests {
             .andExpect(redirectedUrlPattern("/signin/mfa?*"));
         mvc.perform(delete("/webauthn/register/unused").session(session).with(https()).with(csrf()))
             .andExpect(status().isForbidden());
+        // A pending registration ceremony (its id) and the password-only context must survive the store.
+        SessionRoundTrip.assertStorable(session, store);
     }
 
     @Test

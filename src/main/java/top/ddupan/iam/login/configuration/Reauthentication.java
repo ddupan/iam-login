@@ -55,12 +55,13 @@ final class Reauthentication extends OncePerRequestFilter {
         var authenticatedAt = authenticatedAt(authentication);
         var key = MARKER + digest(request);
         var session = request.getSession(false);
-        var demandedAt = session == null ? null : (Instant) session.getAttribute(key);
+        // Kept as an ISO string: session attributes round-trip through JSON (SessionConfiguration).
+        var demandedAt = session != null && session.getAttribute(key) instanceof String stored ? Instant.parse(stored) : null;
         var now = clock.instant();
         if (demandedAt != null && authenticatedAt != null && authenticatedAt.isAfter(demandedAt)) {
             session.removeAttribute(key); // re-authenticated since the demand
         } else if (login || authenticatedAt == null || authenticatedAt.isBefore(now.minusSeconds(maxAge))) {
-            if (demandedAt == null) request.getSession(true).setAttribute(key, now);
+            if (demandedAt == null) request.getSession(true).setAttribute(key, now.toString());
             if (authenticatedAt != null) {
                 var empty = contexts.createEmptyContext();
                 contexts.setContext(empty);

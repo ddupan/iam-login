@@ -23,8 +23,10 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.core.convert.ConversionService;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockHttpSession;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -50,6 +52,7 @@ import org.testcontainers.utility.DockerImageName;
 import tools.jackson.databind.json.JsonMapper;
 import top.ddupan.iam.login.configuration.ExpiredAuthorizations;
 import top.ddupan.iam.login.support.AdDirectoryFixture;
+import top.ddupan.iam.login.support.SessionRoundTrip;
 import top.ddupan.iam.login.support.SigningKeyFixture;
 import top.ddupan.iam.login.support.SpiffeFixture;
 import static org.assertj.core.api.Assertions.*;
@@ -60,7 +63,9 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 /** Spike: the in-process authorization server against simulated AD and a disposable database. */
-@SpringBootTest(properties = {"iam.ad.enabled=true", "iam.ad.domain=example.test", "spring.ldap.base=dc=example,dc=test",
+// Container sessions: MockMvc hands sessions over as MockHttpSession, which Spring Session's cookie-based
+// filter would ignore. What the database store must hold is checked by SessionRoundTrip.
+@SpringBootTest(properties = {"spring.autoconfigure.exclude=org.springframework.boot.session.jdbc.autoconfigure.JdbcSessionAutoConfiguration", "iam.ad.enabled=true", "iam.ad.domain=example.test", "spring.ldap.base=dc=example,dc=test",
     "spring.datasource.hikari.maximum-pool-size=3",
     "iam.webauthn.enabled=true", "iam.webauthn.rp-id=localhost", "iam.webauthn.origin=https://localhost",
     "iam.authorization-server.enabled=true", "iam.authorization-server.issuer=https://localhost",
@@ -116,6 +121,20 @@ class AuthorizationServerIntegrationTests {
     // over LDAPS, not some auto-configured default.
     @Test void overallHealthIsUpAgainstTheConfiguredDirectory() throws Exception {
         mvc.perform(get("/actuator/health")).andExpect(status().isOk()).andExpect(jsonPath("status").value("UP"));
+    }
+
+    // Interrupted authorization request (saved request), both factors, CSRF token, prompt=login marker:
+    // everything this flow leaves in the session must be storable in the database session store.
+    @Test void sessionContentsOfALoginRoundTripThroughTheSessionStore(
+            @Autowired @Qualifier("springSessionConversionService") ConversionService store) throws Exception {
+        var session = new MockHttpSession();
+        mvc.perform(get(URI.create(authorize(verifier()))).session(session).with(https()).accept(MediaType.TEXT_HTML))
+            .andExpect(status().is3xxRedirection());
+        mvc.perform(get("/signin").session(session).with(https())).andExpect(status().isOk());
+        password(session);
+        secondFactor(session);
+        location(session, authorize(verifier(), Map.of("prompt", "login")));
+        SessionRoundTrip.assertStorable(session, store);
     }
 
     @Test void noCodeIsIssuedUntilBothFactorsAreFresh() throws Exception {
