@@ -79,19 +79,22 @@ final class SecurityJacksonHints implements RuntimeHintsRegistrar {
                 // Pending WebAuthn ceremonies are stored with Java serialization (SessionChallenges).
                 if (name.startsWith("org.springframework.security.web.webauthn.api.")) {
                     hints.reflection().registerType(TypeReference.of(name), type -> type.withJavaSerialization(true));
+                    // Options hold some of these as arrays (PublicKeyCredentialParameters[], extension inputs).
+                    hints.reflection().registerType(TypeReference.of(name + "[]"), type -> type.withJavaSerialization(true));
                 }
             }
         } catch (IOException | UncheckedIOException ex) {
             throw new IllegalStateException("Cannot scan Spring Security Jackson classes", ex);
         }
         // The JDK types inside serialized WebAuthn options (collections write themselves via CollSer/Ser).
-        for (var type : new String[] {"java.util.ArrayList", "java.util.HashSet", "java.util.LinkedHashSet",
+        // Checked against real stored ceremonies by WebAuthnIntegrationTests.
+        for (var type : new String[] {"java.util.ArrayList", "java.util.Arrays$ArrayList", "java.util.HashSet", "java.util.LinkedHashSet",
                 "java.util.ImmutableCollections$List12", "java.util.ImmutableCollections$ListN",
                 "java.util.ImmutableCollections$Set12", "java.util.ImmutableCollections$SetN", "java.util.CollSer",
                 "java.util.Collections$UnmodifiableList", "java.util.Collections$UnmodifiableRandomAccessList",
                 "java.util.Collections$UnmodifiableCollection", "java.util.Collections$EmptyList",
                 "java.time.Duration", "java.time.Ser", "java.lang.String", "java.lang.Long", "java.lang.Integer",
-                "java.lang.Number"}) {
+                "java.lang.Number", "java.lang.Boolean"}) {
             hints.reflection().registerType(TypeReference.of(type), hint -> hint.withJavaSerialization(true));
         }
         hints.reflection().registerType(byte[].class, hint -> hint.withJavaSerialization(true));
