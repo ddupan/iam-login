@@ -29,7 +29,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 /** Real LDAPS sockets and Spring Data LDAP; AD bind/subcode semantics are simulated. */
-@SpringBootTest(properties = {"spring.autoconfigure.exclude=org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration", "iam.ad.enabled=true", "iam.ad.domain=example.test", "iam.ad.base-dn=dc=example,dc=test",
+@SpringBootTest(properties = {"spring.autoconfigure.exclude=org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration", "iam.ad.enabled=true", "iam.ad.domain=example.test", "spring.ldap.base=dc=example,dc=test",
     "management.otlp.metrics.export.enabled=false", "spring.security.user.name=fixture-monitor", "spring.security.user.password=fixture-monitor-password"})
 @AutoConfigureMockMvc
 @AutoConfigureMetrics
@@ -48,7 +48,7 @@ class SignInIntegrationTests {
 
     @DynamicPropertySource
     static void directory(DynamicPropertyRegistry registry) {
-        registry.add("iam.ad.url", () -> Directory.INSTANCE.url());
+        registry.add("spring.ldap.urls", () -> Directory.INSTANCE.url());
     }
 
     @AfterAll

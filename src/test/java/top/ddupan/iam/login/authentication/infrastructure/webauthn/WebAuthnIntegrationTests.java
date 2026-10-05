@@ -43,7 +43,7 @@ import top.ddupan.iam.login.support.AdDirectoryFixture;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
-@SpringBootTest(properties = {"iam.ad.enabled=true", "iam.ad.domain=example.test", "iam.ad.base-dn=dc=example,dc=test",
+@SpringBootTest(properties = {"iam.ad.enabled=true", "iam.ad.domain=example.test", "spring.ldap.base=dc=example,dc=test",
     "spring.datasource.hikari.maximum-pool-size=3",     "iam.webauthn.enabled=true", "iam.webauthn.rp-id=localhost", "iam.webauthn.origin=https://localhost",
     "management.otlp.metrics.export.enabled=false", "spring.security.user.password=fixture-monitor-password"})
 @AutoConfigureMockMvc
@@ -57,7 +57,7 @@ class WebAuthnIntegrationTests {
     }
     @DynamicPropertySource
     static void properties(DynamicPropertyRegistry r) {
-        r.add("iam.ad.url", () -> Fixtures.DIRECTORY.url());
+        r.add("spring.ldap.urls", () -> Fixtures.DIRECTORY.url());
         r.add("spring.datasource.url", () -> Fixtures.DATABASE.getJdbcUrl());
         r.add("spring.datasource.username", () -> Fixtures.DATABASE.getUsername());
         r.add("spring.datasource.password", () -> Fixtures.DATABASE.getPassword());

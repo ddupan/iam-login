@@ -59,7 +59,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 /** Spike: the in-process authorization server against simulated AD and a disposable database. */
-@SpringBootTest(properties = {"iam.ad.enabled=true", "iam.ad.domain=example.test", "iam.ad.base-dn=dc=example,dc=test",
+@SpringBootTest(properties = {"iam.ad.enabled=true", "iam.ad.domain=example.test", "spring.ldap.base=dc=example,dc=test",
     "spring.datasource.hikari.maximum-pool-size=3",
     "iam.webauthn.enabled=true", "iam.webauthn.rp-id=localhost", "iam.webauthn.origin=https://localhost",
     "iam.authorization-server.enabled=true", "iam.authorization-server.issuer=https://localhost",
@@ -81,7 +81,7 @@ class AuthorizationServerIntegrationTests {
     }
     @DynamicPropertySource
     static void properties(DynamicPropertyRegistry r) {
-        r.add("iam.ad.url", () -> Fixtures.DIRECTORY.url());
+        r.add("spring.ldap.urls", () -> Fixtures.DIRECTORY.url());
         r.add("spring.datasource.url", () -> Fixtures.DATABASE.getJdbcUrl());
         r.add("spring.datasource.username", () -> Fixtures.DATABASE.getUsername());
         r.add("spring.datasource.password", () -> Fixtures.DATABASE.getPassword());
@@ -106,6 +106,12 @@ class AuthorizationServerIntegrationTests {
             .tokenSettings(TokenSettings.builder()
                 .reuseRefreshTokens(false).build())
             .build());
+    }
+
+    // Overall health includes Boot's LDAP check, which must reach the configured AD (here the fixture)
+    // over LDAPS, not some auto-configured default.
+    @Test void overallHealthIsUpAgainstTheConfiguredDirectory() throws Exception {
+        mvc.perform(get("/actuator/health")).andExpect(status().isOk()).andExpect(jsonPath("status").value("UP"));
     }
 
     @Test void noCodeIsIssuedUntilBothFactorsAreFresh() throws Exception {

@@ -1,6 +1,16 @@
 spring:
   application:
     name: iam-login
+  # AD connection (urls and base are set per environment; iam.ad.domain completes it). Users bind
+  # with their own credentials; read-only contexts stay anonymous because there is no service
+  # account, which is also all Boot's LDAP health check needs (it only opens a connection).
+  ldap:
+    anonymous-read-only: true
+    base-environment:
+      "[java.naming.referral]": ignore
+      "[java.naming.ldap.attributes.binary]": objectGUID
+      "[com.sun.jndi.ldap.connect.timeout]": "3000"
+      "[com.sun.jndi.ldap.read.timeout]": "5000"
 management:
   endpoints:
     web:
@@ -10,10 +20,3 @@ management:
     health:
       probes:
         enabled: true
-  # Boot's LDAP indicator probes its own auto-configured ContextSource (spring.ldap.urls, default
-  # localhost:389), which this app never uses: AD is reached through per-login binds. It must be
-  # off HERE, not in deployment config: Native fixes @ConditionalOnEnabledHealthIndicator at AOT
-  # time, so a runtime management.health.ldap.enabled=false is ignored and /actuator/health is 503.
-  health:
-    ldap:
-      enabled: false

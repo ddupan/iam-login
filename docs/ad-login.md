@@ -48,9 +48,11 @@ Gradle 与 npm 缓存默认持久挂载，可用 `IAM_GRADLE_CACHE`、`IAM_NPM_C
 iam:
   ad:
     enabled: true
-    url: ldaps://dc1.ad.ddupan.top:636
     domain: ad.ddupan.top
-    base-dn: DC=ad,DC=ddupan,DC=top
+spring:
+  ldap:            # Boot 标准键；超时、referral、objectGUID 等默认值在应用自带的 application.yaml
+    urls: ldaps://dc1.ad.ddupan.top:636
+    base: DC=ad,DC=ddupan,DC=top
 server:
   port: 18082
   ssl:
@@ -63,6 +65,10 @@ server:
         secure: true
         same-site: lax
 ```
+
+AD 连接使用 Boot 自动配置的 `ContextSource`（`spring.ldap.*`），用户以自身凭据 bind；只读上下文为匿名
+（没有服务账号），Boot 的 LDAP health 检查只打开一次 LDAPS 连接，因此整体 `/actuator/health` 反映 AD
+是否可达。
 
 证书与私钥使用外部受管文件，不加入仓库。开发验收可使用本机的 Tailscale HTTPS 域名
 及相应证书；用匹配证书的主机名打开，不能用 LAN IP 替代域名后跳过警告。

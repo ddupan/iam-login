@@ -1,16 +1,17 @@
 package top.ddupan.iam.login.authentication.infrastructure.ad;
 
 import java.net.URI;
+import java.util.Arrays;
 import java.util.Locale;
-import java.util.Map;
 import java.util.regex.Pattern;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.boot.ldap.autoconfigure.LdapProperties;
 import org.springframework.dao.DataAccessException;
 import org.springframework.data.ldap.repository.support.SimpleLdapRepository;
 import org.springframework.ldap.AuthenticationException;
 import org.springframework.ldap.NamingException;
 import org.springframework.ldap.core.LdapTemplate;
-import org.springframework.ldap.core.support.LdapContextSource;
+import org.springframework.ldap.core.ContextSource;
 import org.springframework.ldap.core.support.SingleContextSource;
 import org.springframework.stereotype.Component;
 import top.ddupan.iam.login.authentication.application.port.AuthenticatedUserSession;
@@ -24,28 +25,28 @@ import top.ddupan.iam.login.authentication.application.port.PasswordVerification
 public final class AdPasswordAuthenticator implements PasswordAuthenticator {
     private static final Pattern AD_SUBCODE = Pattern.compile("\\bdata\\s+([0-9a-f]+)", Pattern.CASE_INSENSITIVE);
     private final AdProperties properties;
-    private final LdapContextSource contexts;
+    private final ContextSource contexts;
 
-    public AdPasswordAuthenticator(AdProperties properties) {
-        this.properties = properties;
-        if (!properties.enabled()) { contexts = null; return; }
-        var uri = URI.create(properties.url());
-        if (!"ldaps".equals(uri.getScheme()) || uri.getHost() == null || uri.getUserInfo() != null
-                || uri.getQuery() != null || uri.getFragment() != null
+    /**
+     * Binds through Boot's auto-configured ContextSource (spring.ldap.*), so Boot's LDAP health indicator
+     * checks the same LDAPS connection users bind over. Read-only contexts are anonymous: there is no
+     * service account, and the health check only opens a connection.
+     */
+    public AdPasswordAuthenticator(AdProperties properties, LdapProperties ldap, ContextSource contexts) {
+        if (properties.enabled() && (ldap.getUrls() == null || ldap.getUrls().length == 0
+                || !Arrays.stream(ldap.getUrls()).allMatch(AdPasswordAuthenticator::isLdaps)
                 || properties.domain() == null || properties.domain().isBlank()
-                || properties.baseDn() == null || properties.baseDn().isBlank()) {
-            throw new IllegalArgumentException("AD requires an LDAPS URL, domain and base DN");
+                || ldap.getBase() == null || ldap.getBase().isBlank())) {
+            throw new IllegalArgumentException("AD requires LDAPS spring.ldap.urls, spring.ldap.base and iam.ad.domain");
         }
-        contexts = new LdapContextSource();
-        contexts.setUrl(properties.url());
-        contexts.setBase(properties.baseDn());
-        contexts.setPooled(false);
-        contexts.setReferral("ignore");
-        contexts.setBaseEnvironmentProperties(Map.of(
-            "com.sun.jndi.ldap.connect.timeout", "3000",
-            "com.sun.jndi.ldap.read.timeout", "5000",
-            "java.naming.ldap.attributes.binary", "objectGUID"));
-        contexts.afterPropertiesSet();
+        this.properties = properties;
+        this.contexts = properties.enabled() ? contexts : null;
+    }
+
+    private static boolean isLdaps(String url) {
+        var uri = URI.create(url);
+        return "ldaps".equals(uri.getScheme()) && uri.getHost() != null && uri.getUserInfo() == null
+            && uri.getQuery() == null && uri.getFragment() == null;
     }
 
     @Override
