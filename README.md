@@ -67,6 +67,9 @@ npm --prefix frontend run build
 Docker 开发使用 `scripts/gradle-in-docker`，默认持久挂载 Gradle 缓存。
 原生应用可用 `python3 scripts/native-smoke.py` 检查启动、默认访问控制和 HTTP 指标。
 
+会话：HTTP session 存在同一 PostgreSQL（Spring Session JDBC，JSON 序列化，复用授权表的 Jackson 白名单），
+部署重启不登出，也不再限制单副本；WebAuthn challenge 单独成表以保证单次消费。
+
 配置分两层：决定装配哪些 bean 的开关（`iam.*.enabled`）在 Native 构建时固定，写在仓库内的
 `application-prod.yaml`，AOT 以 `prod` profile 构建；部署同样激活 `prod`，外部配置只提供环境值（地址、issuer、
 RP ID、subject 绑定等）。运行时开关与构建不一致时拒绝启动（`FeatureFlags`）。

@@ -34,7 +34,6 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.core.authority.AuthorityUtils;
 import org.springframework.security.core.authority.FactorGrantedAuthority;
-import org.springframework.security.jackson.SecurityJacksonModules;
 import org.springframework.security.oauth2.core.OAuth2AuthenticationException;
 import org.springframework.security.oauth2.core.OAuth2Error;
 import org.springframework.security.oauth2.core.OAuth2ErrorCodes;
@@ -67,9 +66,6 @@ import org.springframework.security.web.authentication.LoginUrlAuthenticationEnt
 import org.springframework.security.web.authentication.preauth.AbstractPreAuthenticatedProcessingFilter;
 import org.springframework.security.web.savedrequest.HttpSessionRequestCache;
 import org.springframework.security.web.util.matcher.MediaTypeRequestMatcher;
-import org.springframework.security.web.webauthn.authentication.WebAuthnAuthentication;
-import tools.jackson.databind.json.JsonMapper;
-import tools.jackson.databind.jsontype.BasicPolymorphicTypeValidator;
 import top.ddupan.iam.login.authentication.domain.User;
 import top.ddupan.iam.login.authentication.infrastructure.security.DirectoryPrincipal;
 import top.ddupan.iam.login.authentication.infrastructure.webauthn.MfaPolicy;
@@ -300,24 +296,11 @@ class AuthorizationServerConfiguration {
     // snapshot must be on Jackson's allowlist for that to deserialize.
     @Bean OAuth2AuthorizationService authorizations(JdbcOperations jdbc, RegisteredClientRepository clients) {
         var service = new JdbcOAuth2AuthorizationService(jdbc, clients);
-        var json = JsonMapper.builder()
-            .addModules(SecurityJacksonModules.getModules(getClass().getClassLoader(),
-                // After a real passkey step the session holds WebAuthnAuthentication, not the password token.
-                allowlist(BasicPolymorphicTypeValidator.builder().allowIfSubType(DirectoryPrincipal.class)
-                    .allowIfSubType(WebAuthnAuthentication.class))))
-            .addMixIn(User.class, PrincipalJson.UserMixin.class)
-            .addMixIn(DirectoryPrincipal.class, PrincipalJson.DirectoryPrincipalMixin.class)
-            .addMixIn(WebAuthnAuthentication.class, PrincipalJson.WebAuthnAuthenticationMixin.class)
-            .build();
+        var json = PrincipalJson.mapper(getClass().getClassLoader());
         var rows = new JdbcOAuth2AuthorizationService.JsonMapperOAuth2AuthorizationRowMapper(clients, json);
         service.setAuthorizationRowMapper(rows);
         service.setAuthorizationParametersMapper(new JdbcOAuth2AuthorizationService.JsonMapperOAuth2AuthorizationParametersMapper(json));
         return service;
-    }
-
-    private static BasicPolymorphicTypeValidator.Builder allowlist(BasicPolymorphicTypeValidator.Builder builder) {
-        for (var type : PrincipalJson.immutableLists()) builder.allowIfSubType(type);
-        return builder;
     }
 
     @Bean ExpiredAuthorizations expiredAuthorizations(JdbcOperations jdbc) {

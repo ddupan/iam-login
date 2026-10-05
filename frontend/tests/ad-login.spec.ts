@@ -14,7 +14,7 @@ test("AD HTTPS page uses native POST and keeps failed credentials out of the res
   await expect(page.getByRole("heading", { name: "登录你的账号" })).toBeVisible();
   await expect(page.locator("form")).toHaveAttribute("method", "post");
   await expect(page.locator("input[name=_csrf]")).toHaveCount(1);
-  const session = (await context.cookies()).find(cookie => cookie.name === "JSESSIONID");
+  const session = (await context.cookies()).find(cookie => cookie.name === "SESSION");
   expect(session).toMatchObject({ secure: true, httpOnly: true, sameSite: "Lax" });
   await page.getByLabel("用户名", { exact: true }).fill("ui-check@invalid.example");
   await page.getByLabel("密码", { exact: true }).fill("synthetic-ui-check");

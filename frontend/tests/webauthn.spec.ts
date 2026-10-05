@@ -29,11 +29,11 @@ test("AD + PostgreSQL + real WebAuthn ceremony, factor gating and persisted re-l
   });
   expect(enrollAgain.status()).toBe(302);
   expect(enrollAgain.headers().location).toContain("factor.type=webauthn");
-  const beforeMfa = (await context.cookies()).find(c => c.name === "JSESSIONID")!.value;
+  const beforeMfa = (await context.cookies()).find(c => c.name === "SESSION")!.value;
   await page.getByRole("button", { name: "验证 Passkey", exact: true }).click();
   await expect(page.getByRole("heading", { name: "MFA 已验证", exact: true })).toBeVisible();
   await expect(page.getByText("gitea-admins", { exact: true })).toBeVisible();
-  expect((await context.cookies()).find(c => c.name === "JSESSIONID")!.value).not.toBe(beforeMfa);
+  expect((await context.cookies()).find(c => c.name === "SESSION")!.value).not.toBe(beforeMfa);
   await page.getByRole("button", { name: "退出并重新验证", exact: true }).click();
   await login();
   await expect(page.getByRole("button", { name: "注册 Passkey", exact: true })).toHaveCount(0);

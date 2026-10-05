@@ -4,8 +4,17 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.ArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import org.flywaydb.core.Flyway;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -15,12 +24,25 @@ import org.springframework.security.web.webauthn.api.Bytes;
 import org.springframework.security.web.webauthn.api.PublicKeyCredentialRequestOptions;
 import org.springframework.security.web.webauthn.management.MapPublicKeyCredentialUserEntityRepository;
 import org.springframework.security.web.webauthn.management.MapUserCredentialRepository;
+import org.testcontainers.postgresql.PostgreSQLContainer;
+import org.testcontainers.utility.DockerImageName;
 import top.ddupan.iam.login.authentication.domain.User;
 import top.ddupan.iam.login.authentication.infrastructure.security.DirectoryPrincipal;
 import static org.assertj.core.api.Assertions.*;
 
 class SessionChallengesTests {
+    static final PostgreSQLContainer DATABASE = new PostgreSQLContainer(DockerImageName.parse(
+        "postgres@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873").asCompatibleSubstituteFor("postgres"));
+    static JdbcTemplate jdbc;
     private final MfaPolicy policy = new MfaPolicy(new MapPublicKeyCredentialUserEntityRepository(), new MapUserCredentialRepository());
+
+    @BeforeAll static void database() {
+        DATABASE.start();
+        var source = new DriverManagerDataSource(DATABASE.getJdbcUrl(), DATABASE.getUsername(), DATABASE.getPassword());
+        Flyway.configure().dataSource(source).load().migrate();
+        jdbc = new JdbcTemplate(source);
+    }
+    @AfterAll static void stop() { DATABASE.stop(); }
     @AfterEach void clear() { SecurityContextHolder.clearContext(); }
 
     @Test
@@ -29,10 +51,10 @@ class SessionChallengesTests {
         var request = new MockHttpServletRequest();
         var response = new MockHttpServletResponse();
         identify("alice", issued);
-        var repository = new SessionChallenges(Clock.fixed(issued, ZoneOffset.UTC), policy).authentication();
+        var repository = new SessionChallenges(Clock.fixed(issued, ZoneOffset.UTC), policy, jdbc).authentication();
         var options = PublicKeyCredentialRequestOptions.builder().rpId("localhost").challenge(Bytes.random()).build();
         repository.save(request, response, options);
-        var later = new SessionChallenges(Clock.fixed(issued.plusSeconds(301), ZoneOffset.UTC), policy).authentication();
+        var later = new SessionChallenges(Clock.fixed(issued.plusSeconds(301), ZoneOffset.UTC), policy, jdbc).authentication();
         assertThat(later.load(request)).isNull();
         repository.save(request, response, options);
         identify("bob", issued);
@@ -47,19 +69,52 @@ class SessionChallengesTests {
         identify("alice", issued);
         var request = new MockHttpServletRequest();
         var response = new MockHttpServletResponse();
-        var repository = new SessionChallenges(Clock.systemUTC(), policy).authentication();
+        var repository = new SessionChallenges(Clock.systemUTC(), policy, jdbc).authentication();
         var first = PublicKeyCredentialRequestOptions.builder().rpId("localhost").challenge(Bytes.random()).build();
         var second = PublicKeyCredentialRequestOptions.builder().rpId("localhost").challenge(Bytes.random()).build();
         repository.save(request, response, first);
-        assertThat(repository.load(request)).isSameAs(first);
+        assertThat(challenge(repository.load(request))).isEqualTo(challenge(first));
         assertThat(repository.load(request)).isNull();
         repository.save(request, response, second);
         repository.save(request, response, null);
-        assertThat(repository.load(request)).isSameAs(second);
+        assertThat(challenge(repository.load(request))).isEqualTo(challenge(second));
         repository.save(request, response, first);
         identify("alice", issued.minusSeconds(601));
         assertThat(repository.load(request)).isNull();
     }
+
+    // Requests of one session each load their own copy of it (sessions live in the database), so two
+    // concurrent requests see the same challenge id; the database lets only one of them consume it.
+    @Test
+    void concurrentRequestsOfOneSessionConsumeAChallengeOnce() throws Exception {
+        var issued = Instant.now();
+        identify("alice", issued);
+        var repository = new SessionChallenges(Clock.systemUTC(), policy, jdbc).authentication();
+        var original = new MockHttpServletRequest();
+        repository.save(original, new MockHttpServletResponse(),
+            PublicKeyCredentialRequestOptions.builder().rpId("localhost").challenge(Bytes.random()).build());
+        var context = SecurityContextHolder.getContext();
+        var start = new CountDownLatch(1);
+        try (var pool = Executors.newFixedThreadPool(8)) {
+            var results = new ArrayList<Future<PublicKeyCredentialRequestOptions>>();
+            for (int i = 0; i < 8; i++) {
+                var copy = new MockHttpServletRequest();
+                copy.getSession().setAttribute("iam.webauthn.authentication",
+                    original.getSession().getAttribute("iam.webauthn.authentication"));
+                results.add(pool.submit(() -> {
+                    SecurityContextHolder.setContext(context);
+                    start.await();
+                    return repository.load(copy);
+                }));
+            }
+            start.countDown();
+            int consumed = 0;
+            for (var result : results) if (result.get() != null) consumed++;
+            assertThat(consumed).isEqualTo(1);
+        }
+    }
+
+    private static String challenge(PublicKeyCredentialRequestOptions options) { return options.getChallenge().toBase64UrlString(); }
 
     private static void identify(String id, Instant issued) {
         var user = new User(new User.UserId("example.test", id), id, id, "", List.of());
