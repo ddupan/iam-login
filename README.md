@@ -67,6 +67,10 @@ npm --prefix frontend run build
 Docker 开发使用 `scripts/gradle-in-docker`，默认持久挂载 Gradle 缓存。
 原生应用可用 `python3 scripts/native-smoke.py` 检查启动、默认访问控制和 HTTP 指标。
 
+配置分两层：决定装配哪些 bean 的开关（`iam.*.enabled`）在 Native 构建时固定，写在仓库内的
+`application-prod.yaml`，AOT 以 `prod` profile 构建；部署同样激活 `prod`，外部配置只提供环境值（地址、issuer、
+RP ID、subject 绑定等）。运行时开关与构建不一致时拒绝启动（`FeatureFlags`）。
+
 发布：合并到 main 后，CI 的 native job 在 Native 浏览器测试通过后，用 `Dockerfile` 打包**同一个**
 二进制并推到 `zot-push.ad.ddupan.top/iam/iam-login:<commit>`（`scripts/publish-image`，身份为 runner
 上 SPIRE Agent 发的 `spiffe://ddupan.top/ci/panxiao81/iam-login/publish`），不再单独为发布编译。

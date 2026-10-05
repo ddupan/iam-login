@@ -1,0 +1,12 @@
+# The production feature set. Everything here decides which beans exist, and Native fixes those
+# decisions when the binary is built (AOT runs with this profile, see build.gradle), so it lives in
+# the repository, not in deployment config: a runtime value that disagreed would be silently ignored.
+# Deployments activate the same profile and supply only environment values (URLs, issuer, RP ID ...);
+# FeatureFlags refuses to start if a runtime value contradicts what was built in.
+iam:
+  ad:
+    enabled: true
+  webauthn:
+    enabled: true
+  authorization-server:
+    enabled: true

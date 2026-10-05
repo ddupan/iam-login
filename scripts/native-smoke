@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 # Browser test against the native binary: simulated AD, disposable PostgreSQL, real (virtual) passkey.
-# Build the binary first with the features it serves switched on at AOT time:
-#   scripts/gradle-in-docker nativeCompile \
-#     -PaotArgs='--iam.ad.enabled=true --iam.webauthn.enabled=true --iam.authorization-server.enabled=true'
+# Build the binary first (AOT uses the prod profile, see build.gradle): scripts/gradle-in-docker nativeCompile
 # Test-only: everything listens on loopback and is removed on exit. Uses ports 18083, 14446 and 25432.
 set -euo pipefail
 
@@ -52,11 +50,11 @@ ldap=$(grep -o 'LDAP_URL=.*' "$work/support.log" | cut -d= -f2)
 keystore=$repo_root/src/test/resources/ldap/fixture.p12
 "$binary" \
   -Djavax.net.ssl.trustStore="$work/trust.p12" -Djavax.net.ssl.trustStorePassword=fixture-only -Djavax.net.ssl.trustStoreType=PKCS12 \
-  --server.address=127.0.0.1 --server.port=18083 --server.ssl.enabled=true \
+  --spring.profiles.active=prod --server.address=127.0.0.1 --server.port=18083 --server.ssl.enabled=true \
   --server.ssl.key-store="file:$keystore" --server.ssl.key-store-password=fixture-only \
-  --iam.ad.enabled=true --iam.ad.domain=example.test --spring.ldap.base=dc=example,dc=test --spring.ldap.urls="$ldap" \
-  --iam.webauthn.enabled=true --iam.webauthn.rp-id=localhost --iam.webauthn.origin=https://localhost:18083 \
-  --iam.authorization-server.enabled=true --iam.authorization-server.issuer=https://localhost:18083 \
+  --iam.ad.domain=example.test --spring.ldap.base=dc=example,dc=test --spring.ldap.urls="$ldap" \
+  --iam.webauthn.rp-id=localhost --iam.webauthn.origin=https://localhost:18083 \
+  --iam.authorization-server.issuer=https://localhost:18083 \
   --iam.authorization-server.signing-keys[0]="file:$work/signing-key.pem" \
   --iam.authorization-server.subjects[0].authority=example.test \
   --iam.authorization-server.subjects[0].directory-id=00112233-4455-6677-8899-aabbccddeeff \

@@ -70,10 +70,10 @@ tasks.register('testAot', Test) {
 	shouldRunAfter tasks.named('test')
 }
 
-// Native bakes @ConditionalOnProperty decisions in at AOT time, so the features a binary needs must be
-// switched on here, e.g. -PaotArgs='--iam.ad.enabled=true --iam.webauthn.enabled=true'.
+// Native bakes @ConditionalOnProperty decisions in at AOT time: the binary is built with the production
+// feature set (application-prod.yaml) and must run with the same profile. -PaotArgs adds/overrides.
 tasks.named('processAot') {
-	args(providers.gradleProperty('aotArgs').map { it.trim().split(/\s+/) as List }.getOrElse([]))
+	args(['--spring.profiles.active=prod'] + providers.gradleProperty('aotArgs').map { it.trim().split(/\s+/) as List }.getOrElse([]))
 }
 
 // Native tests check behavior, not throughput. Keep the application binary optimized.

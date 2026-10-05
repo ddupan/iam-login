@@ -45,9 +45,7 @@ jobs:
       - name: Native image
         env:
           IAM_BUILD_MEMORY: 7g
-        run: >-
-          scripts/gradle-in-docker nativeCompile
-          "-PaotArgs=--iam.ad.enabled=true --iam.webauthn.enabled=true --iam.authorization-server.enabled=true"
+        run: scripts/gradle-in-docker nativeCompile
       - name: Native browser test
         env:
           IAM_BUILD_MEMORY: 3g
