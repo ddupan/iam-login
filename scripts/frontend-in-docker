@@ -8,7 +8,11 @@ docker_cmd=(docker)
 if [[ ${IAM_DOCKER_USE_SUDO:-0} == 1 ]]; then
   docker_cmd=(sudo -n docker)
 fi
-exec "${docker_cmd[@]}" run --rm --network host \
+# Under CI, label every container so the next job can remove what a cancelled run left behind
+# (cancelling a host-mode job kills this script, not the container). Manual runs stay unlabelled.
+ci_label=()
+[[ ${GITHUB_ACTIONS:-} == true ]] && ci_label=(--label iam-login.ci=1)
+exec "${docker_cmd[@]}" run --rm "${ci_label[@]}" --network host \
   --cpus 2 --memory 1g --user "$(id -u):$(id -g)" \
   -e HOME=/npm -e npm_config_cache=/npm \
   -v "$cache_dir:/npm" -v "$repo_root:/workspace" \

@@ -22,7 +22,11 @@ if [[ -n ${IAM_DOCKER_NAME:-} ]]; then
 fi
 
 # Linux host networking is needed for Testcontainers' published ports.
-exec "${docker_cmd[@]}" run --rm "${name_args[@]}" --network host \
+# Under CI, label every container so the next job can remove what a cancelled run left behind
+# (cancelling a host-mode job kills this script, not the container). Manual runs stay unlabelled.
+ci_label=()
+[[ ${GITHUB_ACTIONS:-} == true ]] && ci_label=(--label iam-login.ci=1)
+exec "${docker_cmd[@]}" run --rm "${ci_label[@]}" "${name_args[@]}" --network host \
   --cpus "${IAM_BUILD_CPUS:-4}" --memory "${IAM_BUILD_MEMORY:-8g}" \
   --user "$(id -u):$(id -g)" \
   --group-add "$(stat -c %g /var/run/docker.sock)" \

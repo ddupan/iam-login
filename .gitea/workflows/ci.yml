@@ -18,6 +18,10 @@ jobs:
   jvm:
     runs-on: iam-build
     steps:
+      - name: Remove containers left by cancelled runs
+        # Capacity 1: no other job of this runner is running, so every labelled container is an orphan.
+        # A cancelled native run kept compiling and starved the next one of memory (2026-10-05).
+        run: docker ps -aq --filter label=iam-login.ci=1 | xargs -r docker rm -f
       - uses: actions/checkout@v4
       - name: JVM tests and boot jar
         env:
@@ -41,6 +45,10 @@ jobs:
     needs: jvm
     runs-on: iam-build
     steps:
+      - name: Remove containers left by cancelled runs
+        # Capacity 1: no other job of this runner is running, so every labelled container is an orphan.
+        # A cancelled native run kept compiling and starved the next one of memory (2026-10-05).
+        run: docker ps -aq --filter label=iam-login.ci=1 | xargs -r docker rm -f
       - uses: actions/checkout@v4
       - name: Native image
         env:
