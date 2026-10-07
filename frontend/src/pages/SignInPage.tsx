@@ -1,61 +1,58 @@
+import { Alert, Single, Steps } from "../components/Chrome";
 import { Passkey } from "../components/Passkey";
 import { SubmitForm } from "../components/SubmitForm";
 import type { SignInContext } from "../page-context";
 
+/** Leave this sign-in (POST /signin/restart) and start over with another account. */
+function Restart({ context, label }: { context: SignInContext; label: string }) {
+  return <SubmitForm action={context.action} csrf={context.csrf} label={label} className="link" />;
+}
+
 export function SignInPage({ context }: { context: SignInContext }) {
-  return (
-    <main>
-      <header><a href="/signin" className="brand">i<span>am</span></a></header>
-      <section className="card" aria-labelledby="title">
-        <div className="eyebrow">AD 登录验证</div>
-        <h1 id="title">
-          {context.step === "password" ? "登录你的账号" : context.step === "mfa-complete" ? "MFA 已验证" : "密码已验证，等待 MFA"}
-        </h1>
-        <p className="intro">
-          {context.step === "password"
-            ? "使用 AD 用户名或完整 UPN 登录。"
-            : context.step === "mfa-complete"
-              ? `${context.name}，密码与 passkey 已验证。尚未向应用授权。`
-              : context.passkey === "unavailable"
-                ? `${context.name}，目录验证成功。第二因素尚未接入，本次没有完成登录或向应用授权。`
-                : `${context.name}，请使用 passkey 完成第二因素验证。`}
-        </p>
-        {context.error && <p className="error" role="alert">{context.error}</p>}
-        {context.step !== "password" && (
-          <div className="directory-result">
-            <dl>
-              <dt>账号</dt><dd>{context.identity.username}</dd>
-              <dt>目录标识</dt><dd>{context.identity.subjectId}</dd>
-              <dt>邮箱</dt><dd>{context.identity.email || "未设置"}</dd>
-            </dl>
-            <h2>直接所属组</h2>
-            {context.identity.groups.length
-              ? <ul>{context.identity.groups.map(group => <li key={group}>{group}</li>)}</ul>
-              : <p>没有直接所属组。</p>}
-            <details>
-              <summary>组 DN</summary>
-              <ul>{context.identity.groupDns.map(dn => <li key={dn}>{dn}</li>)}</ul>
-            </details>
-            <p>当前仅读取 memberOf，不展开嵌套组，也不包含主组。</p>
+  if (context.step === "password") {
+    return (
+      <Single below={<span>忘记密码请联系管理员</span>}>
+        <div className="lead-block">
+          <h1>登录</h1>
+          {context.app && <p className="lead">继续前往 <strong>{context.app}</strong>。</p>}
+        </div>
+        {context.error && <Alert kind={context.error.includes("暂时不可用") ? "warn" : "error"}>{context.error}</Alert>}
+        <SubmitForm action={context.action} csrf={context.csrf} label="继续">
+          <div className="field">
+            <label htmlFor="username">用户名</label>
+            <input id="username" name="username" autoComplete="username" autoFocus required maxLength={256}
+              defaultValue={context.name} aria-invalid={context.error ? true : undefined} />
           </div>
-        )}
-        {context.step === "mfa-pending" && context.passkey !== "unavailable" &&
-          <Passkey csrf={context.csrf} initial={context.passkey} />}
-        <SubmitForm action={context.action} csrf={context.csrf}
-          label={context.step === "password" ? "继续" : "退出并重新验证"}>
-          {context.step === "password" && <>
-            <label>用户名
-              <input name="username" autoComplete="username" autoFocus required
-                maxLength={256} defaultValue={context.name} />
-            </label>
-            <label>密码
-              <input name="password" type="password" autoComplete="current-password"
-                required maxLength={1024} />
-            </label>
-          </>}
+          <div className="field">
+            <label htmlFor="password">密码</label>
+            <input id="password" name="password" type="password" autoComplete="current-password" required
+              maxLength={1024} aria-invalid={context.error ? true : undefined} />
+          </div>
         </SubmitForm>
-      </section>
-      <footer>独立 IAM · AD 接入验证</footer>
-    </main>
+      </Single>
+    );
+  }
+  const who = context.identity.username;
+  if (context.step === "mfa-pending") {
+    return (
+      <Single below={<><Restart context={context} label="换一个账号" /><span>丢失 passkey？请联系管理员</span></>}>
+        <Steps current={2} />
+        {context.app && context.passkey === "authenticate" && <p className="lead">继续前往 <strong>{context.app}</strong>。</p>}
+        {context.passkey === "unavailable"
+          ? <Alert>第二步验证暂不可用，请联系管理员。</Alert>
+          : <Passkey csrf={context.csrf} initial={context.passkey} who={who} />}
+      </Single>
+    );
+  }
+  return (
+    <Single>
+      <div className="lead-block"><h1>已登录</h1></div>
+      <div className="who"><span className="avatar" aria-hidden="true">{who.slice(0, 1).toUpperCase()}</span>
+        <div><span>{who}</span><span>{context.identity.email || "未设置邮箱"}</span></div></div>
+      {context.identity.groups.length > 0 && (
+        <div className="chips" aria-label="所属组">{context.identity.groups.map(group => <span key={group} className="chip">{group}</span>)}</div>
+      )}
+      <SubmitForm action={context.action} csrf={context.csrf} label="退出" className="secondary" />
+    </Single>
   );
 }

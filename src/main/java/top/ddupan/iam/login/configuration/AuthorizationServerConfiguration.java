@@ -114,6 +114,8 @@ class AuthorizationServerConfiguration {
                 // Gates go first and defer (null) once MFA is satisfied; the framework's own providers
                 // must stay in the list unchanged, as the endpoint configurer looks them up by type.
                 .authorizationEndpoint(endpoint -> endpoint
+                    // Our page (ConsentController) instead of the framework's default one.
+                    .consentPage("/signin/consent")
                     // prompt=none without full MFA is converted as anonymous, so every later step (pre-validation,
                     // the gates, the framework provider) sees no user and the framework answers login_required.
                     .authorizationRequestConverters(converters -> converters.replaceAll(converter ->

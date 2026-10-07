@@ -66,7 +66,9 @@ provider 再抛错。
 
 ## 尚未实现
 
-- 授权确认页仍为框架默认页面（英文、无本服务样式）。
+- 授权确认页为本服务页面 `/signin/consent`（`ConsentController`，要求完整 MFA），以白话列出请求的权限，允许提交
+  全部请求的 scope（含 openid，空授权即拒绝），拒绝不提交 scope。其 CSP 的 `form-action` 额外放行该客户端回调
+  的 origin：浏览器对表单提交后的跨域重定向同样执行 `form-action`，否则「允许」后无法回到应用。
 - 前/后通道注销（框架仅支持 RP-Initiated Logout）。
 - `acr`、`claims` 请求参数、userinfo 请求体携带 access token。
 - `profile`/`email` 声明目前放在 ID token；OIDC Core 5.4 建议签发 access token 时经 userinfo 返回（一致性测试为警告）。

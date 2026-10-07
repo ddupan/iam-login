@@ -9,6 +9,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.oauth2.server.authorization.client.RegisteredClientRepository;
 import org.springframework.security.web.csrf.CsrfToken;
 import org.springframework.security.web.savedrequest.HttpSessionRequestCache;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -24,24 +25,29 @@ import top.ddupan.iam.login.authentication.infrastructure.webauthn.MfaPolicy;
 public class SignInController {
     private final PageRenderer renderer;
     private final ObjectProvider<MfaPolicy> policies;
+    private final ObjectProvider<RegisteredClientRepository> clients;
 
-    public SignInController(PageRenderer renderer, ObjectProvider<MfaPolicy> policies) {
+    public SignInController(PageRenderer renderer, ObjectProvider<MfaPolicy> policies,
+            ObjectProvider<RegisteredClientRepository> clients) {
         this.renderer = renderer;
         this.policies = policies;
+        this.clients = clients;
     }
 
     @GetMapping(value = "/signin", produces = MediaType.TEXT_HTML_VALUE)
-    ResponseEntity<String> page(@RequestParam(required = false) String error, CsrfToken csrf) {
-        return renderer.render(Map.of("step", "password", "name", "",
-            "error", error == null ? "" : "无法验证账号，请检查凭据与账号状态，或稍后重试。",
+    ResponseEntity<String> page(@RequestParam(required = false) String error, CsrfToken csrf,
+            HttpServletRequest request, HttpServletResponse response) {
+        return renderer.render(Map.of("step", "password", "name", "", "app", app(request, response),
+            "error", error == null ? "" : "unavailable".equals(error) ? "目录服务暂时不可用，请稍后重试。" : "无法验证账号，请检查用户名和密码。",
             "action", "/signin/password", "csrf", csrf(csrf)));
     }
 
     @GetMapping(value = "/signin/mfa", produces = MediaType.TEXT_HTML_VALUE)
-    ResponseEntity<String> pending(@AuthenticationPrincipal DirectoryPrincipal principal, CsrfToken csrf) {
+    ResponseEntity<String> pending(@AuthenticationPrincipal DirectoryPrincipal principal, CsrfToken csrf,
+            HttpServletRequest request, HttpServletResponse response) {
         var policy = policies.getIfAvailable();
         return identity(principal, csrf, "mfa-pending", policy == null ? "unavailable"
-            : policy.enrolled(principal.getName()) ? "authenticate" : "register");
+            : policy.enrolled(principal.getName()) ? "authenticate" : "register", app(request, response));
     }
 
     @GetMapping(value = "/signin/complete", produces = MediaType.TEXT_HTML_VALUE)
@@ -54,17 +60,29 @@ public class SignInController {
             cache.removeRequest(request, response);
             return ResponseEntity.status(303).header("Cache-Control", "no-store").location(URI.create(saved.getRedirectUrl())).build();
         }
-        return identity(principal, csrf, "mfa-complete", "authenticate");
+        return identity(principal, csrf, "mfa-complete", "authenticate", "");
     }
 
-    private ResponseEntity<String> identity(DirectoryPrincipal principal, CsrfToken csrf, String step, String passkey) {
+    private ResponseEntity<String> identity(DirectoryPrincipal principal, CsrfToken csrf, String step, String passkey,
+            String app) {
         var user = principal.user();
-        return renderer.render(Map.of("step", step, "passkey", passkey, "name", user.displayName(),
+        return renderer.render(Map.of("step", step, "passkey", passkey, "name", user.displayName(), "app", app,
             "error", "", "action", "/signin/restart", "csrf", csrf(csrf),
             "identity", Map.of("username", user.username(), "subjectId", user.id().value(),
                 "email", user.email(),
                 "groups", user.memberships().stream().map(GroupMembership::name).toList(),
                 "groupDns", user.memberships().stream().map(GroupMembership::externalId).toList())));
+    }
+
+    /** Name of the application whose authorization request was interrupted for login, or "". */
+    private String app(HttpServletRequest request, HttpServletResponse response) {
+        var repository = clients.getIfAvailable();
+        var saved = new HttpSessionRequestCache().getRequest(request, response);
+        if (repository == null || saved == null) return "";
+        var clientId = saved.getParameterValues("client_id");
+        if (clientId == null || clientId.length != 1) return "";
+        var client = repository.findByClientId(clientId[0]);
+        return client == null ? "" : client.getClientName();
     }
 
     private static Map<String, String> csrf(CsrfToken token) {

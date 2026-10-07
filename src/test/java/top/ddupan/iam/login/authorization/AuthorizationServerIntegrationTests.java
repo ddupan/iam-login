@@ -2,6 +2,7 @@ package top.ddupan.iam.login.authorization;
 
 import com.nimbusds.jose.jwk.RSAKey;
 import java.net.URI;
+import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -135,6 +136,44 @@ class AuthorizationServerIntegrationTests {
         secondFactor(session);
         location(session, authorize(verifier(), Map.of("prompt", "login")));
         SessionRoundTrip.assertStorable(session, store);
+    }
+
+    // Our consent page replaces the framework's: it needs the full MFA, its CSP lets the decision redirect to the
+    // client's callback origin, "allow" with only openid issues a code, and "deny" answers access_denied.
+    @Test void consentPageShowsTheRequestAndHandsTheDecisionBackToTheFramework() throws Exception {
+        if (clients.findByClientId("consent-rp") == null) {
+            clients.save(RegisteredClient.withId(UUID.randomUUID().toString()).clientId("consent-rp").clientName("Consent RP")
+                .clientSecret("{noop}consent-secret").clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_BASIC)
+                .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE).redirectUri("https://consent.example/cb")
+                .scope("openid").scope("groups")
+                .clientSettings(ClientSettings.builder().requireProofKey(false).requireAuthorizationConsent(true).build()).build());
+        }
+        var request = UriComponentsBuilder.fromPath("/oauth2/authorize").queryParam("response_type", "code")
+            .queryParam("client_id", "consent-rp").queryParam("redirect_uri", "https://consent.example/cb")
+            .queryParam("scope", "openid groups").queryParam("state", "rp-state").encode().build().toUriString();
+        // Deny first: an allow is remembered, and the next request skips the page.
+        for (var decision : List.of("deny", "allow")) {
+            var session = login(); secondFactor(session);
+            var consentPage = location(session, request);
+            assertThat(URI.create(consentPage).getPath()).isEqualTo("/signin/consent");
+            var page = mvc.perform(get(URI.create(consentPage)).with(https()).session(session)).andExpect(status().isOk())
+                .andExpect(header().string("Content-Security-Policy", Matchers.containsString("form-action 'self' https://consent.example")))
+                .andReturn().getResponse().getContentAsString();
+            assertThat(page).contains("\"clientName\":\"Consent RP\"", "\"scopes\":[\"openid\",\"groups\"]");
+            var post = post("/oauth2/authorize").with(https()).session(session)
+                .param("client_id", "consent-rp")
+                // query() keeps values URL-encoded; the browser's form gets the decoded state.
+                .param("state", URLDecoder.decode(query(consentPage).get("state"), StandardCharsets.UTF_8));
+            if (decision.equals("allow")) post = post.param("scope", "openid").param("scope", "groups");
+            var redirect = mvc.perform(post).andExpect(status().is3xxRedirection()).andReturn().getResponse().getRedirectedUrl();
+            assertThat(redirect).startsWith("https://consent.example/cb");
+            if (decision.equals("allow")) assertThat(query(redirect)).containsKey("code").containsEntry("state", "rp-state");
+            else assertThat(query(redirect)).containsEntry("error", "access_denied").doesNotContainKey("code");
+        }
+        // Without the full MFA the page is not served.
+        mvc.perform(get("/signin/consent").with(https()).session(login())
+                .param("client_id", "consent-rp").param("state", "x").param("scope", "openid"))
+            .andExpect(status().is3xxRedirection());
     }
 
     @Test void noCodeIsIssuedUntilBothFactorsAreFresh() throws Exception {

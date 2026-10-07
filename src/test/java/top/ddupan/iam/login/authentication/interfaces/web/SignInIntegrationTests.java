@@ -97,6 +97,9 @@ class SignInIntegrationTests {
         assertThat(session.getAttribute("SPRING_SECURITY_CONTEXT")).isNull();
         mvc.perform(get("/signin").with(https()).param("error", "").session(session))
             .andExpect(content().string(Matchers.containsString("无法验证账号")));
+        // A directory outage is the only failure told apart; account states stay the generic message.
+        mvc.perform(get("/signin").with(https()).param("error", "unavailable").session(session))
+            .andExpect(content().string(Matchers.containsString("目录服务暂时不可用")));
         mvc.perform(post("/signin/restart").with(https()).session(session).with(csrf()))
             .andExpect(redirectedUrl("/signin"));
         assertThat(session.isInvalid()).isTrue();
