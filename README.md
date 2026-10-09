@@ -8,7 +8,7 @@
 ## 职责与边界
 
 - 首轮直接连接 Samba AD：验证人类凭据、查询用户与组，沿用已有组名。
-- 处理人类 MFA、认证事务及稳定主体映射（显式 subject 绑定）。
+- 处理人类 MFA、认证事务，并签发稳定的 OIDC subject（与目录账号解耦）。
 - OAuth2/OIDC 协议与下游 token 签发由进程内授权服务器完成，见[内置授权服务器](docs/authorization-server.md)。
 - 独立于 Ayatori；Ayatori 是 IAM 消费者，不是本服务运行依赖。
 - AD 继续作为首轮用户与组权威；迁移目录、统一组模型及 machine/agent 入口留在后续。
@@ -72,7 +72,7 @@ Docker 开发使用 `scripts/gradle-in-docker`，默认持久挂载 Gradle 缓�
 
 配置分两层：决定装配哪些 bean 的开关（`iam.*.enabled`）在 Native 构建时固定，写在仓库内的
 `application-prod.yaml`，AOT 以 `prod` profile 构建；部署同样激活 `prod`，外部配置只提供环境值（地址、issuer、
-RP ID、subject 绑定等）。运行时开关与构建不一致时拒绝启动（`FeatureFlags`）。
+RP ID 等）。运行时开关与构建不一致时拒绝启动（`FeatureFlags`）。
 
 发布：合并到 main 后，CI 的 native job 在 Native 浏览器测试通过后，用 `Dockerfile` 打包**同一个**
 二进制并推到 `zot-push.ad.ddupan.top/iam/iam-login:<commit>`（`scripts/publish-image`，身份为 runner
@@ -105,7 +105,7 @@ configuration → 装配上述实现
 - `authentication/infrastructure/webauthn`：凭据归属与注册策略、challenge 仓储扩展；密码学校验和 JDBC 存储交给 Spring Security。
 - `authentication/interfaces/web`：登录页面与上下文转换；不处理密码 POST、认证会话或退出。
 - `configuration`：Spring 组件装配、安全链、静态资源和 Native hints。
-- `authorization`：subject 绑定（`SubjectBindings`）；授权服务器的装配、MFA 关卡、重新认证、refresh 策略与签名密钥在 `configuration`。由 `iam.authorization-server.enabled` 开启，见[内置授权服务器](docs/authorization-server.md)。
+- `authorization`：subject 签发（`JdbcSubjects`，`subjects` 表）；授权服务器的装配、MFA 关卡、重新认证、refresh 策略与签名密钥在 `configuration`。由 `iam.authorization-server.enabled` 开启，见[内置授权服务器](docs/authorization-server.md)。
 - `clients`：客户端管理。领域契约 `ClientRepository` 由 `RegisteredClients`（内置授权服务器的客户端仓储）实现；bearer API 要求 audience `iam-login` 且 token 的 `groups` 含管理组，`/console` 为调用该 API 的 public 客户端前端，见[客户端管理](docs/client-management.md)。
 - `frontend/src`：入口、页面、表单组件和页面数据契约分别维护，只包含真实登录流程。
 

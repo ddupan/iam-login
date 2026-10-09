@@ -18,7 +18,7 @@ try-with-resources 管理已认证用户仓储会话；基础设施的 `AdUserRe
 ## 目录和组语义
 
 - AD 是身份和组权威。objectGUID 按 AD 混合字节序解析为标准 UUID，作为目录稳定键；
-  不是 OIDC `sub`；`sub` 由显式 subject 绑定决定，以保持现役账号关联。
+  不是 OIDC `sub`：`sub` 由授权服务器签发，objectGUID 只用来关联到它（见[内置授权服务器](authorization-server.md)）。
 - 从 `memberOf` 读取直接成员关系，保留原始 DN；CN 保留大小写，不添加 `ROLE_`，
   不把 Spring 的 `FACTOR_PASSWORD` 当作组。结果排序，不做应用专用组改写。
 - 此轮不展开嵌套组、不推导 primaryGroupID，也不宣称与 Authelia 的有效组集合完全一致。

@@ -4,6 +4,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import org.springframework.boot.SpringApplication;
+import org.springframework.jdbc.core.JdbcOperations;
 import org.springframework.security.oauth2.core.AuthorizationGrantType;
 import org.springframework.security.oauth2.core.ClientAuthenticationMethod;
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClient;
@@ -44,13 +45,14 @@ public final class WebAuthnBrowserFixture {
             properties.put("iam.authorization-server.issuer", "https://localhost:18083");
             properties.put("iam.clients.admin-groups[0]", "gitea-admins");
             properties.put("iam.authorization-server.signing-keys[0]", "file:" + SigningKeyFixture.write());
-            properties.put("iam.authorization-server.subjects[0].authority", "example.test");
-            properties.put("iam.authorization-server.subjects[0].directory-id", "00112233-4455-6677-8899-aabbccddeeff");
-            properties.put("iam.authorization-server.subjects[0].subject", "human:fixture-existing-oidc-subject");
         }
         application.setDefaultProperties(properties);
         var context = application.run(args);
         if (authorizationServer) {
+            // A subject carried over from an earlier issuer, as a migration inserts it.
+            context.getBean(JdbcOperations.class).update("insert into subjects (subject, authority, directory_id) "
+                + "values ('human:fixture-existing-oidc-subject', 'example.test', '00112233-4455-6677-8899-aabbccddeeff') "
+                + "on conflict do nothing");
             context.getBean(RegisteredClientRepository.class).save(
                 RegisteredClient.withId("fixture-rp")
                     .clientId("fixture-rp").clientSecret("{noop}fixture-client-secret")

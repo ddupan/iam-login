@@ -14,7 +14,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.stream.Collectors;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -75,7 +74,7 @@ import org.springframework.security.web.util.matcher.MediaTypeRequestMatcher;
 import top.ddupan.iam.login.authentication.domain.User;
 import top.ddupan.iam.login.authentication.infrastructure.security.DirectoryPrincipal;
 import top.ddupan.iam.login.authentication.infrastructure.webauthn.MfaPolicy;
-import top.ddupan.iam.login.authorization.application.SubjectBindings;
+import top.ddupan.iam.login.authorization.infrastructure.persistence.JdbcSubjects;
 import top.ddupan.iam.login.clients.infrastructure.RegisteredClients;
 
 /**
@@ -89,15 +88,11 @@ import top.ddupan.iam.login.clients.infrastructure.RegisteredClients;
 @EnableScheduling
 class AuthorizationServerConfiguration {
     @ConfigurationProperties("iam.authorization-server")
-    record Properties(boolean enabled, URI issuer, List<SubjectBinding> subjects,
-            List<Resource> signingKeys) {
-        /** A reviewed binding of a directory identity (authority + immutable id) to its existing OIDC subject. */
-        record SubjectBinding(String authority, String directoryId, String subject) { }
-    }
+    record Properties(boolean enabled, URI issuer, List<Resource> signingKeys) { }
 
     @Bean @Order(2)
     SecurityFilterChain authorizationServer(HttpSecurity http, MfaPolicy mfa,
-            SubjectBindings policy, OAuth2AuthorizationService authorizations) throws Exception {
+            JdbcSubjects subjects, OAuth2AuthorizationService authorizations) throws Exception {
         var requiredFactors = mfa.complete;
         // Registered at the authorization endpoint's position before the endpoint itself (added later, while
         // building); filters of equal order keep insertion order, so this runs first.
@@ -140,7 +135,7 @@ class AuthorizationServerConfiguration {
                         providers.addFirst(new MfaGate(OAuth2AuthorizationCodeRequestAuthenticationToken.class, requiredFactors));
                     }))
                 .tokenEndpoint(endpoint -> endpoint.authenticationProviders(providers ->
-                    providers.addFirst(new RefreshPolicy(authorizations, policy))));
+                    providers.addFirst(new RefreshPolicy(authorizations, subjects))));
         })
             // Only the user-facing endpoint needs a human with both factors; token, introspection and
             // revocation authenticate the client, and discovery/JWKS are public. The endpoint filter runs after
@@ -259,10 +254,10 @@ class AuthorizationServerConfiguration {
 
     /**
      * Refresh does not pass through login, so policy that must still hold is re-checked here: the client must
-     * still be enabled for login, and the subject binding must still exist. Either change stops refresh
+     * still be enabled for login, and the account must still have its subject. Either change stops refresh
      * immediately (Hydra could not do this).
      */
-    record RefreshPolicy(OAuth2AuthorizationService authorizations, SubjectBindings policy) implements AuthenticationProvider {
+    record RefreshPolicy(OAuth2AuthorizationService authorizations, JdbcSubjects subjects) implements AuthenticationProvider {
         @Override public Authentication authenticate(Authentication request) throws AuthenticationException {
             var refresh = (OAuth2RefreshTokenAuthenticationToken) request;
             if (refresh.getPrincipal() instanceof OAuth2ClientAuthenticationToken client && client.getRegisteredClient() != null
@@ -271,9 +266,8 @@ class AuthorizationServerConfiguration {
             }
             var authorization = authorizations.findByToken(refresh.getRefreshToken(), OAuth2TokenType.REFRESH_TOKEN);
             var stored = authorization == null ? null : authorization.<Authentication>getAttribute(Principal.class.getName());
-            try {
-                if (stored != null && stored.getPrincipal() instanceof DirectoryPrincipal principal) policy.subject(principal.user());
-            } catch (IllegalArgumentException withdrawn) {
+            if (stored != null && stored.getPrincipal() instanceof DirectoryPrincipal principal
+                    && subjects.find(principal.user().id()).isEmpty()) {
                 throw new OAuth2AuthenticationException(OAuth2ErrorCodes.INVALID_GRANT);
             }
             return null; // allowed: the framework's refresh provider does the actual work
@@ -281,18 +275,16 @@ class AuthorizationServerConfiguration {
         @Override public boolean supports(Class<?> type) { return OAuth2RefreshTokenAuthenticationToken.class.isAssignableFrom(type); }
     }
 
-    @Bean SubjectBindings subjectBindings(Properties properties) {
-        return new SubjectBindings(properties.subjects().stream().collect(Collectors.toMap(
-            binding -> new User.UserId(binding.authority(), binding.directoryId()), Properties.SubjectBinding::subject)));
+    @Bean JdbcSubjects subjects(JdbcOperations jdbc) {
+        return new JdbcSubjects(jdbc);
     }
 
-    /** Existing subjects are preserved, so downstream account links survive the issuer change. */
-    @Bean OAuth2TokenCustomizer<JwtEncodingContext> claims(SubjectBindings policy) {
+    @Bean OAuth2TokenCustomizer<JwtEncodingContext> claims(JdbcSubjects subjects) {
         return context -> {
             if (!(context.getPrincipal().getPrincipal() instanceof DirectoryPrincipal principal)) return;
             var user = principal.user();
             var scopes = context.getAuthorizedScopes();
-            context.getClaims().subject(policy.subject(user));
+            context.getClaims().subject(subjects.issue(user.id()));
             if (scopes.contains("groups")) {
                 context.getClaims().claim("groups", user.memberships().stream().map(User.GroupMembership::name).toList());
             }
