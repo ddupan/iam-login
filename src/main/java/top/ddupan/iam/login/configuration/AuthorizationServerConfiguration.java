@@ -107,11 +107,11 @@ class AuthorizationServerConfiguration {
             AbstractPreAuthenticatedProcessingFilter.class);
         http.oauth2AuthorizationServer(as -> {
             http.securityMatcher(as.getEndpointsMatcher());
-            // Public clients outside the authorization-code exchange (PublicClients).
+            // Public clients outside the authorization-code exchange (PublicClients). Custom converters and providers
+            // go ahead of the framework's, whose public-client provider would reject these requests (no code_verifier).
             as.clientAuthentication(authentication -> authentication
-                .authenticationConverters(converters -> converters.addFirst(
-                    new PublicClients.Converter(settings.getDeviceAuthorizationEndpoint())))
-                .authenticationProviders(providers -> providers.addFirst(new PublicClients.Provider(clients))));
+                .authenticationConverter(new PublicClients.Converter(settings.getDeviceAuthorizationEndpoint()))
+                .authenticationProvider(new PublicClients.Provider(clients)));
             as.oidc(oidc -> oidc.providerConfigurationEndpoint(discovery -> discovery.providerConfigurationCustomizer(metadata -> {
                     // Advertise what consent actually releases; clients and conformance tests rely on it.
                     metadata.scopes(scopes -> { scopes.removeAll(SCOPES); scopes.addAll(SCOPES); });
