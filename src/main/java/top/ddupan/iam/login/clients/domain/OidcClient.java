@@ -5,13 +5,26 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * First-party confidential authorization-code client. No caller-controlled grants or metadata.
+ * First-party authorization-code client. Grants follow from the fields; there is no caller-controlled metadata.
  * {@code loginEnabled} is required: a request that omits it must not silently disable (or enable) a client.
  * {@code pkceRequired} is required for the same reason; turning it off is only for confidential clients that
  * cannot send PKCE (Gitea 1.27 sends neither PKCE nor nonce), which RFC 9700 2.1.1 still permits.
+ * <ul>
+ * <li>{@code publicClient}: no secret (a CLI, a browser app). PKCE is then mandatory; fixed at creation.</li>
+ * <li>{@code deviceAuthorization}: also the device grant (RFC 8628), for clients without a browser.</li>
+ * <li>{@code audiences}: extra access-token audiences, for resources that check {@code aud} (Incus).</li>
+ * </ul>
+ * Who may do what is the resource's decision, from the token's claims; a client admits everyone who can sign in.
+ * The three are optional so that callers predating them keep working; absent means off / empty.
  */
 public record OidcClient(String id, String name, List<String> redirectUris, Set<String> scopes,
-        List<String> postLogoutRedirectUris, Boolean loginEnabled, Boolean pkceRequired) {
+        List<String> postLogoutRedirectUris, Boolean loginEnabled, Boolean pkceRequired, Boolean publicClient,
+        Boolean deviceAuthorization, List<String> audiences) {
+    public OidcClient(String id, String name, List<String> redirectUris, Set<String> scopes,
+            List<String> postLogoutRedirectUris, Boolean loginEnabled, Boolean pkceRequired) {
+        this(id, name, redirectUris, scopes, postLogoutRedirectUris, loginEnabled, pkceRequired, false, false, List.of());
+    }
+
     public OidcClient {
         requireId(id);
         if (name == null || name.isBlank() || name.length() > 200) throw new IllegalArgumentException("Invalid name");
@@ -28,6 +41,14 @@ public record OidcClient(String id, String name, List<String> redirectUris, Set<
         redirectUris.forEach(OidcClient::requireUri); postLogoutRedirectUris.forEach(OidcClient::requireUri);
         if (loginEnabled == null) throw new IllegalArgumentException("loginEnabled is required");
         if (pkceRequired == null) throw new IllegalArgumentException("pkceRequired is required");
+        publicClient = Boolean.TRUE.equals(publicClient);
+        deviceAuthorization = Boolean.TRUE.equals(deviceAuthorization);
+        // Without a secret, PKCE is what binds the code to the client that asked for it.
+        if (publicClient && !pkceRequired) throw new IllegalArgumentException("Public clients require PKCE");
+        audiences = audiences == null ? List.of() : List.copyOf(audiences);
+        // Stored comma-separated (RegisteredClients.AUDIENCES).
+        if (audiences.size() > 10 || !audiences.stream().allMatch(a -> a != null && !a.isBlank() && a.length() <= 2048
+                && !a.contains(",") && a.equals(a.strip()))) throw new IllegalArgumentException("Invalid audiences");
     }
     public static void requireId(String id) {
         if (id == null || !id.matches("[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}")) throw new IllegalArgumentException("Invalid client ID");
