@@ -7,7 +7,7 @@ type PageBase = {
   csrf: CsrfToken;
 };
 
-export type SignInContext = PageBase & (
+export type SignInContext = PageBase & { app: string } & (
   | { step: "password" }
   | {
       step: "mfa-pending" | "mfa-complete";
@@ -22,14 +22,31 @@ export type SignInContext = PageBase & (
     }
 );
 
+export type ConsentContext = PageBase & {
+  step: "consent";
+  consent: {
+    clientId: string;
+    clientName: string;
+    state: string;
+    scopes: string[];
+    previouslyGranted: string[];
+    returnHosts: string[];
+    username: string;
+    email: string;
+    groups: string[];
+  };
+};
+
 export type AdminContext = { step: "admin"; authority: string; clientId: string };
 
-export function readPageContext(): SignInContext | AdminContext {
+export type PageContext = SignInContext | ConsentContext | AdminContext;
+
+const STEPS = ["admin", "password", "mfa-pending", "mfa-complete", "consent"];
+
+export function readPageContext(): PageContext {
   const data = document.getElementById("login-context")?.textContent;
   if (!data) throw new Error("Missing login page context");
-  const context: SignInContext | AdminContext = JSON.parse(data);
-  if (context.step !== "admin" && context.step !== "password" && context.step !== "mfa-pending" && context.step !== "mfa-complete") {
-    throw new Error("Unknown login step");
-  }
+  const context: PageContext = JSON.parse(data);
+  if (!STEPS.includes(context.step)) throw new Error("Unknown login step");
   return context;
 }

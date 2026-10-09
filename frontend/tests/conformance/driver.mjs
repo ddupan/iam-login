@@ -36,18 +36,17 @@ async function drive(escaped) {
     }
     if (!here.startsWith(OP)) { log("left OP to", here); return; }
     const has = name => page.getByRole("button", { name, exact: true }).isVisible().catch(() => false);
-    if (await page.getByRole("heading", { name: "登录你的账号" }).isVisible().catch(() => false)) {
+    if (await page.getByRole("heading", { name: "登录", exact: true }).isVisible().catch(() => false)) {
       await page.getByLabel("用户名", { exact: true }).fill("alice");
       await page.getByLabel("密码", { exact: true }).fill("fixture-password");
       await page.getByRole("button", { name: "继续", exact: true }).click();
-    } else if (await has("注册 Passkey")) {
-      await page.getByRole("button", { name: "注册 Passkey", exact: true }).click();
-      await page.getByRole("button", { name: "验证 Passkey", exact: true }).waitFor({ timeout: 10000 }).catch(() => {});
-    } else if (await has("验证 Passkey")) {
-      await page.getByRole("button", { name: "验证 Passkey", exact: true }).click();
-    } else if (await page.getByRole("button", { name: /submit/i }).isVisible().catch(() => false)) {
-      for (const box of await page.getByRole("checkbox").all()) await box.check();
-      await page.getByRole("button", { name: /submit/i }).click();
+    } else if (await has("创建 passkey")) {
+      await page.getByRole("button", { name: "创建 passkey", exact: true }).click();
+      await page.getByRole("button", { name: "用 passkey 验证", exact: true }).waitFor({ timeout: 10000 }).catch(() => {});
+    } else if (await has("用 passkey 验证")) {
+      await page.getByRole("button", { name: "用 passkey 验证", exact: true }).click();
+    } else if (await has("允许")) {
+      await page.getByRole("button", { name: "允许", exact: true }).click();
     } else {
       // An OP error page is a legitimate outcome for negative tests; the suite then asks for review.
       log("OP page needs no action", here);

@@ -8,6 +8,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.authentication.InternalAuthenticationServiceException;
 import org.springframework.security.authentication.ProviderManager;
 import org.springframework.security.authorization.AuthorizationManagerFactories;
 import org.springframework.security.config.Customizer;
@@ -60,6 +61,7 @@ class SecurityConfiguration {
             .authorizeHttpRequests(auth -> {
                 if (mfa != null) {
                     auth.requestMatchers("/signin/complete").access(mfa.policy.complete);
+                    auth.requestMatchers("/signin/consent").access(mfa.policy.complete);
                     auth.requestMatchers(HttpMethod.POST, "/webauthn/register")
                         .access(mfa.policy.password);
                 }
@@ -70,9 +72,11 @@ class SecurityConfiguration {
             })
             .formLogin(form -> form.loginPage("/signin").loginProcessingUrl("/signin/password")
                 .defaultSuccessUrl("/signin/mfa", true).failureHandler((request, response, exception) ->
-                    // No exception in the session: the page shows one generic message, and session
-                    // attributes must be JSON (SessionConfiguration).
-                    response.sendRedirect(request.getContextPath() + "/signin?error")))
+                    // No exception in the session (attributes must be JSON, SessionConfiguration). Only a directory
+                    // outage is told apart: wrong password, locked, disabled and expired stay one message, so the
+                    // page does not reveal account state.
+                    response.sendRedirect(request.getContextPath() + (exception instanceof InternalAuthenticationServiceException
+                        ? "/signin?error=unavailable" : "/signin?error"))))
             // Signing out of this service only; relying parties use RP-initiated logout (/connect/logout).
             .logout(logout -> logout.logoutRequestMatcher(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/signin/restart"))
                 .logoutSuccessHandler((request, response, authentication) -> {

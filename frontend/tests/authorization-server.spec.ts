@@ -39,17 +39,17 @@ test("AD + passkey -> in-process authorization server: consent, tokens, userinfo
   }).toString();
 
   await page.goto(authorize.toString());
-  await expect(page.getByRole("heading", { name: "登录你的账号" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "登录", exact: true })).toBeVisible();
   await page.getByLabel("用户名", { exact: true }).fill("alice");
   await page.getByLabel("密码", { exact: true }).fill("fixture-password");
   await page.getByRole("button", { name: "继续", exact: true }).click();
-  await page.getByRole("button", { name: "注册 Passkey", exact: true }).click();
-  await expect(page.getByRole("status")).toContainText("Passkey 已保存");
-  await page.getByRole("button", { name: "验证 Passkey", exact: true }).click();
-  // Resumed authorization request -> the framework's consent page (to be replaced by our own UI).
-  await expect(page.getByText("fixture-rp")).toBeVisible();
-  for (const box of await page.getByRole("checkbox").all()) await box.check();
-  await page.getByRole("button", { name: /submit/i }).click();
+  await page.getByRole("button", { name: "创建 passkey", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "passkey 已创建", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "用 passkey 验证", exact: true }).click();
+  // Resumed authorization request -> our consent page: requested access in plain words, then allow.
+  await expect(page.getByRole("heading", { name: /请求访问你的账号$/ })).toBeVisible();
+  await expect(page.getByText("你所在的组", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "允许", exact: true }).click();
   await expect.poll(() => new URL(page.url()).origin + new URL(page.url()).pathname).toBe(CALLBACK);
   const callback = new URL(page.url());
   expect(callback.searchParams.get("state")).toBe(state);
@@ -89,7 +89,7 @@ test("AD + passkey -> in-process authorization server: consent, tokens, userinfo
   await page.goto(logout.toString());
   await expect.poll(() => new URL(page.url()).origin + new URL(page.url()).pathname).toBe("http://localhost:14446/logged-out");
   await page.goto(authorize.toString());
-  await expect(page.getByRole("heading", { name: "登录你的账号" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "登录", exact: true })).toBeVisible();
 
   // Console: a public client of this same server; the client API only accepts its bearer token.
   expect((await context.request.get(`${ISSUER}/api/iam/clients`, { headers: { Authorization: `Bearer ${latest.access_token}` } })).status()).toBe(403);
@@ -97,7 +97,7 @@ test("AD + passkey -> in-process authorization server: consent, tokens, userinfo
   await page.getByLabel("用户名", { exact: true }).fill("alice");
   await page.getByLabel("密码", { exact: true }).fill("fixture-password");
   await page.getByRole("button", { name: "继续", exact: true }).click();
-  await page.getByRole("button", { name: "验证 Passkey", exact: true }).click();
+  await page.getByRole("button", { name: "用 passkey 验证", exact: true }).click();
   await expect(page.getByRole("heading", { name: "OIDC 客户端" })).toBeVisible();
   expect(new URL(page.url()).pathname).toBe("/console");
   await expect(page.getByRole("row", { name: /fixture-rp/ })).toBeVisible();

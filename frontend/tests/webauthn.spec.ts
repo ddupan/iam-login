@@ -16,11 +16,11 @@ test("AD + PostgreSQL + real WebAuthn ceremony, factor gating and persisted re-l
     await page.getByLabel("用户名", { exact: true }).fill(username);
     await page.getByLabel("密码", { exact: true }).fill("fixture-password");
     await page.getByRole("button", { name: "继续", exact: true }).click();
-    await expect(page.getByRole("heading", { name: "密码已验证，等待 MFA" })).toBeVisible();
+    await expect(page).toHaveURL(/\/signin\/mfa$/);
   }
   await login();
-  await page.getByRole("button", { name: "注册 Passkey", exact: true }).click();
-  await expect(page.getByRole("status")).toContainText("Passkey 已保存");
+  await page.getByRole("button", { name: "创建 passkey", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "passkey 已创建", exact: true })).toBeVisible();
   await page.goto("https://localhost:18083/signin/complete");
   await expect(page).toHaveURL(/^https:\/\/localhost:18083\/signin\/mfa(?:\?.*)?$/);
   const enrollmentToken = await page.evaluate(() => JSON.parse(document.getElementById("login-context")!.textContent!).csrf);
@@ -30,23 +30,23 @@ test("AD + PostgreSQL + real WebAuthn ceremony, factor gating and persisted re-l
   expect(enrollAgain.status()).toBe(302);
   expect(enrollAgain.headers().location).toContain("factor.type=webauthn");
   const beforeMfa = (await context.cookies()).find(c => c.name === "SESSION")!.value;
-  await page.getByRole("button", { name: "验证 Passkey", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "MFA 已验证", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "用 passkey 验证", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "已登录", exact: true })).toBeVisible();
   await expect(page.getByText("gitea-admins", { exact: true })).toBeVisible();
   expect((await context.cookies()).find(c => c.name === "SESSION")!.value).not.toBe(beforeMfa);
-  await page.getByRole("button", { name: "退出并重新验证", exact: true }).click();
+  await page.getByRole("button", { name: "退出", exact: true }).click();
   await login();
-  await expect(page.getByRole("button", { name: "注册 Passkey", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "创建 passkey", exact: true })).toHaveCount(0);
   const assertionRequest = page.waitForRequest(request => new URL(request.url()).pathname === "/login/webauthn");
-  await page.getByRole("button", { name: "验证 Passkey", exact: true }).click();
+  await page.getByRole("button", { name: "用 passkey 验证", exact: true }).click();
   const assertion = (await assertionRequest).postDataJSON();
-  await expect(page.getByRole("heading", { name: "MFA 已验证", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "已登录", exact: true })).toBeVisible();
   const token = await page.evaluate(() => JSON.parse(document.getElementById("login-context")!.textContent!).csrf);
   const replay = await context.request.post("https://localhost:18083/login/webauthn", {
     headers: { [token.headerName]: token.value }, data: assertion,
   });
   expect(replay.status()).toBe(401);
-  await page.getByRole("button", { name: "退出并重新验证", exact: true }).click();
+  await page.getByRole("button", { name: "退出", exact: true }).click();
   await login("bob");
   // Bob has no credential. A discoverable Alice credential must not become Bob's second factor.
   const foreignStatus = await page.evaluate(async () => {
