@@ -3,8 +3,8 @@ package top.ddupan.iam.login;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import org.jooq.DSLContext;
 import org.springframework.boot.SpringApplication;
-import org.springframework.jdbc.core.JdbcOperations;
 import org.springframework.security.oauth2.core.AuthorizationGrantType;
 import org.springframework.security.oauth2.core.ClientAuthenticationMethod;
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClient;
@@ -15,6 +15,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
 import top.ddupan.iam.login.support.AdDirectoryFixture;
 import top.ddupan.iam.login.support.SigningKeyFixture;
+import static top.ddupan.iam.login.persistence.schema.Tables.SUBJECTS;
 
 /** Test-only HTTPS application with simulated AD and disposable PostgreSQL. Never connects to real AD. */
 public final class WebAuthnBrowserFixture {
@@ -50,9 +51,9 @@ public final class WebAuthnBrowserFixture {
         var context = application.run(args);
         if (authorizationServer) {
             // A subject carried over from an earlier issuer, as a migration inserts it.
-            context.getBean(JdbcOperations.class).update("insert into subjects (subject, authority, directory_id) "
-                + "values ('human:fixture-existing-oidc-subject', 'example.test', '00112233-4455-6677-8899-aabbccddeeff') "
-                + "on conflict do nothing");
+            context.getBean(DSLContext.class).insertInto(SUBJECTS).set(SUBJECTS.SUBJECT, "human:fixture-existing-oidc-subject")
+                .set(SUBJECTS.AUTHORITY, "example.test").set(SUBJECTS.DIRECTORY_ID, "00112233-4455-6677-8899-aabbccddeeff")
+                .onConflictDoNothing().execute();
             context.getBean(RegisteredClientRepository.class).save(
                 RegisteredClient.withId("fixture-rp")
                     .clientId("fixture-rp").clientSecret("{noop}fixture-client-secret")

@@ -3,6 +3,8 @@ plugins {
 	id 'org.springframework.boot' version '4.1.1'
 	id 'io.spring.dependency-management' version '1.1.7'
 	id 'org.graalvm.buildtools.native' version '1.1.8'
+	// Same version as the jOOQ runtime Spring Boot manages (3.21.7 with Boot 4.1.1).
+	id 'org.jooq.jooq-codegen-gradle' version '3.21.7'
 }
 
 group = 'top.ddupan.iam'
@@ -21,7 +23,7 @@ repositories {
 
 dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-actuator'
-	implementation 'org.springframework.boot:spring-boot-starter-jdbc'
+	implementation 'org.springframework.boot:spring-boot-starter-jooq'
 	implementation 'org.springframework.boot:spring-boot-starter-flyway'
 	runtimeOnly 'org.flywaydb:flyway-database-postgresql'
 	runtimeOnly 'org.postgresql:postgresql'
@@ -35,6 +37,8 @@ dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-webmvc'
 	implementation 'org.springframework.boot:spring-boot-starter-restclient'
 	implementation 'org.springframework.security:spring-security-webauthn'
+	// The schema is read from the Flyway scripts themselves: no database at build time.
+	jooqCodegen 'org.jooq:jooq-meta-extensions:3.21.7'
 	compileOnly 'org.projectlombok:lombok'
 	developmentOnly 'org.springframework.boot:spring-boot-devtools'
 	runtimeOnly 'io.micrometer:micrometer-registry-prometheus'
@@ -130,3 +134,44 @@ tasks.register('conformanceFixture', JavaExec) {
     systemProperty 'iam.fixture.conformance', 'true'
 }
 
+
+// Typed tables and columns for the SQL this service writes, generated from the Flyway migrations
+// (including the framework schemas copied there), so a renamed column fails compilation, not a query.
+jooq {
+	configuration {
+		generator {
+			database {
+				name = 'org.jooq.meta.extensions.ddl.DDLDatabase'
+				properties {
+					property { key = 'scripts'; value = 'build/jooq-ddl/*.sql' }
+					property { key = 'sort'; value = 'flyway' }
+					property { key = 'defaultNameCase'; value = 'lower' }
+				}
+			}
+			generate {
+				// Records and table references only; no DAOs or POJOs (no reflection for native).
+				daos = false
+				pojos = false
+			}
+			target {
+				packageName = 'top.ddupan.iam.login.persistence.schema'
+			}
+		}
+	}
+}
+
+// DDLDatabase simulates the DDL on H2, which cannot index text columns (nor build hash indexes). Indexes do not
+// shape the generated code, so a copy without them is parsed; the applied migrations stay byte-for-byte unchanged
+// (Flyway checksums). Every CREATE INDEX in the migrations is a single line.
+tasks.register('jooqDdl', Copy) {
+	from 'src/main/resources/db/migration'
+	into layout.buildDirectory.dir('jooq-ddl')
+	filter { String line -> line ==~ /(?i)\s*CREATE\s+(UNIQUE\s+)?INDEX\b.*/ ? '' : line }
+}
+tasks.named('jooqCodegen') {
+	dependsOn tasks.named('jooqDdl')
+	inputs.files(fileTree('src/main/resources/db/migration'))
+}
+tasks.named('compileJava') {
+	dependsOn tasks.named('jooqCodegen')
+}

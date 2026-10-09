@@ -14,6 +14,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import org.jooq.DSLContext;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -74,7 +75,7 @@ import org.springframework.security.web.util.matcher.MediaTypeRequestMatcher;
 import top.ddupan.iam.login.authentication.domain.User;
 import top.ddupan.iam.login.authentication.infrastructure.security.DirectoryPrincipal;
 import top.ddupan.iam.login.authentication.infrastructure.webauthn.MfaPolicy;
-import top.ddupan.iam.login.authorization.infrastructure.persistence.JdbcSubjects;
+import top.ddupan.iam.login.authorization.infrastructure.persistence.Subjects;
 import top.ddupan.iam.login.clients.infrastructure.RegisteredClients;
 
 /**
@@ -92,7 +93,7 @@ class AuthorizationServerConfiguration {
 
     @Bean @Order(2)
     SecurityFilterChain authorizationServer(HttpSecurity http, MfaPolicy mfa,
-            JdbcSubjects subjects, OAuth2AuthorizationService authorizations) throws Exception {
+            Subjects subjects, OAuth2AuthorizationService authorizations) throws Exception {
         var requiredFactors = mfa.complete;
         // Registered at the authorization endpoint's position before the endpoint itself (added later, while
         // building); filters of equal order keep insertion order, so this runs first.
@@ -257,7 +258,7 @@ class AuthorizationServerConfiguration {
      * still be enabled for login, and the account must still have its subject. Either change stops refresh
      * immediately (Hydra could not do this).
      */
-    record RefreshPolicy(OAuth2AuthorizationService authorizations, JdbcSubjects subjects) implements AuthenticationProvider {
+    record RefreshPolicy(OAuth2AuthorizationService authorizations, Subjects subjects) implements AuthenticationProvider {
         @Override public Authentication authenticate(Authentication request) throws AuthenticationException {
             var refresh = (OAuth2RefreshTokenAuthenticationToken) request;
             if (refresh.getPrincipal() instanceof OAuth2ClientAuthenticationToken client && client.getRegisteredClient() != null
@@ -275,11 +276,11 @@ class AuthorizationServerConfiguration {
         @Override public boolean supports(Class<?> type) { return OAuth2RefreshTokenAuthenticationToken.class.isAssignableFrom(type); }
     }
 
-    @Bean JdbcSubjects subjects(JdbcOperations jdbc) {
-        return new JdbcSubjects(jdbc);
+    @Bean Subjects subjects(DSLContext db) {
+        return new Subjects(db);
     }
 
-    @Bean OAuth2TokenCustomizer<JwtEncodingContext> claims(JdbcSubjects subjects) {
+    @Bean OAuth2TokenCustomizer<JwtEncodingContext> claims(Subjects subjects) {
         return context -> {
             if (!(context.getPrincipal().getPrincipal() instanceof DirectoryPrincipal principal)) return;
             var user = principal.user();
@@ -321,8 +322,8 @@ class AuthorizationServerConfiguration {
         return service;
     }
 
-    @Bean ExpiredAuthorizations expiredAuthorizations(JdbcOperations jdbc) {
-        return new ExpiredAuthorizations(jdbc, Clock.systemUTC());
+    @Bean ExpiredAuthorizations expiredAuthorizations(DSLContext db) {
+        return new ExpiredAuthorizations(db, Clock.systemUTC());
     }
 
     @Bean OAuth2AuthorizationConsentService consents(JdbcOperations jdbc, RegisteredClientRepository clients) {

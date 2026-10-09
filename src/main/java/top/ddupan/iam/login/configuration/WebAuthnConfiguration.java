@@ -3,6 +3,7 @@ package top.ddupan.iam.login.configuration;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.Set;
+import org.jooq.DSLContext;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -15,7 +16,7 @@ import org.springframework.security.web.webauthn.api.UserVerificationRequirement
 import org.springframework.security.web.webauthn.management.*;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
-import top.ddupan.iam.login.authentication.infrastructure.persistence.JdbcCredentialRegistration;
+import top.ddupan.iam.login.authentication.infrastructure.persistence.CredentialRegistration;
 import top.ddupan.iam.login.authentication.infrastructure.webauthn.*;
 
 @Configuration(proxyBeanMethods = false)
@@ -38,14 +39,14 @@ class WebAuthnConfiguration {
     }
 
     @Bean
-    SessionChallenges challenges(MfaPolicy policy, JdbcOperations jdbc) {
-        return new SessionChallenges(Clock.systemUTC(), policy, jdbc);
+    SessionChallenges challenges(MfaPolicy policy, DSLContext db) {
+        return new SessionChallenges(Clock.systemUTC(), policy, db);
     }
 
     @Bean
     WebAuthnRelyingPartyOperations relyingParty(WebAuthnProperties properties, MfaPolicy policy,
             PublicKeyCredentialUserEntityRepository users, UserCredentialRepository credentials,
-            JdbcOperations jdbc, PlatformTransactionManager transactions) {
+            DSLContext db, PlatformTransactionManager transactions) {
         var delegate = new Webauthn4JRelyingPartyOperations(users, credentials,
             PublicKeyCredentialRpEntity.builder().id(properties.rpId()).name("IAM Login").build(),
             Set.of(properties.origin()));
@@ -56,8 +57,7 @@ class WebAuthnConfiguration {
         delegate.setCustomizeRequestOptions(options -> options.timeout(Duration.ofMinutes(5))
             .userVerification(UserVerificationRequirement.REQUIRED));
         return new DirectoryRelyingPartyOperations(delegate, policy, users, credentials,
-            new JdbcCredentialRegistration(
-                jdbc, new TransactionTemplate(transactions)));
+            new CredentialRegistration(db, new TransactionTemplate(transactions)));
     }
 
     @Bean

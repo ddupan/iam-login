@@ -3,17 +3,19 @@ package top.ddupan.iam.login.authentication.infrastructure.webauthn;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
-import java.util.List;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import org.flywaydb.core.Flyway;
+import org.jooq.DSLContext;
+import org.jooq.SQLDialect;
+import org.jooq.impl.DSL;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
@@ -33,14 +35,14 @@ import static org.assertj.core.api.Assertions.*;
 class SessionChallengesTests {
     static final PostgreSQLContainer DATABASE = new PostgreSQLContainer(DockerImageName.parse(
         "postgres@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873").asCompatibleSubstituteFor("postgres"));
-    static JdbcTemplate jdbc;
+    static DSLContext db;
     private final MfaPolicy policy = new MfaPolicy(new MapPublicKeyCredentialUserEntityRepository(), new MapUserCredentialRepository());
 
     @BeforeAll static void database() {
         DATABASE.start();
         var source = new DriverManagerDataSource(DATABASE.getJdbcUrl(), DATABASE.getUsername(), DATABASE.getPassword());
         Flyway.configure().dataSource(source).load().migrate();
-        jdbc = new JdbcTemplate(source);
+        db = DSL.using(source, SQLDialect.POSTGRES);
     }
     @AfterAll static void stop() { DATABASE.stop(); }
     @AfterEach void clear() { SecurityContextHolder.clearContext(); }
@@ -51,10 +53,10 @@ class SessionChallengesTests {
         var request = new MockHttpServletRequest();
         var response = new MockHttpServletResponse();
         identify("alice", issued);
-        var repository = new SessionChallenges(Clock.fixed(issued, ZoneOffset.UTC), policy, jdbc).authentication();
+        var repository = new SessionChallenges(Clock.fixed(issued, ZoneOffset.UTC), policy, db).authentication();
         var options = PublicKeyCredentialRequestOptions.builder().rpId("localhost").challenge(Bytes.random()).build();
         repository.save(request, response, options);
-        var later = new SessionChallenges(Clock.fixed(issued.plusSeconds(301), ZoneOffset.UTC), policy, jdbc).authentication();
+        var later = new SessionChallenges(Clock.fixed(issued.plusSeconds(301), ZoneOffset.UTC), policy, db).authentication();
         assertThat(later.load(request)).isNull();
         repository.save(request, response, options);
         identify("bob", issued);
@@ -69,7 +71,7 @@ class SessionChallengesTests {
         identify("alice", issued);
         var request = new MockHttpServletRequest();
         var response = new MockHttpServletResponse();
-        var repository = new SessionChallenges(Clock.systemUTC(), policy, jdbc).authentication();
+        var repository = new SessionChallenges(Clock.systemUTC(), policy, db).authentication();
         var first = PublicKeyCredentialRequestOptions.builder().rpId("localhost").challenge(Bytes.random()).build();
         var second = PublicKeyCredentialRequestOptions.builder().rpId("localhost").challenge(Bytes.random()).build();
         repository.save(request, response, first);
@@ -89,7 +91,7 @@ class SessionChallengesTests {
     void concurrentRequestsOfOneSessionConsumeAChallengeOnce() throws Exception {
         var issued = Instant.now();
         identify("alice", issued);
-        var repository = new SessionChallenges(Clock.systemUTC(), policy, jdbc).authentication();
+        var repository = new SessionChallenges(Clock.systemUTC(), policy, db).authentication();
         var original = new MockHttpServletRequest();
         repository.save(original, new MockHttpServletResponse(),
             PublicKeyCredentialRequestOptions.builder().rpId("localhost").challenge(Bytes.random()).build());

@@ -1,5 +1,7 @@
 package top.ddupan.iam.login.authentication.infrastructure.webauthn;
 
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -8,19 +10,18 @@ import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.io.Serializable;
 import java.io.UncheckedIOException;
-import java.sql.Timestamp;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.UUID;
-import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpServletResponse;
-import org.springframework.jdbc.core.JdbcOperations;
+import org.jooq.DSLContext;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.webauthn.api.PublicKeyCredentialCreationOptions;
 import org.springframework.security.web.webauthn.api.PublicKeyCredentialRequestOptions;
 import org.springframework.security.web.webauthn.authentication.PublicKeyCredentialRequestOptionsRepository;
 import org.springframework.security.web.webauthn.registration.PublicKeyCredentialCreationOptionsRepository;
+import static top.ddupan.iam.login.persistence.schema.Tables.WEBAUTHN_CHALLENGE;
 
 /**
  * Framework repository extension: server-side TTL, owner binding and atomic single consumption.
@@ -37,15 +38,14 @@ public final class SessionChallenges {
      */
     private static final ObjectInputFilter OPTIONS = ObjectInputFilter.Config.createFilter(
         "org.springframework.security.web.webauthn.api.*;java.lang.*;java.util.*;java.time.*;maxdepth=20;!*");
-    private record Stored(String owner, byte[] options, Instant expiresAt) { }
     private final Clock clock;
     private final MfaPolicy policy;
-    private final JdbcOperations jdbc;
+    private final DSLContext db;
 
-    public SessionChallenges(Clock clock, MfaPolicy policy, JdbcOperations jdbc) {
+    public SessionChallenges(Clock clock, MfaPolicy policy, DSLContext db) {
         this.clock = clock;
         this.policy = policy;
-        this.jdbc = jdbc;
+        this.db = db;
     }
 
     private void save(HttpServletRequest request, String purpose, Serializable options) {
@@ -53,15 +53,20 @@ public final class SessionChallenges {
         if (options == null) return;
         var owner = policy.current().getName();
         var session = request.getSession();
-        var now = clock.instant();
+        var now = clock.instant().atOffset(ZoneOffset.UTC);
         // Expired ceremonies of anyone, and this session's previous one for the same purpose.
-        jdbc.update("DELETE FROM webauthn_challenge WHERE expires_at <= ?", Timestamp.from(now));
+        db.deleteFrom(WEBAUTHN_CHALLENGE).where(WEBAUTHN_CHALLENGE.EXPIRES_AT.le(now)).execute();
         if (session.getAttribute(purpose) instanceof String previous) {
-            jdbc.update("DELETE FROM webauthn_challenge WHERE id = ?", UUID.fromString(previous));
+            db.deleteFrom(WEBAUTHN_CHALLENGE).where(WEBAUTHN_CHALLENGE.ID.eq(UUID.fromString(previous))).execute();
         }
         var id = UUID.randomUUID();
-        jdbc.update("INSERT INTO webauthn_challenge (id, purpose, owner, options, expires_at) VALUES (?, ?, ?, ?, ?)",
-            id, purpose, owner, serialize(options), Timestamp.from(now.plus(LIFETIME)));
+        db.insertInto(WEBAUTHN_CHALLENGE)
+            .set(WEBAUTHN_CHALLENGE.ID, id)
+            .set(WEBAUTHN_CHALLENGE.PURPOSE, purpose)
+            .set(WEBAUTHN_CHALLENGE.OWNER, owner)
+            .set(WEBAUTHN_CHALLENGE.OPTIONS, serialize(options))
+            .set(WEBAUTHN_CHALLENGE.EXPIRES_AT, now.plus(LIFETIME))
+            .execute();
         session.setAttribute(purpose, id.toString());
     }
 
@@ -69,17 +74,18 @@ public final class SessionChallenges {
         var session = request.getSession(false);
         if (session == null || !(session.getAttribute(purpose) instanceof String id)) return null;
         session.removeAttribute(purpose);
-        var rows = jdbc.query("DELETE FROM webauthn_challenge WHERE id = ? AND purpose = ? RETURNING owner, options, expires_at",
-            (row, n) -> new Stored(row.getString(1), row.getBytes(2), row.getTimestamp(3).toInstant()),
-            UUID.fromString(id), purpose);
-        if (rows.isEmpty()) return null;
-        var stored = rows.getFirst();
+        // Deleting and reading in one statement: concurrent requests of one session consume a challenge once.
+        var stored = db.deleteFrom(WEBAUTHN_CHALLENGE)
+            .where(WEBAUTHN_CHALLENGE.ID.eq(UUID.fromString(id)), WEBAUTHN_CHALLENGE.PURPOSE.eq(purpose))
+            .returning(WEBAUTHN_CHALLENGE.OWNER, WEBAUTHN_CHALLENGE.OPTIONS, WEBAUTHN_CHALLENGE.EXPIRES_AT)
+            .fetchOne();
+        if (stored == null) return null;
         var authentication = SecurityContextHolder.getContext().getAuthentication();
-        if (!clock.instant().isBefore(stored.expiresAt())
-                || authentication == null || !stored.owner().equals(authentication.getName())) return null;
+        if (!clock.instant().isBefore(stored.getExpiresAt().toInstant())
+                || authentication == null || !stored.getOwner().equals(authentication.getName())) return null;
         var result = policy.password.authorize(() -> authentication, null);
         if (result == null || !result.isGranted()) return null;
-        return deserialize(stored.options());
+        return deserialize(stored.getOptions());
     }
 
     private static byte[] serialize(Serializable options) {

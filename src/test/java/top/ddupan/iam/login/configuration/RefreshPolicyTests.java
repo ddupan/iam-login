@@ -18,7 +18,7 @@ import org.springframework.security.oauth2.server.authorization.authentication.O
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClient;
 import top.ddupan.iam.login.authentication.domain.User;
 import top.ddupan.iam.login.authentication.infrastructure.security.DirectoryPrincipal;
-import top.ddupan.iam.login.authorization.infrastructure.persistence.JdbcSubjects;
+import top.ddupan.iam.login.authorization.infrastructure.persistence.Subjects;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
@@ -37,7 +37,7 @@ class RefreshPolicyTests {
                 .build());
         var request = new OAuth2RefreshTokenAuthenticationToken("refresh",
             new OAuth2ClientAuthenticationToken(client, ClientAuthenticationMethod.CLIENT_SECRET_BASIC, null), Set.of(), Map.of());
-        var subjects = mock(JdbcSubjects.class);
+        var subjects = mock(Subjects.class);
         when(subjects.find(user.id())).thenReturn(Optional.of("subject"));
         assertThat(gate(authorizations, subjects).authenticate(request)).as("allowed: defer to the framework").isNull();
         when(subjects.find(user.id())).thenReturn(Optional.empty());
@@ -46,7 +46,7 @@ class RefreshPolicyTests {
     }
 
     private static AuthorizationServerConfiguration.RefreshPolicy gate(OAuth2AuthorizationService authorizations,
-            JdbcSubjects subjects) {
+            Subjects subjects) {
         return new AuthorizationServerConfiguration.RefreshPolicy(authorizations, subjects);
     }
 }

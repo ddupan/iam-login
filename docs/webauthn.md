@@ -82,6 +82,6 @@ PostgreSQL 是应用运行依赖，通过 `spring.datasource.*` 配置，连接�
 WebAuthn 配置仅装配官方凭据仓储及认证策略；不在应用配置中排除 DataSource 自动配置。
 仅不涉及持久化的独立测试显式排除它。
 
-首次注册的数据库锁由 `authentication/infrastructure/persistence/JdbcCredentialRegistration`
+首次注册的数据库锁由 `authentication/infrastructure/persistence/CredentialRegistration`
 封装；获得用户行锁后，在同一事务中重新检查注册策略并调用官方凭据保存逻辑。
 WebAuthn 策略集成不直接引用 SQL 或表结构。失败回滚与跨连接串行化由 PostgreSQL 集成测试覆盖。

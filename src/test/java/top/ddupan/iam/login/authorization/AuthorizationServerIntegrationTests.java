@@ -20,6 +20,7 @@ import java.util.Map;
 import java.util.UUID;
 import org.assertj.core.api.InstanceOfAssertFactories;
 import org.hamcrest.Matchers;
+import org.jooq.DSLContext;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -29,7 +30,6 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.core.convert.ConversionService;
 import org.springframework.http.MediaType;
-import org.springframework.jdbc.core.JdbcOperations;
 import org.springframework.mock.web.MockHttpSession;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.GrantedAuthority;
@@ -53,7 +53,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
 import tools.jackson.databind.json.JsonMapper;
 import top.ddupan.iam.login.authentication.domain.User;
-import top.ddupan.iam.login.authorization.infrastructure.persistence.JdbcSubjects;
+import top.ddupan.iam.login.authorization.infrastructure.persistence.Subjects;
 import top.ddupan.iam.login.configuration.ExpiredAuthorizations;
 import top.ddupan.iam.login.support.AdDirectoryFixture;
 import top.ddupan.iam.login.support.SessionRoundTrip;
@@ -65,6 +65,7 @@ import static org.springframework.security.test.web.servlet.request.SecurityMock
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+import static top.ddupan.iam.login.persistence.schema.Tables.SUBJECTS;
 
 /** Spike: the in-process authorization server against simulated AD and a disposable database. */
 // Container sessions: MockMvc hands sessions over as MockHttpSession, which Spring Session's cookie-based
@@ -103,13 +104,13 @@ class AuthorizationServerIntegrationTests {
     private static final String CALLBACK = "https://rp.example/cb";
     @Autowired MockMvc mvc;
     @Autowired RegisteredClientRepository clients;
-    @Autowired JdbcOperations jdbc;
-    @Autowired JdbcSubjects subjects;
+    @Autowired DSLContext db;
+    @Autowired Subjects subjects;
 
     @BeforeEach void client() {
         // alice's subject was carried over from the previous issuer, as the migration inserts it.
-        jdbc.update("insert into subjects (subject, authority, directory_id) "
-            + "values ('human:existing-subject', 'example.test', '00112233-4455-6677-8899-aabbccddeeff') on conflict do nothing");
+        db.insertInto(SUBJECTS).set(SUBJECTS.SUBJECT, "human:existing-subject").set(SUBJECTS.AUTHORITY, "example.test")
+            .set(SUBJECTS.DIRECTORY_ID, "00112233-4455-6677-8899-aabbccddeeff").onConflictDoNothing().execute();
         if (clients.findByClientId("spike-rp") != null) return;
         clients.save(RegisteredClient.withId(UUID.randomUUID().toString()).clientId("spike-rp")
             .clientSecret("{noop}spike-secret").clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_BASIC)
