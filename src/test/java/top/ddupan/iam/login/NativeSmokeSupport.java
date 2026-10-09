@@ -27,9 +27,13 @@ public final class NativeSmokeSupport {
         System.out.flush();
         var jdbc = new JdbcTemplate(new DriverManagerDataSource(args[0], args[1], args[2]));
         for (int attempt = 0; ; attempt++) {
-            try { jdbc.queryForObject("select count(*) from oauth2_registered_client", Integer.class); break; }
+            // subjects comes from the last migration, so every table exists once it does.
+            try { jdbc.queryForObject("select count(*) from subjects", Integer.class); break; }
             catch (RuntimeException notYet) { if (attempt > 300) throw notYet; Thread.sleep(1000); }
         }
+        // A subject carried over from an earlier issuer, as a migration inserts it.
+        jdbc.update("insert into subjects (subject, authority, directory_id) values "
+            + "('human:fixture-existing-oidc-subject', 'example.test', '00112233-4455-6677-8899-aabbccddeeff')");
         new JdbcRegisteredClientRepository(jdbc).save(RegisteredClient.withId("fixture-rp").clientId("fixture-rp")
             .clientSecret("{noop}fixture-client-secret").clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_BASIC)
             .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE).authorizationGrantType(AuthorizationGrantType.REFRESH_TOKEN)

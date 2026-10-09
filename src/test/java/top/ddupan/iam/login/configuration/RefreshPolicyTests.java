@@ -3,6 +3,7 @@ package top.ddupan.iam.login.configuration;
 import java.security.Principal;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -17,7 +18,7 @@ import org.springframework.security.oauth2.server.authorization.authentication.O
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClient;
 import top.ddupan.iam.login.authentication.domain.User;
 import top.ddupan.iam.login.authentication.infrastructure.security.DirectoryPrincipal;
-import top.ddupan.iam.login.authorization.application.SubjectBindings;
+import top.ddupan.iam.login.authorization.infrastructure.persistence.JdbcSubjects;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
@@ -27,7 +28,7 @@ class RefreshPolicyTests {
         .clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_BASIC)
         .authorizationGrantType(AuthorizationGrantType.REFRESH_TOKEN).redirectUri("https://rp.example/cb").build();
 
-    @Test void refreshStopsOnceTheSubjectBindingIsWithdrawn() {
+    @Test void refreshStopsOnceTheAccountLosesItsSubject() {
         var authorizations = mock(OAuth2AuthorizationService.class);
         when(authorizations.findByToken("refresh", OAuth2TokenType.REFRESH_TOKEN)).thenReturn(
             OAuth2Authorization.withRegisteredClient(client).principalName(user.username())
@@ -36,16 +37,16 @@ class RefreshPolicyTests {
                 .build());
         var request = new OAuth2RefreshTokenAuthenticationToken("refresh",
             new OAuth2ClientAuthenticationToken(client, ClientAuthenticationMethod.CLIENT_SECRET_BASIC, null), Set.of(), Map.of());
-        var bound = new AuthorizationConfigurationAccess(new SubjectBindings(Map.of(user.id(), "human:sub")));
-        assertThat(bound.gate(authorizations).authenticate(request)).as("allowed: defer to the framework").isNull();
-        var withdrawn = new AuthorizationConfigurationAccess(new SubjectBindings(Map.of(new User.UserId("example.test", "other"), "human:other")));
-        assertThatThrownBy(() -> withdrawn.gate(authorizations).authenticate(request))
+        var subjects = mock(JdbcSubjects.class);
+        when(subjects.find(user.id())).thenReturn(Optional.of("subject"));
+        assertThat(gate(authorizations, subjects).authenticate(request)).as("allowed: defer to the framework").isNull();
+        when(subjects.find(user.id())).thenReturn(Optional.empty());
+        assertThatThrownBy(() -> gate(authorizations, subjects).authenticate(request))
             .isInstanceOfSatisfying(OAuth2AuthenticationException.class, ex -> assertThat(ex.getError().getErrorCode()).isEqualTo("invalid_grant"));
     }
 
-    private record AuthorizationConfigurationAccess(SubjectBindings policy) {
-        AuthorizationServerConfiguration.RefreshPolicy gate(OAuth2AuthorizationService authorizations) {
-            return new AuthorizationServerConfiguration.RefreshPolicy(authorizations, policy);
-        }
+    private static AuthorizationServerConfiguration.RefreshPolicy gate(OAuth2AuthorizationService authorizations,
+            JdbcSubjects subjects) {
+        return new AuthorizationServerConfiguration.RefreshPolicy(authorizations, subjects);
     }
 }

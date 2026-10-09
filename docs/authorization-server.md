@@ -12,10 +12,6 @@ iam:
   authorization-server:
     enabled: true
     issuer: https://auth.example.test
-    subjects:                      # 显式 subject 绑定，沿用现役 sub，保持下游账号关联
-      - authority: example.test
-        directory-id: 00112233-4455-6677-8899-aabbccddeeff
-        subject: human:existing-subject
     signing-keys:                  # 由基础设施提供；首个签名，其余仅发布公钥
       - file:/run/secrets/iam/signing-key-2026-10.pem
       - file:/run/secrets/iam/signing-key-2026-07.pem
@@ -53,11 +49,13 @@ provider 再抛错。
 
 ## Token 与策略
 
-- `sub` 按显式绑定沿用现役值；`profile`、`email`、`groups` 按授予的 scope 释放；`groups` 同时进入
-  access token。
+- `sub` 由本服务签发：账号首次登录时生成随机 UUID，存在 `subjects` 表，之后不变、不复用。账号
+  （目录 authority + 目录内不可变 ID，如 AD objectGUID）只是关联到它，所以改名不变；不在 AD 的账号、
+  以及将来离开 AD，都沿用同一个 subject。从旧 issuer 迁移来的 subject 在迁移时作为普通行插入一次。
+- `profile`、`email`、`groups` 按授予的 scope 释放（ID token 与 UserInfo）；`groups` 同时进入 access token。
 - `offline_access`：客户端须登记 `refresh_token` 授权类型。框架默认**复用** refresh token，客户端须设置
   `reuseRefreshTokens(false)` 以轮换。
-- refresh 前重新检查 subject 绑定，绑定撤销后拒绝续期。
+- refresh 前重新检查账号仍有 subject；删除该行即撤销身份，拒绝续期。
 - 框架默认对所有客户端强制 PKCE；不发送 PKCE 的旧 RP 由客户端管理 API 的 `pkceRequired: false` 关闭（见[客户端管理](client-management.md)）。
 - `request` 参数返回 `request_not_supported`；`request_uri` 按 PAR 处理，未知引用 400 且不跳转。
   discovery 声明支持的 scope、claims，并明确不支持 request、request_uri、claims 参数。

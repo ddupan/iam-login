@@ -29,6 +29,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.core.convert.ConversionService;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcOperations;
 import org.springframework.mock.web.MockHttpSession;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.GrantedAuthority;
@@ -51,6 +52,8 @@ import org.springframework.web.util.UriComponentsBuilder;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
 import tools.jackson.databind.json.JsonMapper;
+import top.ddupan.iam.login.authentication.domain.User;
+import top.ddupan.iam.login.authorization.infrastructure.persistence.JdbcSubjects;
 import top.ddupan.iam.login.configuration.ExpiredAuthorizations;
 import top.ddupan.iam.login.support.AdDirectoryFixture;
 import top.ddupan.iam.login.support.SessionRoundTrip;
@@ -70,9 +73,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
     "spring.datasource.hikari.maximum-pool-size=3",
     "iam.webauthn.enabled=true", "iam.webauthn.rp-id=localhost", "iam.webauthn.origin=https://localhost",
     "iam.authorization-server.enabled=true", "iam.authorization-server.issuer=https://localhost",
-    "iam.authorization-server.subjects[0].authority=example.test",
-    "iam.authorization-server.subjects[0].directory-id=00112233-4455-6677-8899-aabbccddeeff",
-    "iam.authorization-server.subjects[0].subject=human:existing-subject",
     "management.otlp.metrics.export.enabled=false", "spring.security.user.password=fixture-monitor-password",
     "iam.clients.admin-groups[0]=gitea-admins",
     "iam.clients.spiffe.issuer=" + SpiffeFixture.ISSUER, "iam.clients.spiffe.admin-ids[0]=spiffe://example.test/ci/terraform"})
@@ -103,8 +103,13 @@ class AuthorizationServerIntegrationTests {
     private static final String CALLBACK = "https://rp.example/cb";
     @Autowired MockMvc mvc;
     @Autowired RegisteredClientRepository clients;
+    @Autowired JdbcOperations jdbc;
+    @Autowired JdbcSubjects subjects;
 
     @BeforeEach void client() {
+        // alice's subject was carried over from the previous issuer, as the migration inserts it.
+        jdbc.update("insert into subjects (subject, authority, directory_id) "
+            + "values ('human:existing-subject', 'example.test', '00112233-4455-6677-8899-aabbccddeeff') on conflict do nothing");
         if (clients.findByClientId("spike-rp") != null) return;
         clients.save(RegisteredClient.withId(UUID.randomUUID().toString()).clientId("spike-rp")
             .clientSecret("{noop}spike-secret").clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_BASIC)
@@ -219,6 +224,17 @@ class AuthorizationServerIntegrationTests {
         mvc.perform(post("/oauth2/token").with(https()).with(httpBasic("spike-rp", "spike-secret"))
                 .param("grant_type", "refresh_token").param("refresh_token", (String) tokens.get("refresh_token")))
             .andExpect(status().isBadRequest());
+    }
+
+    @Test void accountsWithoutASubjectAreIssuedOneThatNeverChanges() {
+        var account = new User.UserId("local", UUID.randomUUID().toString());
+        assertThat(subjects.find(account)).isEmpty();
+        var issued = subjects.issue(account);
+        assertThat(UUID.fromString(issued)).hasToString(issued);
+        assertThat(subjects.issue(account)).isEqualTo(issued);
+        assertThat(subjects.issue(new User.UserId("local", UUID.randomUUID().toString()))).isNotEqualTo(issued);
+        assertThat(subjects.issue(new User.UserId("example.test", "00112233-4455-6677-8899-aabbccddeeff")))
+            .as("carried over").isEqualTo("human:existing-subject");
     }
 
     @Test void promptNoneAnswersTheClientInsteadOfShowingLogin() throws Exception {

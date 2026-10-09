@@ -74,9 +74,6 @@ keystore=$repo_root/src/test/resources/ldap/fixture.p12
   --iam.clients.spiffe.issuer=https://spire-oidc.example.test --iam.clients.spiffe.jwk-set-uri="$jwks" \
   --iam.clients.spiffe.admin-ids[0]=spiffe://example.test/ci/terraform \
   --iam.authorization-server.signing-keys[0]="file:$work/signing-key.pem" \
-  --iam.authorization-server.subjects[0].authority=example.test \
-  --iam.authorization-server.subjects[0].directory-id=00112233-4455-6677-8899-aabbccddeeff \
-  --iam.authorization-server.subjects[0].subject=human:fixture-existing-oidc-subject \
   --iam.clients.admin-groups[0]=gitea-admins \
   --spring.datasource.url=jdbc:postgresql://127.0.0.1:25432/iam --spring.datasource.username=iam \
   --spring.datasource.password=smoke-only --spring.security.user.password=smoke-monitor-password \
