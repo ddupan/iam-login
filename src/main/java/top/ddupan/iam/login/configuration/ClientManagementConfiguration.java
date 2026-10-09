@@ -5,6 +5,7 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.Set;
 import java.util.UUID;
+import org.jooq.DSLContext;
 import org.springframework.aot.hint.annotation.RegisterReflectionForBinding;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -13,7 +14,6 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.annotation.Order;
-import org.springframework.jdbc.core.JdbcOperations;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.ProviderManager;
 import org.springframework.security.authorization.AuthorizationDecision;
@@ -92,9 +92,9 @@ class ClientManagementConfiguration {
     // Client secrets are stored encoded ({bcrypt} for new ones); the framework matches with the same encoder.
     @Bean PasswordEncoder clientSecrets() { return PasswordEncoderFactories.createDelegatingPasswordEncoder(); }
 
-    @Bean ClientRepository clientRepository(RegisteredClientRepository clients, JdbcOperations jdbc,
+    @Bean ClientRepository clientRepository(RegisteredClientRepository clients, DSLContext db,
             PlatformTransactionManager transactions, PasswordEncoder clientSecrets) {
-        return new RegisteredClients(clients, jdbc, new TransactionTemplate(transactions), clientSecrets);
+        return new RegisteredClients(clients, db, new TransactionTemplate(transactions), clientSecrets);
     }
 
     // Bearer only, verified against this server's own signing keys; the console and any future caller go

@@ -7,7 +7,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
-import org.springframework.jdbc.core.JdbcOperations;
+import org.jooq.DSLContext;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.oauth2.core.AuthorizationGrantType;
 import org.springframework.security.oauth2.core.ClientAuthenticationMethod;
@@ -19,6 +19,9 @@ import org.springframework.transaction.support.TransactionOperations;
 import top.ddupan.iam.login.clients.domain.ClientRepository;
 import top.ddupan.iam.login.clients.domain.ClientRepositoryException;
 import top.ddupan.iam.login.clients.domain.OidcClient;
+import static top.ddupan.iam.login.persistence.schema.Tables.OAUTH2_AUTHORIZATION;
+import static top.ddupan.iam.login.persistence.schema.Tables.OAUTH2_AUTHORIZATION_CONSENT;
+import static top.ddupan.iam.login.persistence.schema.Tables.OAUTH2_REGISTERED_CLIENT;
 
 /**
  * Clients of the in-process authorization server. Only confidential authorization-code clients are
@@ -33,13 +36,13 @@ public final class RegisteredClients implements ClientRepository {
 
     private static final SecureRandom RANDOM = new SecureRandom();
     private final RegisteredClientRepository clients;
-    private final JdbcOperations jdbc;
+    private final DSLContext db;
     private final TransactionOperations transactions;
     private final PasswordEncoder passwords;
 
-    public RegisteredClients(RegisteredClientRepository clients, JdbcOperations jdbc, TransactionOperations transactions,
+    public RegisteredClients(RegisteredClientRepository clients, DSLContext db, TransactionOperations transactions,
             PasswordEncoder passwords) {
-        this.clients = clients; this.jdbc = jdbc; this.transactions = transactions; this.passwords = passwords;
+        this.clients = clients; this.db = db; this.transactions = transactions; this.passwords = passwords;
     }
 
     public static boolean loginEnabled(RegisteredClient client) {
@@ -49,8 +52,9 @@ public final class RegisteredClients implements ClientRepository {
     @Override public List<OidcClient> list(int page, int size) {
         if (page < 0 || size < 1 || size > 100) throw new IllegalArgumentException("Invalid pagination");
         // ponytail: pages over all registrations, then drops unmanaged ones; a page can come back short.
-        return jdbc.queryForList("SELECT client_id FROM oauth2_registered_client ORDER BY client_id LIMIT ? OFFSET ?",
-                String.class, size, (long) page * size).stream()
+        return db.select(OAUTH2_REGISTERED_CLIENT.CLIENT_ID).from(OAUTH2_REGISTERED_CLIENT)
+                .orderBy(OAUTH2_REGISTERED_CLIENT.CLIENT_ID).limit(size).offset((long) page * size)
+                .fetch(OAUTH2_REGISTERED_CLIENT.CLIENT_ID).stream()
             .map(clients::findByClientId).filter(Objects::nonNull).filter(RegisteredClients::managed)
             .map(RegisteredClients::view).toList();
     }
@@ -81,9 +85,10 @@ public final class RegisteredClients implements ClientRepository {
         var existing = managedClient(id);
         // The framework cannot load an authorization whose client is gone, so they go together.
         transactions.executeWithoutResult(status -> {
-            jdbc.update("DELETE FROM oauth2_authorization WHERE registered_client_id = ?", existing.getId());
-            jdbc.update("DELETE FROM oauth2_authorization_consent WHERE registered_client_id = ?", existing.getId());
-            jdbc.update("DELETE FROM oauth2_registered_client WHERE id = ?", existing.getId());
+            db.deleteFrom(OAUTH2_AUTHORIZATION).where(OAUTH2_AUTHORIZATION.REGISTERED_CLIENT_ID.eq(existing.getId())).execute();
+            db.deleteFrom(OAUTH2_AUTHORIZATION_CONSENT)
+                .where(OAUTH2_AUTHORIZATION_CONSENT.REGISTERED_CLIENT_ID.eq(existing.getId())).execute();
+            db.deleteFrom(OAUTH2_REGISTERED_CLIENT).where(OAUTH2_REGISTERED_CLIENT.ID.eq(existing.getId())).execute();
         });
     }
 

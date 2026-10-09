@@ -1,5 +1,6 @@
 package top.ddupan.iam.login.authentication.infrastructure.webauthn;
 
+import com.zaxxer.hikari.HikariDataSource;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.ObjectInputStream;
@@ -16,8 +17,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.regex.Pattern;
 import javax.sql.DataSource;
-import com.zaxxer.hikari.HikariDataSource;
 import org.hamcrest.Matchers;
+import org.jooq.DSLContext;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentMatchers;
@@ -30,7 +31,6 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.core.convert.ConversionService;
-import org.springframework.jdbc.core.JdbcOperations;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpSession;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -56,13 +56,16 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
-import static org.assertj.core.api.Assertions.*;
-import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
-import top.ddupan.iam.login.authentication.infrastructure.persistence.JdbcCredentialRegistration;
+import top.ddupan.iam.login.authentication.infrastructure.persistence.CredentialRegistration;
 import top.ddupan.iam.login.support.AdDirectoryFixture;
 import top.ddupan.iam.login.support.SessionRoundTrip;
+import static org.assertj.core.api.Assertions.*;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+import static top.ddupan.iam.login.persistence.schema.Tables.USER_CREDENTIALS;
+import static top.ddupan.iam.login.persistence.schema.Tables.USER_ENTITIES;
+import static top.ddupan.iam.login.persistence.schema.Tables.WEBAUTHN_CHALLENGE;
 
 // Container sessions, see AuthorizationServerIntegrationTests.
 @SpringBootTest(properties = {"spring.autoconfigure.exclude=org.springframework.boot.session.jdbc.autoconfigure.JdbcSessionAutoConfiguration", "iam.ad.enabled=true", "iam.ad.domain=example.test", "spring.ldap.base=dc=example,dc=test",
@@ -86,7 +89,7 @@ class WebAuthnIntegrationTests {
     }
     @AfterAll static void close() { Fixtures.DIRECTORY.close(); Fixtures.DATABASE.stop(); }
     @Autowired MockMvc mvc;
-    @Autowired JdbcOperations jdbc;
+    @Autowired DSLContext db;
 
 
 
@@ -113,7 +116,7 @@ class WebAuthnIntegrationTests {
         mvc.perform(post("/webauthn/authenticate/options").session(session).with(https()).with(csrf())).andExpect(status().isOk());
 
         var classes = new TreeSet<String>();
-        for (var bytes : jdbc.queryForList("SELECT options FROM webauthn_challenge", byte[].class)) {
+        for (var bytes : db.select(WEBAUTHN_CHALLENGE.OPTIONS).from(WEBAUTHN_CHALLENGE).fetch(WEBAUTHN_CHALLENGE.OPTIONS)) {
             try (var in = new ObjectInputStream(new ByteArrayInputStream(bytes)) {
                 @Override protected Class<?> resolveClass(ObjectStreamClass type) throws IOException, ClassNotFoundException {
                     classes.add(type.getName());
@@ -136,16 +139,15 @@ class WebAuthnIntegrationTests {
 
     @Test void registrationLockSerializesAndRollsBackOnFailure() throws Exception {
         assertThat(((HikariDataSource)dataSource).getMaximumPoolSize()).isEqualTo(3);
-        var registrations = new JdbcCredentialRegistration(
-            jdbc, new TransactionTemplate(transactionManager));
+        var registrations = new CredentialRegistration(db, new TransactionTemplate(transactionManager));
         String id = UUID.randomUUID().toString();
-        jdbc.update("insert into user_entities(id,name,display_name) values (?,?,?)", id,id,"before");
+        db.insertInto(USER_ENTITIES).set(USER_ENTITIES.ID, id).set(USER_ENTITIES.NAME, id).set(USER_ENTITIES.DISPLAY_NAME, "before").execute();
         var locked = new CountDownLatch(1);
         var release = new CountDownLatch(1);
         var started = new CountDownLatch(1);
         try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
             var first = executor.submit(() -> registrations.register(id, () -> {
-                jdbc.update("update user_entities set display_name='committed' where id=?",id);
+                displayName(id, "committed");
                 locked.countDown();
                 try {
                     if (!release.await(5,TimeUnit.SECONDS)) throw new IllegalStateException("Test timed out");
@@ -156,8 +158,7 @@ class WebAuthnIntegrationTests {
                 assertThat(locked.await(5,TimeUnit.SECONDS)).isTrue();
                 var second = executor.submit(() -> {
                     started.countDown();
-                    return registrations.register(id, () -> jdbc.queryForObject(
-                        "select display_name from user_entities where id=?",String.class,id));
+                    return registrations.register(id, () -> displayName(id));
                 });
                 assertThat(started.await(5,TimeUnit.SECONDS)).isTrue();
                 assertThatThrownBy(() -> second.get(200,TimeUnit.MILLISECONDS))
@@ -168,12 +169,19 @@ class WebAuthnIntegrationTests {
             } finally { release.countDown(); }
         }
         assertThatThrownBy(() -> registrations.register(id, () -> {
-            jdbc.update("update user_entities set display_name='rolled back' where id=?",id);
+            displayName(id, "rolled back");
             throw new IllegalStateException("Registration rejected");
         })).isInstanceOf(IllegalStateException.class);
-        assertThat(jdbc.queryForObject("select display_name from user_entities where id=?",String.class,id))
-            .isEqualTo("committed");
-        jdbc.update("delete from user_entities where id=?",id);
+        assertThat(displayName(id)).isEqualTo("committed");
+        db.deleteFrom(USER_ENTITIES).where(USER_ENTITIES.ID.eq(id)).execute();
+    }
+
+    private String displayName(String id) {
+        return db.select(USER_ENTITIES.DISPLAY_NAME).from(USER_ENTITIES).where(USER_ENTITIES.ID.eq(id)).fetchSingle(USER_ENTITIES.DISPLAY_NAME);
+    }
+
+    private void displayName(String id, String value) {
+        db.update(USER_ENTITIES).set(USER_ENTITIES.DISPLAY_NAME, value).where(USER_ENTITIES.ID.eq(id)).execute();
     }
 
     @Test
@@ -185,8 +193,8 @@ class WebAuthnIntegrationTests {
         mvc.perform(post("/webauthn/register/options").session(session).with(https()).with(csrf()))
             .andExpect(status().isOk()).andExpect(jsonPath("rp.id").value("localhost"))
             .andExpect(jsonPath("authenticatorSelection.userVerification").value("required"));
-        assertThat(jdbc.queryForObject("select count(*) from user_entities", Integer.class)).isEqualTo(1);
-        assertThat(jdbc.queryForObject("select count(*) from user_credentials", Integer.class)).isZero();
+        assertThat(db.fetchCount(USER_ENTITIES)).isEqualTo(1);
+        assertThat(db.fetchCount(USER_CREDENTIALS)).isZero();
         mvc.perform(get("/signin/complete").session(session).with(https()))
             .andExpect(redirectedUrlPattern("/signin/mfa?*"));
         mvc.perform(delete("/webauthn/register/unused").session(session).with(https()).with(csrf()))

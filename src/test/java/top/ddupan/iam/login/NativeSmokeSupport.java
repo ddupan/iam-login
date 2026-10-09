@@ -1,5 +1,7 @@
 package top.ddupan.iam.login;
 
+import org.jooq.SQLDialect;
+import org.jooq.impl.DSL;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.security.oauth2.core.AuthorizationGrantType;
@@ -10,6 +12,7 @@ import org.springframework.security.oauth2.server.authorization.settings.ClientS
 import org.springframework.security.oauth2.server.authorization.settings.TokenSettings;
 import top.ddupan.iam.login.support.AdDirectoryFixture;
 import top.ddupan.iam.login.support.SpiffeFixture;
+import static top.ddupan.iam.login.persistence.schema.Tables.SUBJECTS;
 
 /**
  * Test-only companion for running the browser test against a native binary: simulated AD for the binary
@@ -25,16 +28,17 @@ public final class NativeSmokeSupport {
         System.out.println("SPIFFE_JWKS=" + spire.jwkSetUri());
         System.out.println("SPIFFE_SVID=" + spire.svid("spiffe://example.test/ci/terraform"));
         System.out.flush();
-        var jdbc = new JdbcTemplate(new DriverManagerDataSource(args[0], args[1], args[2]));
+        var source = new DriverManagerDataSource(args[0], args[1], args[2]);
+        var db = DSL.using(source, SQLDialect.POSTGRES);
         for (int attempt = 0; ; attempt++) {
             // subjects comes from the last migration, so every table exists once it does.
-            try { jdbc.queryForObject("select count(*) from subjects", Integer.class); break; }
+            try { db.fetchCount(SUBJECTS); break; }
             catch (RuntimeException notYet) { if (attempt > 300) throw notYet; Thread.sleep(1000); }
         }
         // A subject carried over from an earlier issuer, as a migration inserts it.
-        jdbc.update("insert into subjects (subject, authority, directory_id) values "
-            + "('human:fixture-existing-oidc-subject', 'example.test', '00112233-4455-6677-8899-aabbccddeeff')");
-        new JdbcRegisteredClientRepository(jdbc).save(RegisteredClient.withId("fixture-rp").clientId("fixture-rp")
+        db.insertInto(SUBJECTS).set(SUBJECTS.SUBJECT, "human:fixture-existing-oidc-subject")
+            .set(SUBJECTS.AUTHORITY, "example.test").set(SUBJECTS.DIRECTORY_ID, "00112233-4455-6677-8899-aabbccddeeff").execute();
+        new JdbcRegisteredClientRepository(new JdbcTemplate(source)).save(RegisteredClient.withId("fixture-rp").clientId("fixture-rp")
             .clientSecret("{noop}fixture-client-secret").clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_BASIC)
             .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE).authorizationGrantType(AuthorizationGrantType.REFRESH_TOKEN)
             .redirectUri("http://localhost:14446/callback").postLogoutRedirectUri("http://localhost:14446/logged-out")

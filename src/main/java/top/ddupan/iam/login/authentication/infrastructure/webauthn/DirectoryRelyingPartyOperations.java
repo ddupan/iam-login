@@ -1,6 +1,6 @@
 package top.ddupan.iam.login.authentication.infrastructure.webauthn;
 
-import top.ddupan.iam.login.authentication.infrastructure.persistence.JdbcCredentialRegistration;
+import top.ddupan.iam.login.authentication.infrastructure.persistence.CredentialRegistration;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.webauthn.api.*;
@@ -13,11 +13,11 @@ public final class DirectoryRelyingPartyOperations implements WebAuthnRelyingPar
     private final MfaPolicy policy;
     private final PublicKeyCredentialUserEntityRepository users;
     private final UserCredentialRepository credentials;
-    private final JdbcCredentialRegistration registrations;
+    private final CredentialRegistration registrations;
 
     public DirectoryRelyingPartyOperations(WebAuthnRelyingPartyOperations delegate, MfaPolicy policy,
             PublicKeyCredentialUserEntityRepository users, UserCredentialRepository credentials,
-            JdbcCredentialRegistration registrations) {
+            CredentialRegistration registrations) {
         this.delegate = delegate;
         this.policy = policy;
         this.users = users;

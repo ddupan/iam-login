@@ -105,7 +105,8 @@ configuration → 装配上述实现
 - `authentication/infrastructure/webauthn`：凭据归属与注册策略、challenge 仓储扩展；密码学校验和 JDBC 存储交给 Spring Security。
 - `authentication/interfaces/web`：登录页面与上下文转换；不处理密码 POST、认证会话或退出。
 - `configuration`：Spring 组件装配、安全链、静态资源和 Native hints。
-- `authorization`：subject 签发（`JdbcSubjects`，`subjects` 表）；授权服务器的装配、MFA 关卡、重新认证、refresh 策略与签名密钥在 `configuration`。由 `iam.authorization-server.enabled` 开启，见[内置授权服务器](docs/authorization-server.md)。
+- 持久化：本服务自己写的 SQL 一律用 jOOQ，表与列的类型由构建时从 Flyway 迁移脚本生成（`top.ddupan.iam.login.persistence.schema`，见 `build.gradle` 的 `jooq`）；框架自带的仓储（授权服务器、WebAuthn、Spring Session）仍用它们自己的 JDBC 实现。
+- `authorization`：subject 签发（`Subjects`，`subjects` 表）；授权服务器的装配、MFA 关卡、重新认证、refresh 策略与签名密钥在 `configuration`。由 `iam.authorization-server.enabled` 开启，见[内置授权服务器](docs/authorization-server.md)。
 - `clients`：客户端管理。领域契约 `ClientRepository` 由 `RegisteredClients`（内置授权服务器的客户端仓储）实现；bearer API 要求 audience `iam-login` 且 token 的 `groups` 含管理组，`/console` 为调用该 API 的 public 客户端前端，见[客户端管理](docs/client-management.md)。
 - `frontend/src`：入口、页面、表单组件和页面数据契约分别维护，只包含真实登录流程。
 
