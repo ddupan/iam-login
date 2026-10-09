@@ -1,8 +1,10 @@
 package top.ddupan.iam.login.configuration;
 
+import java.time.Clock;
 import java.time.Duration;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.annotation.Order;
@@ -24,10 +26,13 @@ import org.springframework.security.web.servlet.util.matcher.PathPatternRequestM
 import org.springframework.security.web.util.matcher.AnyRequestMatcher;
 import top.ddupan.iam.login.authentication.application.VerifyPassword;
 import top.ddupan.iam.login.authentication.infrastructure.security.DirectoryAuthenticationProvider;
+import top.ddupan.iam.login.authentication.infrastructure.security.SignInThrottle;
+import top.ddupan.iam.login.authentication.infrastructure.security.SignInThrottledException;
 import top.ddupan.iam.login.authentication.interfaces.web.PageRenderer;
 
 @Configuration(proxyBeanMethods = false)
 @EnableMultiFactorAuthentication(authorities = {})
+@EnableConfigurationProperties(SignInThrottle.Properties.class)
 class SecurityConfiguration {
     // Operational Basic authentication is isolated from human first-factor authentication.
     @Bean
@@ -48,7 +53,7 @@ class SecurityConfiguration {
     @Bean
     @Order(3)
     @ConditionalOnProperty(prefix = "iam.ad", name = "enabled", havingValue = "true")
-    SecurityFilterChain browser(HttpSecurity http, VerifyPassword passwords,
+    SecurityFilterChain browser(HttpSecurity http, VerifyPassword passwords, SignInThrottle.Properties throttle,
             ObjectProvider<WebAuthnBrowserConfigurer> webAuthn) throws Exception {
         var passwordFactor = AuthorizationManagerFactories.<RequestAuthorizationContext>multiFactor()
             .requireFactor(factor -> factor.passwordAuthority().validDuration(Duration.ofMinutes(10)))
@@ -57,7 +62,8 @@ class SecurityConfiguration {
         // /oauth2/** belongs to the authorization server's own chain.
         http.securityMatcher("/signin", "/signin/**", "/assets/**", "/webauthn/**", "/login/webauthn")
             .redirectToHttps(Customizer.withDefaults())
-            .authenticationManager(new ProviderManager(new DirectoryAuthenticationProvider(passwords)))
+            .authenticationManager(new ProviderManager(
+                new DirectoryAuthenticationProvider(passwords, new SignInThrottle(throttle, Clock.systemUTC()))))
             .authorizeHttpRequests(auth -> {
                 if (mfa != null) {
                     auth.requestMatchers("/signin/complete").access(mfa.policy.complete);
@@ -75,8 +81,11 @@ class SecurityConfiguration {
                     // No exception in the session (attributes must be JSON, SessionConfiguration). Only a directory
                     // outage is told apart: wrong password, locked, disabled and expired stay one message, so the
                     // page does not reveal account state.
-                    response.sendRedirect(request.getContextPath() + (exception instanceof InternalAuthenticationServiceException
-                        ? "/signin?error=unavailable" : "/signin?error"))))
+                    response.sendRedirect(request.getContextPath() + switch (exception) {
+                        case InternalAuthenticationServiceException e -> "/signin?error=unavailable";
+                        case SignInThrottledException e -> "/signin?error=throttled";
+                        default -> "/signin?error";
+                    })))
             // Signing out of this service only; relying parties use RP-initiated logout (/connect/logout).
             .logout(logout -> logout.logoutRequestMatcher(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/signin/restart"))
                 .logoutSuccessHandler((request, response, authentication) -> {

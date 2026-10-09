@@ -38,7 +38,11 @@ public class SignInController {
     ResponseEntity<String> page(@RequestParam(required = false) String error, CsrfToken csrf,
             HttpServletRequest request, HttpServletResponse response) {
         return renderer.render(Map.of("step", "password", "name", "", "app", app(request, response),
-            "error", error == null ? "" : "unavailable".equals(error) ? "目录服务暂时不可用，请稍后重试。" : "无法验证账号，请检查用户名和密码。",
+            "error", error == null ? "" : switch (error) {
+                case "unavailable" -> "目录服务暂时不可用，请稍后重试。";
+                case "throttled" -> "尝试次数过多，请稍后再试。";
+                default -> "无法验证账号，请检查用户名和密码。";
+            },
             "action", "/signin/password", "csrf", csrf(csrf)));
     }
 

@@ -105,6 +105,22 @@ class SignInIntegrationTests {
         assertThat(session.isInvalid()).isTrue();
     }
     @Test
+    void repeatedFailuresAreRejectedWithoutAskingTheDirectory() throws Exception {
+        for (int i = 0; i < 5; i++) {
+            mvc.perform(post("/signin/password").with(https()).with(csrf())
+                .param("username", "guessed").param("password", "wrong-" + i))
+                .andExpect(redirectedUrl("/signin?error"));
+        }
+        int before = Directory.INSTANCE.binds.get();
+        mvc.perform(post("/signin/password").with(https()).with(csrf())
+            .param("username", "Guessed@example.test").param("password", "wrong"))
+            .andExpect(redirectedUrl("/signin?error=throttled"));
+        assertThat(Directory.INSTANCE.binds.get()).isEqualTo(before);
+        mvc.perform(get("/signin").with(https()).param("error", "throttled"))
+            .andExpect(content().string(Matchers.containsString("尝试次数过多")));
+    }
+
+    @Test
     void plaintextPasswordPostCannotReachDirectory() throws Exception {
         int before = Directory.INSTANCE.binds.get();
         mvc.perform(post("/signin/password").with(csrf()).param("username", "alice")
