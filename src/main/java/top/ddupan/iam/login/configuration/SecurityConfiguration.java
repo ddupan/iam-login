@@ -4,6 +4,7 @@ import java.time.Clock;
 import java.time.Duration;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.annotation.Order;
@@ -31,6 +32,7 @@ import top.ddupan.iam.login.authentication.interfaces.web.PageRenderer;
 
 @Configuration(proxyBeanMethods = false)
 @EnableMultiFactorAuthentication(authorities = {})
+@EnableConfigurationProperties(SignInThrottle.Properties.class)
 class SecurityConfiguration {
     // Operational Basic authentication is isolated from human first-factor authentication.
     @Bean
@@ -51,7 +53,7 @@ class SecurityConfiguration {
     @Bean
     @Order(3)
     @ConditionalOnProperty(prefix = "iam.ad", name = "enabled", havingValue = "true")
-    SecurityFilterChain browser(HttpSecurity http, VerifyPassword passwords,
+    SecurityFilterChain browser(HttpSecurity http, VerifyPassword passwords, SignInThrottle.Properties throttle,
             ObjectProvider<WebAuthnBrowserConfigurer> webAuthn) throws Exception {
         var passwordFactor = AuthorizationManagerFactories.<RequestAuthorizationContext>multiFactor()
             .requireFactor(factor -> factor.passwordAuthority().validDuration(Duration.ofMinutes(10)))
@@ -61,7 +63,7 @@ class SecurityConfiguration {
         http.securityMatcher("/signin", "/signin/**", "/assets/**", "/webauthn/**", "/login/webauthn")
             .redirectToHttps(Customizer.withDefaults())
             .authenticationManager(new ProviderManager(
-                new DirectoryAuthenticationProvider(passwords, new SignInThrottle(Clock.systemUTC()))))
+                new DirectoryAuthenticationProvider(passwords, new SignInThrottle(throttle, Clock.systemUTC()))))
             .authorizeHttpRequests(auth -> {
                 if (mfa != null) {
                     auth.requestMatchers("/signin/complete").access(mfa.policy.complete);
