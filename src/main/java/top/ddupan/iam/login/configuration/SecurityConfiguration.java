@@ -71,7 +71,8 @@ class SecurityConfiguration {
                     auth.requestMatchers(HttpMethod.POST, "/webauthn/register")
                         .access(mfa.policy.password);
                 }
-                auth.requestMatchers("/error", "/signin", "/signin/password", "/assets/**").permitAll()
+                // /signin/device decides itself: it saves the request before sending a visitor to sign in.
+                auth.requestMatchers("/error", "/signin", "/signin/password", "/signin/device", "/assets/**").permitAll()
                 .requestMatchers("/signin/mfa").access(passwordFactor.authenticated())
                 // Credential deletion and all unimplemented routes remain closed.
                 .anyRequest().denyAll();

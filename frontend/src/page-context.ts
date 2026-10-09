@@ -34,14 +34,25 @@ export type ConsentContext = PageBase & {
     username: string;
     email: string;
     groups: string[];
+    /** Present for the device grant: the decision goes to the device verification endpoint. */
+    userCode?: string;
+  };
+};
+
+export type DeviceContext = PageBase & {
+  step: "device";
+  device: {
+    username: string;
+    userCode: string;
+    result: "" | "done" | "invalid" | "denied";
   };
 };
 
 export type AdminContext = { step: "admin"; authority: string; clientId: string };
 
-export type PageContext = SignInContext | ConsentContext | AdminContext;
+export type PageContext = SignInContext | ConsentContext | DeviceContext | AdminContext;
 
-const STEPS = ["admin", "password", "mfa-pending", "mfa-complete", "consent"];
+const STEPS = ["admin", "password", "mfa-pending", "mfa-complete", "consent", "device"];
 
 export function readPageContext(): PageContext {
   const data = document.getElementById("login-context")?.textContent;

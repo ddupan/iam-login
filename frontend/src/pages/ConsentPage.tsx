@@ -56,11 +56,13 @@ export function ConsentPage({ context }: { context: ConsentContext }) {
             <form method="post" action={context.action}>
               <input type="hidden" name="client_id" value={consent.clientId} />
               <input type="hidden" name="state" value={consent.state} />
+              {consent.userCode && <input type="hidden" name="user_code" value={consent.userCode} />}
               <button className="secondary" type="submit">拒绝</button>
             </form>
             <form method="post" action={context.action}>
               <input type="hidden" name="client_id" value={consent.clientId} />
               <input type="hidden" name="state" value={consent.state} />
+              {consent.userCode && <input type="hidden" name="user_code" value={consent.userCode} />}
               {consent.scopes.map(scope => <input key={scope} type="hidden" name="scope" value={scope} />)}
               <button className="primary" type="submit">允许</button>
             </form>

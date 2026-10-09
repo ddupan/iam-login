@@ -509,6 +509,54 @@ class AuthorizationServerIntegrationTests {
             .andExpect(jsonPath("token_endpoint_auth_methods_supported").value(Matchers.hasItem("none")));
     }
 
+    // RFC 8628 with a public client (the Incus CLI): the user enters the code on our page after signing in,
+    // consents, and the device polls the token endpoint with client_id alone.
+    @Test void deviceGrantGoesThroughSignInAndConsent() throws Exception {
+        var admin = token(List.of("iam-login"), List.of("gitea-admins"));
+        mvc.perform(post("/api/iam/clients").with(https()).with(admin).contentType(MediaType.APPLICATION_JSON).content("""
+                {"id":"device-app","name":"Device","redirectUris":["http://127.0.0.1/cb"],"scopes":["openid","offline_access"],
+                 "postLogoutRedirectUris":[],"loginEnabled":true,"pkceRequired":true,"publicClient":true,"deviceAuthorization":true}
+                """)).andExpect(status().isCreated());
+        mvc.perform(get("/.well-known/openid-configuration").with(https()))
+            .andExpect(jsonPath("device_authorization_endpoint").value("https://localhost/oauth2/device_authorization"));
+        var device = json(mvc.perform(post("/oauth2/device_authorization").with(https())
+                .param("client_id", "device-app").param("scope", "openid offline_access"))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
+        var userCode = (String) device.get("user_code");
+        assertThat(device.get("verification_uri")).isEqualTo("https://localhost/signin/device");
+
+        // Not signed in: sent to sign in, and brought back (with the code) by /signin/complete afterwards.
+        var session = new MockHttpSession();
+        mvc.perform(get("/signin/device").param("user_code", userCode).with(https()).session(session))
+            .andExpect(status().isSeeOther()).andExpect(header().string("Location", "/signin"));
+        assertThat(session.getAttribute("SPRING_SECURITY_SAVED_REQUEST")).isNotNull();
+        password(session); secondFactor(session);
+        mvc.perform(get("/signin/device").param("user_code", userCode).with(https()).session(session))
+            .andExpect(status().isOk()).andExpect(content().string(Matchers.containsString("\"userCode\":\"" + userCode + "\"")));
+
+        // The endpoint reads a GET's user_code from the query string, as a browser's form submission sends it.
+        var consent = mvc.perform(get("/oauth2/device_verification?user_code=" + userCode).with(https()).session(session))
+            .andExpect(status().is3xxRedirection()).andReturn().getResponse().getRedirectedUrl();
+        assertThat(consent).contains("/signin/consent");
+        var parameters = query(consent);
+        mvc.perform(get(URI.create(consent)).with(https()).session(session)).andExpect(status().isOk())
+            .andExpect(content().string(Matchers.containsString("\"action\":\"/oauth2/device_verification\"")));
+        mvc.perform(post("/oauth2/device_verification").with(https()).session(session)
+                .param("client_id", "device-app").param("state", URLDecoder.decode(parameters.get("state"), StandardCharsets.UTF_8))
+                .param("user_code", userCode)
+                .param("scope", "openid").param("scope", "offline_access"))
+            .andExpect(redirectedUrl("/signin/device?result=done"));
+
+        var tokens = json(mvc.perform(post("/oauth2/token").with(https())
+                .param("grant_type", "urn:ietf:params:oauth:grant-type:device_code")
+                .param("device_code", (String) device.get("device_code")).param("client_id", "device-app"))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
+        assertThat(tokens).containsKeys("access_token", "refresh_token");
+
+        mvc.perform(get("/oauth2/device_verification?user_code=BCDF-GHJK").with(https()).session(session))
+            .andExpect(redirectedUrl("/signin/device?result=invalid"));
+    }
+
     private String tokenError(String client, String secret) throws Exception {
         return (String) json(mvc.perform(post("/oauth2/token").with(https()).with(httpBasic(client, secret))
                 .param("grant_type", "authorization_code").param("code", "invalid-code")

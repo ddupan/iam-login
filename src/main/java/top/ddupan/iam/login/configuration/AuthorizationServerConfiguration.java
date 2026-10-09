@@ -41,7 +41,9 @@ import org.springframework.security.oauth2.core.ClientAuthenticationMethod;
 import org.springframework.security.oauth2.core.OAuth2AuthenticationException;
 import org.springframework.security.oauth2.core.OAuth2Error;
 import org.springframework.security.oauth2.core.OAuth2ErrorCodes;
+import org.springframework.security.oauth2.core.endpoint.OAuth2ParameterNames;
 import org.springframework.security.oauth2.core.oidc.OidcIdToken;
+import org.springframework.security.oauth2.core.oidc.OidcScopes;
 import org.springframework.security.oauth2.core.oidc.OidcUserInfo;
 import org.springframework.security.oauth2.core.oidc.endpoint.OidcParameterNames;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
@@ -49,6 +51,7 @@ import org.springframework.security.oauth2.jwt.JwtEncoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
 import org.springframework.security.oauth2.server.authorization.JdbcOAuth2AuthorizationConsentService;
 import org.springframework.security.oauth2.server.authorization.JdbcOAuth2AuthorizationService;
+import org.springframework.security.oauth2.server.authorization.OAuth2Authorization;
 import org.springframework.security.oauth2.server.authorization.OAuth2AuthorizationConsentService;
 import org.springframework.security.oauth2.server.authorization.OAuth2AuthorizationService;
 import org.springframework.security.oauth2.server.authorization.OAuth2TokenType;
@@ -59,6 +62,10 @@ import org.springframework.security.oauth2.server.authorization.authentication.O
 import org.springframework.security.oauth2.server.authorization.authentication.OAuth2AuthorizationCodeRequestAuthenticationValidator;
 import org.springframework.security.oauth2.server.authorization.authentication.OAuth2AuthorizationConsentAuthenticationToken;
 import org.springframework.security.oauth2.server.authorization.authentication.OAuth2ClientAuthenticationToken;
+import org.springframework.security.oauth2.server.authorization.authentication.OAuth2DeviceAuthorizationConsentAuthenticationToken;
+import org.springframework.security.oauth2.server.authorization.authentication.OAuth2DeviceAuthorizationRequestAuthenticationProvider;
+import org.springframework.security.oauth2.server.authorization.authentication.OAuth2DeviceAuthorizationRequestAuthenticationToken;
+import org.springframework.security.oauth2.server.authorization.authentication.OAuth2DeviceVerificationAuthenticationToken;
 import org.springframework.security.oauth2.server.authorization.authentication.OAuth2RefreshTokenAuthenticationToken;
 import org.springframework.security.oauth2.server.authorization.client.JdbcRegisteredClientRepository;
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClientRepository;
@@ -147,6 +154,19 @@ class AuthorizationServerConfiguration {
                         providers.addFirst(new MfaGate(OAuth2AuthorizationConsentAuthenticationToken.class, requiredFactors));
                         providers.addFirst(new MfaGate(OAuth2AuthorizationCodeRequestAuthenticationToken.class, requiredFactors));
                     }))
+                // Device grant (RFC 8628). The user enters the code on our page; the outcome comes back to it.
+                // Custom providers run ahead of the framework's, in the order added.
+                .deviceAuthorizationEndpoint(endpoint -> endpoint.verificationUri("/signin/device")
+                    .authenticationProvider(new DeviceLoginEnabled())
+                    .authenticationProvider(new DeviceOpenIdScope(new OAuth2DeviceAuthorizationRequestAuthenticationProvider(authorizations), authorizations)))
+                .deviceVerificationEndpoint(endpoint -> endpoint.consentPage("/signin/consent")
+                    .deviceVerificationResponseHandler((request, response, authentication) ->
+                        response.sendRedirect(request.getContextPath() + "/signin/device?result=done"))
+                    .errorResponseHandler((request, response, exception) -> response.sendRedirect(request.getContextPath()
+                        + "/signin/device?result=" + (exception instanceof OAuth2AuthenticationException oauth
+                            && OAuth2ErrorCodes.ACCESS_DENIED.equals(oauth.getError().getErrorCode()) ? "denied" : "invalid")))
+                    .authenticationProvider(new DeviceMfaGate(OAuth2DeviceVerificationAuthenticationToken.class, requiredFactors))
+                    .authenticationProvider(new DeviceMfaGate(OAuth2DeviceAuthorizationConsentAuthenticationToken.class, requiredFactors)))
                 .tokenEndpoint(endpoint -> endpoint.authenticationProviders(providers ->
                     providers.addFirst(new RefreshPolicy(authorizations, subjects))));
         })
@@ -195,6 +215,65 @@ class AuthorizationServerConfiguration {
             return request;
         }
         @Override public boolean supports(Class<?> candidate) { return type.isAssignableFrom(candidate); }
+    }
+
+    /**
+     * MfaGate for the device grant. Unlike the authorization endpoint, the verification endpoint does not hand an
+     * unauthenticated result on to the login pages (it would report success), so missing factors are a denial.
+     * Users reach it from /signin/device, which has them sign in first; this only stops a direct request, or a
+     * consent submitted after the factors went stale.
+     */
+    record DeviceMfaGate(Class<? extends Authentication> type, AuthorizationManager<Object> requiredFactors) implements AuthenticationProvider {
+        @Override public Authentication authenticate(Authentication request) throws AuthenticationException {
+            var decision = requiredFactors.authorize(() -> (Authentication) request.getPrincipal(), null);
+            if (decision != null && decision.isGranted()) return null;
+            throw new OAuth2AuthenticationException(OAuth2ErrorCodes.ACCESS_DENIED);
+        }
+        @Override public boolean supports(Class<?> candidate) { return type.isAssignableFrom(candidate); }
+    }
+
+    /**
+     * The framework refuses openid in a device authorization request (the device grant issues no ID token), but OIDC
+     * clients ask for it there too: Incus requests its configured scopes, openid included. Neither OIDC nor RFC 8628
+     * forbids it. The request is validated and issued without openid, then openid is put back among the requested
+     * scopes, so consent shows it and the access token carries it (userinfo needs it). Still no ID token.
+     */
+    record DeviceOpenIdScope(AuthenticationProvider framework, OAuth2AuthorizationService authorizations) implements AuthenticationProvider {
+        private static final OAuth2TokenType DEVICE_CODE = new OAuth2TokenType(OAuth2ParameterNames.DEVICE_CODE);
+
+        @Override public Authentication authenticate(Authentication request) throws AuthenticationException {
+            var device = (OAuth2DeviceAuthorizationRequestAuthenticationToken) request;
+            if (!device.getScopes().contains(OidcScopes.OPENID)) return null;
+            if (!(device.getPrincipal() instanceof OAuth2ClientAuthenticationToken client) || client.getRegisteredClient() == null
+                    || !client.getRegisteredClient().getScopes().contains(OidcScopes.OPENID)) {
+                throw new OAuth2AuthenticationException(OAuth2ErrorCodes.INVALID_SCOPE);
+            }
+            var others = new HashSet<>(device.getScopes());
+            others.remove(OidcScopes.OPENID);
+            var result = (OAuth2DeviceAuthorizationRequestAuthenticationToken) framework.authenticate(
+                new OAuth2DeviceAuthorizationRequestAuthenticationToken(client, device.getAuthorizationUri(), others,
+                    device.getAdditionalParameters()));
+            var stored = authorizations.findByToken(result.getDeviceCode().getTokenValue(), DEVICE_CODE);
+            authorizations.save(OAuth2Authorization.from(stored).attribute(OAuth2ParameterNames.SCOPE, new HashSet<>(device.getScopes())).build());
+            return result;
+        }
+        @Override public boolean supports(Class<?> candidate) {
+            return OAuth2DeviceAuthorizationRequestAuthenticationToken.class.isAssignableFrom(candidate);
+        }
+    }
+
+    /** A client disabled for login gets no device code either (requestPolicy covers the authorization endpoint). */
+    record DeviceLoginEnabled() implements AuthenticationProvider {
+        @Override public Authentication authenticate(Authentication request) throws AuthenticationException {
+            if (request.getPrincipal() instanceof OAuth2ClientAuthenticationToken client && client.getRegisteredClient() != null
+                    && !RegisteredClients.loginEnabled(client.getRegisteredClient())) {
+                throw new OAuth2AuthenticationException(OAuth2ErrorCodes.UNAUTHORIZED_CLIENT);
+            }
+            return null;
+        }
+        @Override public boolean supports(Class<?> candidate) {
+            return OAuth2DeviceAuthorizationRequestAuthenticationToken.class.isAssignableFrom(candidate);
+        }
     }
 
     /** See MfaGate: converts prompt=none requests as anonymous unless the principal already holds full MFA. */

@@ -56,6 +56,13 @@ provider 再抛错。
 - `offline_access`：客户端须登记 `refresh_token` 授权类型。框架默认**复用** refresh token，客户端须设置
   `reuseRefreshTokens(false)` 以轮换。
 - refresh 前重新检查账号仍有 subject；删除该行即撤销身份，拒绝续期。
+- device 授权（RFC 8628，客户端登记 `deviceAuthorization`）：`verification_uri` 是 `/signin/device`。未完成两步验证的访问者
+  先去登录，登录后带着代码回到该页；代码交给框架的 `/oauth2/device_verification`，授权确认页与授权码流程共用
+  （表单改为提交到 device 端点）。结果回到 `/signin/device?result=done|invalid|denied`。
+  - 框架拒绝 device 请求里的 `openid`；OIDC 客户端（如 Incus）会带上它，OIDC 与 RFC 8628 都不禁止。先去掉 `openid`
+    交给框架校验与签发，再把它放回请求的 scope：确认页显示它，access token 带上它（userinfo 需要）。仍不签发 ID token。
+  - device 验证端点在因素不足时不会把请求交还登录流程（会当作成功），所以这里因素不足即拒绝（`access_denied`）；
+    正常路径由 `/signin/device` 先完成登录。
 - 框架默认对所有客户端强制 PKCE；不发送 PKCE 的旧 RP 由客户端管理 API 的 `pkceRequired: false` 关闭（见[客户端管理](client-management.md)）。
 - `request` 参数返回 `request_not_supported`；`request_uri` 按 PAR 处理，未知引用 400 且不跳转。
   discovery 声明支持的 scope、claims，并明确不支持 request、request_uri、claims 参数。
