@@ -1,31 +1,37 @@
 name: ci
-# Runs on the repository runner "iam-build" (temporary: a host-mode runner in a disposable LXC on pve1,
-# so that caches persist and native builds stay off the k3s laptop). JVM checks run for every change;
-# the native image (~11 min, ~5.5 GB peak) only after a merge to main, or on demand. On main the
-# tested binary is also published to zot (scripts/publish-image), so releases are never rebuilt.
+# JVM checks run for every change on the shared pod pool (Docker inside the executor Pod). The native image
+# (~11 min, ~5.5 GB peak, more than a pool Pod gets) runs only after a merge to main, or on demand, on the
+# repository runner "iam-build": a host-mode runner in a disposable LXC on pve1 with persistent caches. On main
+# the tested binary is also published to zot (scripts/publish-image), so releases are never rebuilt.
 on:
   pull_request:
   push:
     branches: [main]
   workflow_dispatch:
 
-env:
-  IAM_GRADLE_CACHE: /srv/iam/ci/gradle
-  IAM_NPM_CACHE: /srv/iam/ci/npm
-  IAM_BUILD_CPUS: "4"
-
 jobs:
   jvm:
-    runs-on: iam-build
+    # Each executor Pod is capped at 2 CPU / 4Gi (dynamic-runner LimitRange) and starts empty, so the
+    # dependency caches come from the actions cache instead of the runner's disk.
+    runs-on: [self-hosted, pod]
+    env:
+      IAM_GRADLE_CACHE: /tmp/iam-ci/gradle
+      IAM_NPM_CACHE: /tmp/iam-ci/npm
+      IAM_BUILD_CPUS: "2"
     steps:
-      - name: Remove containers left by cancelled runs
-        # Capacity 1: no other job of this runner is running, so every labelled container is an orphan.
-        # A cancelled native run kept compiling and starved the next one of memory (2026-10-05).
-        run: docker ps -aq --filter label=iam-login.ci=1 | xargs -r docker rm -f
       - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: |
+            /tmp/iam-ci/gradle/caches/modules-2
+            /tmp/iam-ci/gradle/wrapper
+            /tmp/iam-ci/npm
+          key: iam-jvm-${{ hashFiles('build.gradle', 'gradle/wrapper/gradle-wrapper.properties', 'frontend/package-lock.json') }}
+          restore-keys: iam-jvm-
       - name: JVM tests and boot jar
         env:
-          IAM_BUILD_MEMORY: 4g
+          # Leaves room in the Pod's 4Gi for dockerd and the Testcontainers database.
+          IAM_BUILD_MEMORY: 3g
         # Test AOT is skipped until its fixture lifecycle issue is fixed (docs/native-validation.md).
         run: scripts/gradle-in-docker test bootJar -x processTestAot -x compileAotTestJava -x processAotTestResources
       - name: Failed tests
@@ -44,6 +50,10 @@ jobs:
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     needs: jvm
     runs-on: iam-build
+    env:
+      IAM_GRADLE_CACHE: /srv/iam/ci/gradle
+      IAM_NPM_CACHE: /srv/iam/ci/npm
+      IAM_BUILD_CPUS: "4"
     steps:
       - name: Remove containers left by cancelled runs
         # Capacity 1: no other job of this runner is running, so every labelled container is an orphan.
