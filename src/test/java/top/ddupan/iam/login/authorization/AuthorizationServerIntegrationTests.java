@@ -204,6 +204,12 @@ class AuthorizationServerIntegrationTests {
         assertThat(idToken.get("groups")).asInstanceOf(InstanceOfAssertFactories.LIST).contains("gitea-admins");
         assertThat(claims((String) tokens.get("access_token"))).containsEntry("sub", "human:existing-subject");
         assertThat(tokens.get("refresh_token")).as("offline_access was granted").isNotNull();
+        // UserInfo releases the same scope claims (OIDC Core 5.4), groups included; email was not requested.
+        var userInfo = json(mvc.perform(get("/userinfo").with(https()).header("Authorization", "Bearer " + tokens.get("access_token")))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
+        assertThat(userInfo).containsEntry("sub", "human:existing-subject").containsEntry("preferred_username", "alice")
+            .doesNotContainKey("email");
+        assertThat(userInfo.get("groups")).asInstanceOf(InstanceOfAssertFactories.LIST).contains("gitea-admins");
         // Refresh reloads the stored principal from the database (Jackson allowlist round trip).
         var refreshed = json(mvc.perform(post("/oauth2/token").with(https()).with(httpBasic("spike-rp", "spike-secret"))
                 .param("grant_type", "refresh_token").param("refresh_token", (String) tokens.get("refresh_token")))

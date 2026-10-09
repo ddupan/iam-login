@@ -9,7 +9,10 @@ import java.net.URI;
 import java.security.Principal;
 import java.time.Clock;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -37,6 +40,8 @@ import org.springframework.security.core.authority.FactorGrantedAuthority;
 import org.springframework.security.oauth2.core.OAuth2AuthenticationException;
 import org.springframework.security.oauth2.core.OAuth2Error;
 import org.springframework.security.oauth2.core.OAuth2ErrorCodes;
+import org.springframework.security.oauth2.core.oidc.OidcIdToken;
+import org.springframework.security.oauth2.core.oidc.OidcUserInfo;
 import org.springframework.security.oauth2.core.oidc.endpoint.OidcParameterNames;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.JwtEncoder;
@@ -56,6 +61,7 @@ import org.springframework.security.oauth2.server.authorization.authentication.O
 import org.springframework.security.oauth2.server.authorization.authentication.OAuth2RefreshTokenAuthenticationToken;
 import org.springframework.security.oauth2.server.authorization.client.JdbcRegisteredClientRepository;
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClientRepository;
+import org.springframework.security.oauth2.server.authorization.oidc.authentication.OidcUserInfoAuthenticationContext;
 import org.springframework.security.oauth2.server.authorization.settings.AuthorizationServerSettings;
 import org.springframework.security.oauth2.server.authorization.token.JwtEncodingContext;
 import org.springframework.security.oauth2.server.authorization.token.OAuth2TokenCustomizer;
@@ -107,7 +113,10 @@ class AuthorizationServerConfiguration {
                     metadata.claim("request_parameter_supported", false);
                     metadata.claim("request_uri_parameter_supported", false);
                     metadata.claim("claims_parameter_supported", false);
-                })))
+                }))
+                // OIDC Core 5.4: with an access token issued, scope claims belong in UserInfo. The default mapper
+                // knows only the standard scopes and would drop groups.
+                .userInfoEndpoint(userInfo -> userInfo.userInfoMapper(AuthorizationServerConfiguration::userInfo)))
                 // The endpoint only asks "is the principal authenticated?". A password-only session is,
                 // so both steps that can yield a code must also demand the full MFA, or a stolen
                 // password alone would be enough to obtain tokens.
@@ -229,6 +238,21 @@ class AuthorizationServerConfiguration {
         }
     }
 
+    /** The ID token's claims, limited to the scopes on the presented access token. */
+    static OidcUserInfo userInfo(OidcUserInfoAuthenticationContext context) {
+        var scopes = context.getAccessToken().getScopes();
+        var released = new HashSet<>(Set.of("sub"));
+        SCOPE_CLAIMS.forEach((scope, claims) -> { if (scopes.contains(scope)) released.addAll(claims); });
+        var idToken = context.getAuthorization().getToken(OidcIdToken.class).getToken().getClaims();
+        var claims = new HashMap<String, Object>();
+        idToken.forEach((name, value) -> { if (released.contains(name)) claims.put(name, value); });
+        return new OidcUserInfo(claims);
+    }
+
+    private static final Map<String, List<String>> SCOPE_CLAIMS = Map.of(
+        "profile", List.of("name", "preferred_username"),
+        "email", List.of("email", "email_verified"),
+        "groups", List.of("groups"));
     private static final List<String> SCOPES = List.of("openid", "profile", "email", "groups", "offline_access");
     private static final List<String> CLAIMS = List.of("sub", "iss", "aud", "exp", "iat", "auth_time", "nonce", "sid",
         "name", "preferred_username", "email", "email_verified", "groups");
