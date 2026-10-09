@@ -31,6 +31,24 @@ class OidcClientTests {
             () -> new OidcClient("id", "Name", List.of("https://rp.example/cb"), Set.of("openid"), List.of(), true, null));
     }
 
+    @Test void newFieldsDefaultToOffAndPublicClientsNeedPkce() {
+        var plain = new OidcClient("id", "Name", List.of("https://rp.example/cb"), Set.of("openid"), null, true, true, null, null, null);
+        assertThat(plain.publicClient()).isFalse();
+        assertThat(plain.deviceAuthorization()).isFalse();
+        assertThat(plain.audiences()).isEmpty();
+        assertThatIllegalArgumentException().isThrownBy(() -> new OidcClient("id", "Name", List.of("https://rp.example/cb"),
+            Set.of("openid"), List.of(), true, false, true, false, List.of()));
+    }
+
+    @Test void audiencesAreSingleValuesWithoutSeparators() {
+        new OidcClient("id", "Name", List.of("https://rp.example/cb"), Set.of("openid"), List.of(), true, true, false, false,
+            List.of("https://incus.example"));
+        for (var audience : List.of("a,b", " padded", "")) {
+            assertThatIllegalArgumentException().isThrownBy(() -> new OidcClient("id", "Name", List.of("https://rp.example/cb"),
+                Set.of("openid"), List.of(), true, true, false, false, List.of(audience)));
+        }
+    }
+
     private static OidcClient client(List<String> callbacks, Set<String> scopes, Boolean enabled) {
         return new OidcClient("id", "Name", callbacks, scopes, List.of(), enabled, true);
     }

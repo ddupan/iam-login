@@ -37,6 +37,7 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.core.authority.AuthorityUtils;
 import org.springframework.security.core.authority.FactorGrantedAuthority;
+import org.springframework.security.oauth2.core.ClientAuthenticationMethod;
 import org.springframework.security.oauth2.core.OAuth2AuthenticationException;
 import org.springframework.security.oauth2.core.OAuth2Error;
 import org.springframework.security.oauth2.core.OAuth2ErrorCodes;
@@ -63,8 +64,12 @@ import org.springframework.security.oauth2.server.authorization.client.JdbcRegis
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClientRepository;
 import org.springframework.security.oauth2.server.authorization.oidc.authentication.OidcUserInfoAuthenticationContext;
 import org.springframework.security.oauth2.server.authorization.settings.AuthorizationServerSettings;
+import org.springframework.security.oauth2.server.authorization.token.DelegatingOAuth2TokenGenerator;
 import org.springframework.security.oauth2.server.authorization.token.JwtEncodingContext;
+import org.springframework.security.oauth2.server.authorization.token.JwtGenerator;
+import org.springframework.security.oauth2.server.authorization.token.OAuth2AccessTokenGenerator;
 import org.springframework.security.oauth2.server.authorization.token.OAuth2TokenCustomizer;
+import org.springframework.security.oauth2.server.authorization.token.OAuth2TokenGenerator;
 import org.springframework.security.oauth2.server.authorization.web.authentication.OAuth2AuthorizationCodeRequestAuthenticationConverter;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.AuthenticationConverter;
@@ -93,7 +98,8 @@ class AuthorizationServerConfiguration {
 
     @Bean @Order(2)
     SecurityFilterChain authorizationServer(HttpSecurity http, MfaPolicy mfa,
-            Subjects subjects, OAuth2AuthorizationService authorizations) throws Exception {
+            Subjects subjects, OAuth2AuthorizationService authorizations, RegisteredClientRepository clients,
+            AuthorizationServerSettings settings) throws Exception {
         var requiredFactors = mfa.complete;
         // Registered at the authorization endpoint's position before the endpoint itself (added later, while
         // building); filters of equal order keep insertion order, so this runs first.
@@ -101,10 +107,16 @@ class AuthorizationServerConfiguration {
             AbstractPreAuthenticatedProcessingFilter.class);
         http.oauth2AuthorizationServer(as -> {
             http.securityMatcher(as.getEndpointsMatcher());
+            // Public clients outside the authorization-code exchange (PublicClients).
+            as.clientAuthentication(authentication -> authentication
+                .authenticationConverters(converters -> converters.addFirst(
+                    new PublicClients.Converter(settings.getDeviceAuthorizationEndpoint())))
+                .authenticationProviders(providers -> providers.addFirst(new PublicClients.Provider(clients))));
             as.oidc(oidc -> oidc.providerConfigurationEndpoint(discovery -> discovery.providerConfigurationCustomizer(metadata -> {
                     // Advertise what consent actually releases; clients and conformance tests rely on it.
                     metadata.scopes(scopes -> { scopes.removeAll(SCOPES); scopes.addAll(SCOPES); });
                     metadata.claim("claims_supported", CLAIMS);
+                    metadata.tokenEndpointAuthenticationMethods(methods -> methods.add(ClientAuthenticationMethod.NONE.getValue()));
                     // Request objects are rejected (requestPolicy); request_uri defaults to true if absent.
                     metadata.claim("request_parameter_supported", false);
                     metadata.claim("request_uri_parameter_supported", false);
@@ -336,6 +348,13 @@ class AuthorizationServerConfiguration {
     }
 
     // Signing uses the first key only; the framework takes a JwtEncoder bean over building one from all keys.
+    /** The framework's generators, except that refresh tokens also go to public clients (PublicClients). */
+    @Bean OAuth2TokenGenerator<?> tokenGenerator(JwtEncoder encoder, OAuth2TokenCustomizer<JwtEncodingContext> claims) {
+        var jwt = new JwtGenerator(encoder);
+        jwt.setJwtCustomizer(claims);
+        return new DelegatingOAuth2TokenGenerator(jwt, new OAuth2AccessTokenGenerator(), new PublicClients.RefreshTokens());
+    }
+
     @Bean JwtEncoder jwtEncoder(Properties properties) {
         return new NimbusJwtEncoder(
             new ImmutableJWKSet<>(new JWKSet(SigningKeys.load(properties.signingKeys()).getFirst())));

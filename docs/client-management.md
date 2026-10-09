@@ -62,12 +62,23 @@ iam:
   "scopes": ["openid", "profile", "email", "groups", "offline_access"],
   "postLogoutRedirectUris": ["https://app.example.test/logged-out"],
   "loginEnabled": true,
-  "pkceRequired": true
+  "pkceRequired": true,
+  "publicClient": false,
+  "deviceAuthorization": false,
+  "audiences": []
 }
 ```
 
 - 回调必须 HTTPS（隔离开发允许 loopback HTTP），不允许通配符、fragment 或 URL 用户信息。
-- 固定 `authorization_code`、`client_secret_basic`；refresh token 轮换。
+- 固定 `authorization_code`；confidential 客户端用 `client_secret_basic`。refresh token 每次使用都轮换。
+- `publicClient`（可选，默认 `false`）：不签发 secret，客户端认证方式为 `none`（CLI、浏览器应用）。此时
+  `pkceRequired` 必须为 `true`；创建后不可改变（换类型即换客户端），也没有 secret 可轮换（409）。
+  授权码由 PKCE 绑定；device 授权与 refresh 只凭 `client_id`。public 客户端同样拿到 refresh token
+  （框架默认不发），以每次轮换代替发送方绑定（RFC 9700 4.14.2）。
+- `deviceAuthorization`（可选，默认 `false`）：另外登记 device 授权类型（RFC 8628），给没有浏览器的客户端。
+- `audiences`（可选）：access token 额外的 `aud`，给自己校验 audience 的资源（如 Incus）。最多 10 个，
+  不可含逗号。
+- 客户端不做按人准入：谁能做什么由资源按 token 里的身份与组自行决定。
 - `pkceRequired` 必填，缺失 400。只为不能发送 PKCE 的 confidential 客户端关闭（Gitea 1.27 的 OIDC
   登录源既不发 PKCE 也不发 nonce，只有 `state`）；RFC 9700 2.1.1 允许 confidential 客户端如此，
   但授权码注入防护随之变弱，能发 PKCE 的应用一律保持开启。

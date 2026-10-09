@@ -452,6 +452,63 @@ class AuthorizationServerIntegrationTests {
         mvc.perform(delete("/api/iam/clients/iam-console").with(https()).with(admin)).andExpect(status().isConflict());
     }
 
+    // A CLI or browser app: no secret, PKCE for the code, then refreshes with client_id alone. The framework
+    // covers only the PKCE exchange; refresh tokens and client_id-only requests are PublicClients.
+    @Test void publicClientsRefreshWithClientIdAloneAndRotate() throws Exception {
+        var admin = token(List.of("iam-login"), List.of("gitea-admins"));
+        var body = """
+            {"id":"public-app","name":"Public","redirectUris":["http://127.0.0.1/cb"],"scopes":["openid","offline_access"],
+             "postLogoutRedirectUris":[],"loginEnabled":true,"pkceRequired":true,"publicClient":true,
+             "audiences":["https://resource.example"]}
+            """;
+        var created = json(mvc.perform(post("/api/iam/clients").with(https()).with(admin).contentType(MediaType.APPLICATION_JSON).content(body))
+            .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString());
+        assertThat(created.get("secret")).isNull();
+        assertThat((Map<String, Object>) created.get("client")).containsEntry("publicClient", true)
+            .containsEntry("audiences", List.of("https://resource.example"));
+        mvc.perform(post("/api/iam/clients").with(https()).with(admin).contentType(MediaType.APPLICATION_JSON)
+                .content(body.replace("public-app", "public-no-pkce").replace("\"pkceRequired\":true", "\"pkceRequired\":false")))
+            .andExpect(status().isBadRequest());
+        // A public client has no secret to rotate, and cannot be turned into a confidential one.
+        mvc.perform(post("/api/iam/clients/public-app/secret").with(https()).with(admin)).andExpect(status().isConflict());
+        mvc.perform(put("/api/iam/clients/public-app").with(https()).with(admin).contentType(MediaType.APPLICATION_JSON)
+                .content(body.replace("\"publicClient\":true", "\"publicClient\":false"))).andExpect(status().isBadRequest());
+        // Consent is the framework's page here; this test is about the token endpoint.
+        clients.save(RegisteredClient.from(clients.findByClientId("public-app")).clientSettings(ClientSettings.withSettings(
+            clients.findByClientId("public-app").getClientSettings().getSettings()).requireAuthorizationConsent(false).build()).build());
+
+        var session = login(); secondFactor(session);
+        var verifier = verifier();
+        var challenge = Base64.getUrlEncoder().withoutPadding().encodeToString(
+            MessageDigest.getInstance("SHA-256").digest(verifier.getBytes(StandardCharsets.US_ASCII)));
+        var callback = location(session, UriComponentsBuilder.fromPath("/oauth2/authorize").queryParam("response_type", "code")
+            .queryParam("client_id", "public-app").queryParam("redirect_uri", "http://127.0.0.1/cb")
+            .queryParam("scope", "openid offline_access").queryParam("state", "s")
+            .queryParam("code_challenge", challenge).queryParam("code_challenge_method", "S256").encode().build().toUriString());
+        var tokens = json(mvc.perform(post("/oauth2/token").with(https()).param("grant_type", "authorization_code")
+                .param("client_id", "public-app").param("code", query(callback).get("code"))
+                .param("redirect_uri", "http://127.0.0.1/cb").param("code_verifier", verifier))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
+        assertThat(claims((String) tokens.get("access_token")).get("aud")).asInstanceOf(InstanceOfAssertFactories.LIST)
+            .contains("public-app", "https://resource.example");
+        var refresh = (String) tokens.get("refresh_token");
+        assertThat(refresh).as("refresh token for a public client").isNotNull();
+
+        var refreshed = json(mvc.perform(post("/oauth2/token").with(https()).param("grant_type", "refresh_token")
+                .param("client_id", "public-app").param("refresh_token", refresh))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
+        assertThat(refreshed.get("refresh_token")).isNotNull().isNotEqualTo(refresh);
+        mvc.perform(post("/oauth2/token").with(https()).param("grant_type", "refresh_token")
+                .param("client_id", "public-app").param("refresh_token", refresh))
+            .andExpect(status().isBadRequest()).andExpect(jsonPath("error").value("invalid_grant"));
+        // A confidential client is not let in for leaving out its secret.
+        mvc.perform(post("/oauth2/token").with(https()).param("grant_type", "refresh_token")
+                .param("client_id", "spike-rp").param("refresh_token", (String) refreshed.get("refresh_token")))
+            .andExpect(status().isUnauthorized()).andExpect(jsonPath("error").value("invalid_client"));
+        mvc.perform(get("/.well-known/openid-configuration").with(https()))
+            .andExpect(jsonPath("token_endpoint_auth_methods_supported").value(Matchers.hasItem("none")));
+    }
+
     private String tokenError(String client, String secret) throws Exception {
         return (String) json(mvc.perform(post("/oauth2/token").with(https()).with(httpBasic(client, secret))
                 .param("grant_type", "authorization_code").param("code", "invalid-code")
