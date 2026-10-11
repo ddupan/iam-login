@@ -491,6 +491,8 @@ class AuthorizationServerIntegrationTests {
             .andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
         assertThat(claims((String) tokens.get("access_token")).get("aud")).asInstanceOf(InstanceOfAssertFactories.LIST)
             .contains("public-app", "https://resource.example");
+        assertThat(claims((String) tokens.get("access_token")).get("scope")).as("RFC 9068: space-delimited string")
+            .isInstanceOf(String.class);
         var refresh = (String) tokens.get("refresh_token");
         assertThat(refresh).as("refresh token for a public client").isNotNull();
 
