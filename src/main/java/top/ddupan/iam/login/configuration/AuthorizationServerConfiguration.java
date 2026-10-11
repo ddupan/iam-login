@@ -380,6 +380,11 @@ class AuthorizationServerConfiguration {
             if (scopes.contains("groups")) {
                 context.getClaims().claim("groups", user.memberships().stream().map(User.GroupMembership::name).toList());
             }
+            if (OAuth2TokenType.ACCESS_TOKEN.equals(context.getTokenType()) && !scopes.isEmpty()) {
+                // RFC 9068 2.2.3: a space-delimited string. The framework writes an array, which strict
+                // resource servers (Incus, via zitadel/oidc) fail to parse and treat as unauthenticated.
+                context.getClaims().claim(OAuth2ParameterNames.SCOPE, String.join(" ", scopes));
+            }
             if (OAuth2TokenType.ACCESS_TOKEN.equals(context.getTokenType())
                     && context.getRegisteredClient().getClientSettings().getSetting(RegisteredClients.AUDIENCES) instanceof String extra) {
                 // Resource audiences registered for the client (the framework has no audience parameter).
