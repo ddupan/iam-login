@@ -9,7 +9,7 @@ import org.testcontainers.utility.DockerImageName;
 @TestConfiguration(proxyBeanMethods = false)
 class TestcontainersConfiguration {
 
-	static final String LGTM_IMAGE = "grafana/otel-lgtm@sha256:b966ea107831d526d9eb8fe4d2d86c9e5731392fad9dce8296bcf2072031f07c";
+	static final String LGTM_IMAGE = "grafana/otel-lgtm:0.34.0";
 
 	@Bean
 	@ServiceConnection

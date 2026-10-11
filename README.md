@@ -75,9 +75,9 @@ Docker 开发使用 `scripts/gradle-in-docker`，默认持久挂载 Gradle 缓�
 RP ID 等）。运行时开关与构建不一致时拒绝启动（`FeatureFlags`）。
 
 发布：合并到 main 后，CI 的 native job 在 Native 浏览器测试通过后，用 `Dockerfile` 打包**同一个**
-二进制并推到 `zot-push.ad.ddupan.top/iam/iam-login:<commit>`（`scripts/publish-image`，身份为 runner
+二进制并推到 `zot-push.lab.ddupan.top/iam/iam-login:<commit>`（`scripts/publish-image`，身份为 runner
 上 SPIRE Agent 发的 `spiffe://ddupan.top/ci/panxiao81/iam-login/publish`），不再单独为发布编译。
-部署在 homelab-infra 中固定 digest。
+部署在 homelab-infra 中按 commit tag 固定。
 JVM、AOT、Native 测试及原生应用 HTTP 检查已通过，实测范围与资源数据见
 [本地验证结果](docs/bootstrap.md#2026-09-25-本地验证结果)。
 新增 AD 路径本轮按维护者要求只进行 JVM 验证，不沿用基线的 Native 验收结论。

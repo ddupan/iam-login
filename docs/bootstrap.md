@@ -29,8 +29,7 @@ Actuator 与 Prometheus 依赖存在不等于监控端点已按生产策略开�
 
 ## 骨架验证
 
-构建环境为 `ghcr.io/graalvm/native-image-community:25`，固定 digest：
-`sha256:0d936f32bb8acb5bc60c41b33e05f064d7a6aaf36b726538296c54949bd4a3c0`。
+构建环境为 `ghcr.io/graalvm/native-image-community:25.0.2`。
 
 验证分为 `test`（JVM）、`testAot`（JVM 上的 AOT 上下文）、`nativeTest`（原生测试）
 和应用二进制 HTTP 检查。JVM/AOT/Native 测试均使用真实 LGTM Testcontainer，

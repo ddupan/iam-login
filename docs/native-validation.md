@@ -40,7 +40,7 @@ WebAuthn 集成；TOTP、恢复方式与已有 Authelia MFA 的迁移方式需�
 ## 发布条件
 
 通过上述测试后才准备生产切换；保留现役 OIDC 上游适配器作为回退路径。应用镜像以
-不可变 digest 交给 homelab-infra，部署状态与真实人类 MFA 验收分别记录。
+commit tag 交给 homelab-infra，部署状态与真实人类 MFA 验收分别记录。
 
 ### 测试 AOT 的待排查项（2026-09-29）
 

@@ -34,7 +34,7 @@ import static org.assertj.core.api.Assertions.*;
 
 class SessionChallengesTests {
     static final PostgreSQLContainer DATABASE = new PostgreSQLContainer(DockerImageName.parse(
-        "postgres@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873").asCompatibleSubstituteFor("postgres"));
+        "postgres:18.6").asCompatibleSubstituteFor("postgres"));
     static DSLContext db;
     private final MfaPolicy policy = new MfaPolicy(new MapPublicKeyCredentialUserEntityRepository(), new MapUserCredentialRepository());
 
