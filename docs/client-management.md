@@ -29,8 +29,8 @@ iam:
       - Domain Admins
     console-client-id: iam-console   # 默认值
     spiffe:                          # 可选；机器调用方
-      issuer: https://spire-oidc.ad.ddupan.top
-      jwk-set-uri: https://spire-oidc.ad.ddupan.top/keys
+      issuer: https://spire-oidc.lab.ddupan.top
+      jwk-set-uri: https://spire-oidc.lab.ddupan.top/keys
       admin-ids:
         - spiffe://ddupan.top/ci/panxiao81/homelab-infra/terraform-apply
 ```
