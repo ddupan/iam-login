@@ -1,10 +1,14 @@
 import { useEffect, useState } from "react";
 import { InMemoryWebStorage, UserManager, WebStorageStateStore, type User } from "oidc-client-ts";
+import { useTranslation } from "react-i18next";
 import { ClientsPanel } from "../components/ClientsPanel";
 import type { AdminContext } from "../page-context";
 
+type Problem = "" | "unreachable" | "incomplete" | "expired";
+
 /** Ordinary OIDC public client of this server; it holds no privileges beyond the access token it is granted. */
 export function AdminApp({ context }: { context: AdminContext }) {
+  const { t } = useTranslation();
   const [manager] = useState(() => new UserManager({
     authority: context.authority,
     client_id: context.clientId,
@@ -18,26 +22,26 @@ export function AdminApp({ context }: { context: AdminContext }) {
     loadUserInfo: false,
   }));
   const [user, setUser] = useState<User | null>(null);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<Problem>("");
 
   useEffect(() => {
     if (window.location.pathname !== "/console/callback") {
-      manager.signinRedirect().catch(() => setError("无法连接统一登录，请稍后重试。"));
+      manager.signinRedirect().catch(() => setError("unreachable"));
       return;
     }
     manager.signinRedirectCallback().then(signedIn => {
       window.history.replaceState(null, "", "/console");
       setUser(signedIn);
-    }).catch(() => setError("登录未完成。需要管理组成员通过密码与 passkey 登录。"));
+    }).catch(() => setError("incomplete"));
   }, [manager]);
 
-  const signIn = () => { setError(""); manager.signinRedirect().catch(() => setError("无法连接统一登录，请稍后重试。")); };
+  const signIn = () => { setError(""); manager.signinRedirect().catch(() => setError("unreachable")); };
 
   return <main className="admin">
-    <header><a href="/console" className="brand">i<span>am</span></a> <span className="eyebrow">OIDC 客户端管理</span></header>
-    {error && <section className="card"><p className="error" role="alert">{error}</p>
-      <button type="button" className="primary" onClick={signIn}>重新登录</button></section>}
-    {!error && !user && <p role="status">正在跳转统一登录…</p>}
-    {user && <ClientsPanel token={user.access_token} onExpired={() => { setUser(null); setError("登录已过期，请重新登录。"); }} />}
+    <header><a href="/console" className="brand">i<span>am</span></a> <span className="eyebrow">{t("admin.eyebrow")}</span></header>
+    {error && <section className="card"><p className="error" role="alert">{t(`admin.error.${error}`)}</p>
+      <button type="button" className="primary" onClick={signIn}>{t("admin.signInAgain")}</button></section>}
+    {!error && !user && <p role="status">{t("admin.redirecting")}</p>}
+    {user && <ClientsPanel token={user.access_token} onExpired={() => { setUser(null); setError("expired"); }} />}
   </main>;
 }

@@ -1,4 +1,6 @@
 import type { ReactNode } from "react";
+import type { TFunction } from "i18next";
+import { Trans, useTranslation } from "react-i18next";
 import { Brand } from "../components/Chrome";
 import type { ConsentContext } from "../page-context";
 
@@ -13,19 +15,19 @@ const ICONS: Record<string, ReactNode> = {
 type Grant = { key: string; icon: keyof typeof ICONS; what: string; detail?: ReactNode };
 
 /** Requested scopes in plain words; profile and email read as one line, unknown scopes by name. */
-function grants({ consent }: ConsentContext): Grant[] {
+function grants({ consent }: ConsentContext, t: TFunction): Grant[] {
   const scopes = new Set(consent.scopes);
-  const list: Grant[] = [{ key: "openid", icon: "identity", what: "确认你的身份", detail: `账号标识，用于在 ${consent.clientName} 中关联你` }];
+  const list: Grant[] = [{ key: "openid", icon: "identity", what: t("consent.identity"), detail: t("consent.identityDetail", { client: consent.clientName }) }];
   if (scopes.has("profile") || scopes.has("email")) {
-    const parts = [scopes.has("profile") && consent.username, scopes.has("email") && (consent.email || "未设置邮箱")].filter(Boolean);
-    list.push({ key: "profile", icon: "profile", what: scopes.has("email") ? "用户名、显示名和邮箱" : "用户名和显示名", detail: parts.join(" · ") });
+    const parts = [scopes.has("profile") && consent.username, scopes.has("email") && (consent.email || t("common.noEmail"))].filter(Boolean);
+    list.push({ key: "profile", icon: "profile", what: scopes.has("email") ? t("consent.profileEmail") : t("consent.profile"), detail: parts.join(" · ") });
   }
   if (scopes.has("groups")) {
-    list.push({ key: "groups", icon: "groups", what: "你所在的组", detail: consent.groups.length
-      ? <span className="chips">{consent.groups.map(group => <span key={group} className="chip">{group}</span>)}</span> : "没有直接所属组" });
+    list.push({ key: "groups", icon: "groups", what: t("consent.groups"), detail: consent.groups.length
+      ? <span className="chips">{consent.groups.map(group => <span key={group} className="chip">{group}</span>)}</span> : t("consent.noGroups") });
   }
   if (scopes.has("offline_access")) {
-    list.push({ key: "offline_access", icon: "offline", what: "在你离开后保持访问", detail: "无需你在场即可续期，直到你撤销授权" });
+    list.push({ key: "offline_access", icon: "offline", what: t("consent.offline"), detail: t("consent.offlineDetail") });
   }
   for (const scope of consent.scopes) {
     if (!["openid", "profile", "email", "groups", "offline_access"].includes(scope)) list.push({ key: scope, icon: "other", what: scope });
@@ -34,6 +36,7 @@ function grants({ consent }: ConsentContext): Grant[] {
 }
 
 export function ConsentPage({ context }: { context: ConsentContext }) {
+  const { t } = useTranslation();
   const { consent } = context;
   return (
     <main className="single wide">
@@ -41,11 +44,12 @@ export function ConsentPage({ context }: { context: ConsentContext }) {
         <div className="brand-row"><Brand host={false} /><span className="lead">{consent.username}</span></div>
         <section className="card" aria-labelledby="consent-title">
           <div className="lead-block">
-            <h1 id="consent-title">{consent.clientName} 请求访问你的账号</h1>
-            {consent.returnHosts.length > 0 && <p className="lead">完成后返回 <code>{consent.returnHosts.join("、")}</code></p>}
+            <h1 id="consent-title">{t("consent.heading", { client: consent.clientName })}</h1>
+            {consent.returnHosts.length > 0 && <p className="lead"><Trans i18nKey="consent.returnsTo"
+              values={{ hosts: consent.returnHosts.join(t("consent.hostSeparator")) }} components={{ code: <code /> }} /></p>}
           </div>
           <ul className="grants">
-            {grants(context).map(grant => (
+            {grants(context, t).map(grant => (
               <li key={grant.key}>
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">{ICONS[grant.icon]}</svg>
                 <div><span className="what">{grant.what}</span>{grant.detail && <span className="detail">{grant.detail}</span>}</div>
@@ -57,17 +61,17 @@ export function ConsentPage({ context }: { context: ConsentContext }) {
               <input type="hidden" name="client_id" value={consent.clientId} />
               <input type="hidden" name="state" value={consent.state} />
               {consent.userCode && <input type="hidden" name="user_code" value={consent.userCode} />}
-              <button className="secondary" type="submit">拒绝</button>
+              <button className="secondary" type="submit">{t("consent.deny")}</button>
             </form>
             <form method="post" action={context.action}>
               <input type="hidden" name="client_id" value={consent.clientId} />
               <input type="hidden" name="state" value={consent.state} />
               {consent.userCode && <input type="hidden" name="user_code" value={consent.userCode} />}
               {consent.scopes.map(scope => <input key={scope} type="hidden" name="scope" value={scope} />)}
-              <button className="primary" type="submit">允许</button>
+              <button className="primary" type="submit">{t("consent.allow")}</button>
             </form>
           </div>
-          <p className="fine">允许后，下次同样的请求不再询问。</p>
+          <p className="fine">{t("consent.remembered")}</p>
         </section>
       </div>
     </main>

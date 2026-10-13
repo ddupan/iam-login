@@ -1,12 +1,21 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { CsrfToken } from "../page-context";
 import { Alert } from "./Chrome";
 
+type Problem = "expired" | "unsupported" | "cancelled" | "timeout" | "failed";
+
+/** A failure whose message is a catalogue key, so the text follows the page language. */
+class Failure extends Error {
+  constructor(readonly problem: Problem) { super(problem); }
+}
+
 /** Registers (first time) or verifies a passkey; the server owns every factor decision. */
 export function Passkey({ csrf, initial, who }: { csrf: CsrfToken; initial: "register" | "authenticate"; who: string }) {
+  const { t } = useTranslation();
   const [step, setStep] = useState(initial);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<Problem | null>(null);
   const [registered, setRegistered] = useState(false);
 
   async function post(path: string, body?: unknown) {
@@ -16,24 +25,24 @@ export function Passkey({ csrf, initial, who }: { csrf: CsrfToken; initial: "reg
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     if (!response.ok || !response.headers.get("content-type")?.includes("application/json")) {
-      throw new Error("验证已过期，请换一个账号重新登录。");
+      throw new Failure("expired");
     }
     return response.json();
   }
 
   async function perform() {
     setBusy(true);
-    setError("");
+    setError(null);
     try {
       if (!PublicKeyCredential.parseCreationOptionsFromJSON || !PublicKeyCredential.parseRequestOptionsFromJSON) {
-        throw new Error("这个浏览器不支持 passkey，请换用新版浏览器。");
+        throw new Failure("unsupported");
       }
       if (step === "register") {
         const options = await post("/webauthn/register/options");
         const credential = await navigator.credentials.create({
           publicKey: PublicKeyCredential.parseCreationOptionsFromJSON(options),
         }) as PublicKeyCredential | null;
-        if (!credential) throw new Error("已取消。");
+        if (!credential) throw new Failure("cancelled");
         await post("/webauthn/register", { publicKey: { credential: credential.toJSON(), label: "Passkey" } });
         setRegistered(true);
         setStep("authenticate");
@@ -42,7 +51,7 @@ export function Passkey({ csrf, initial, who }: { csrf: CsrfToken; initial: "reg
         const credential = await navigator.credentials.get({
           publicKey: PublicKeyCredential.parseRequestOptionsFromJSON(options),
         }) as PublicKeyCredential | null;
-        if (!credential) throw new Error("已取消。");
+        if (!credential) throw new Failure("cancelled");
         // Spring Security answers with the request that was interrupted for login (it consumes the saved
         // request); "/" means there was none, and the sign-in result page decides what comes next.
         const result = await post("/login/webauthn", credential.toJSON());
@@ -51,23 +60,23 @@ export function Passkey({ csrf, initial, who }: { csrf: CsrfToken; initial: "reg
           ? target.toString() : "/signin/complete");
       }
     } catch (cause) {
-      setError(cause instanceof DOMException ? "passkey 验证已取消或超时。"
-        : cause instanceof Error ? cause.message : "验证未完成，请重试。");
+      setError(cause instanceof DOMException ? "timeout" : cause instanceof Failure ? cause.problem : "failed");
     } finally {
       setBusy(false);
     }
   }
 
+  const alert = error && <Alert>{t(`passkey.error.${error}`)}</Alert>;
   if (step === "register") {
     return <>
       <div className="lead-block">
-        <h1>创建 passkey</h1>
-        <p className="lead">这个账号还没有 passkey。以后每次登录都需要它：存在本机、手机或安全密钥上，使用时要求 PIN 或生物识别。</p>
+        <h1>{t("passkey.createHeading")}</h1>
+        <p className="lead">{t("passkey.createLead")}</p>
       </div>
       <div className="who"><span className="avatar" aria-hidden="true">{who.slice(0, 1).toUpperCase()}</span>
-        <div><span>{who}</span><span>刚刚通过密码验证</span></div></div>
-      {error && <Alert>{error}</Alert>}
-      <button className="primary" type="button" disabled={busy} onClick={perform}>{busy ? "等待验证器…" : "创建 passkey"}</button>
+        <div><span>{who}</span><span>{t("passkey.justVerified")}</span></div></div>
+      {alert}
+      <button className="primary" type="button" disabled={busy} onClick={perform}>{busy ? t("passkey.waitingShort") : t("passkey.create")}</button>
     </>;
   }
   return <>
@@ -77,11 +86,11 @@ export function Passkey({ csrf, initial, who }: { csrf: CsrfToken; initial: "reg
           <path d="M12 11c0 3-1 6-3 8" /><path d="M8 7a5 5 0 0 1 9 3c0 2 0 4-1 6" /><path d="M5 10a7 7 0 0 1 2-5" /><path d="M12 11c0 2 .5 4 1.5 6" />
         </svg>
       </div>
-      <h1>{registered ? "passkey 已创建" : "用 passkey 验证"}</h1>
-      <p className="lead">{registered ? "用它验证一次即可继续。" : "按浏览器提示，用 PIN、指纹或安全密钥确认。"}</p>
+      <h1>{registered ? t("passkey.created") : t("passkey.verifyHeading")}</h1>
+      <p className="lead">{registered ? t("passkey.createdLead") : t("passkey.verifyLead")}</p>
     </div>
-    {error && <Alert>{error}</Alert>}
-    {busy && <p className="status" role="status">正在等待验证器…</p>}
-    <button className="primary" type="button" disabled={busy} onClick={perform}>{error ? "重试" : "用 passkey 验证"}</button>
+    {alert}
+    {busy && <p className="status" role="status">{t("passkey.waiting")}</p>}
+    <button className="primary" type="button" disabled={busy} onClick={perform}>{error ? t("passkey.retry") : t("passkey.verify")}</button>
   </>;
 }

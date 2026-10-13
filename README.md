@@ -114,6 +114,7 @@ configuration → 装配上述实现
 界面采用 React + Vite，Spring 在 HTML 中内联当前步骤上下文，浏览器原生表单 POST，
 表单由 Spring Security `formLogin` 处理，框架维护因素、SecurityContext、会话轮换和退出。
 React 只替换默认登录 UI，不增加前端路由器、模板引擎或 Node 运行服务。
+界面文案全部在 `frontend/src/locales/<语言>.json`（i18next），按浏览器语言选择，缺省 zh-CN；键名以 zh-CN 为准做类型检查，漏写或拼错键名 `tsc` 即失败。服务端只传错误码（如 `invalid`、`throttled`），不传句子。新增语言＝加一个语言文件并在 `frontend/src/i18n.ts` 登记。
 
 ## AD 第一因素接入
 

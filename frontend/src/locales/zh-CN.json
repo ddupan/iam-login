@@ -1,0 +1,125 @@
+{
+  "title": "登录 · IAM",
+  "brand": {
+    "host": "· {{host}}"
+  },
+  "steps": {
+    "label": "登录步骤",
+    "password": "密码",
+    "secondFactor": "两步验证"
+  },
+  "common": {
+    "continue": "继续",
+    "continueTo": "继续前往 <strong>{{app}}</strong>。",
+    "signOut": "退出",
+    "noEmail": "未设置邮箱",
+    "groups": "所属组"
+  },
+  "signin": {
+    "heading": "登录",
+    "username": "用户名",
+    "password": "密码",
+    "forgotPassword": "忘记密码请联系管理员",
+    "switchAccount": "换一个账号",
+    "lostFactor": "两步验证方式都丢了？请联系管理员",
+    "secondFactorUnavailable": "两步验证暂不可用，请联系管理员。",
+    "signedIn": "已登录",
+    "error": {
+      "invalid": "无法验证账号，请检查用户名和密码。",
+      "unavailable": "目录服务暂时不可用，请稍后重试。",
+      "throttled": "尝试次数过多，请稍后再试。"
+    }
+  },
+  "passkey": {
+    "createHeading": "创建 Passkey",
+    "createLead": "这个账号还没有两步验证方式。Passkey 存在本机、手机或安全密钥上，使用时要求 PIN 或生物识别，以后每次登录都需要它。",
+    "justVerified": "刚刚通过密码验证",
+    "create": "创建 Passkey",
+    "created": "Passkey 已创建",
+    "createdLead": "用它验证一次即可继续。",
+    "verifyHeading": "用 Passkey 验证",
+    "verifyLead": "按浏览器提示，用 PIN、指纹或安全密钥确认。",
+    "verify": "用 Passkey 验证",
+    "waiting": "正在等待验证器…",
+    "waitingShort": "等待验证器…",
+    "retry": "重试",
+    "error": {
+      "expired": "验证已过期，请换一个账号重新登录。",
+      "unsupported": "这个浏览器不支持 Passkey，请换用新版浏览器。",
+      "cancelled": "已取消。",
+      "timeout": "Passkey 验证已取消或超时。",
+      "failed": "验证未完成，请重试。"
+    }
+  },
+  "consent": {
+    "heading": "{{client}} 请求访问你的账号",
+    "returnsTo": "完成后返回 <code>{{hosts}}</code>",
+    "hostSeparator": "、",
+    "identity": "确认你的身份",
+    "identityDetail": "账号标识，用于在 {{client}} 中关联你",
+    "profileEmail": "用户名、显示名和邮箱",
+    "profile": "用户名和显示名",
+    "groups": "你所在的组",
+    "noGroups": "没有直接所属组",
+    "offline": "在你离开后保持访问",
+    "offlineDetail": "无需你在场即可续期，直到你撤销授权",
+    "deny": "拒绝",
+    "allow": "允许",
+    "remembered": "允许后，下次同样的请求不再询问。"
+  },
+  "device": {
+    "heading": "连接设备",
+    "code": "设备上显示的代码",
+    "invalid": "代码无效或已过期。",
+    "done": "设备已连接",
+    "doneLead": "回到设备上继续。",
+    "denied": "已拒绝",
+    "deniedLead": "设备没有获得访问权限。"
+  },
+  "admin": {
+    "eyebrow": "OIDC 客户端管理",
+    "redirecting": "正在跳转统一登录…",
+    "signInAgain": "重新登录",
+    "error": {
+      "unreachable": "无法连接统一登录，请稍后重试。",
+      "incomplete": "登录未完成。需要管理组成员通过密码与两步验证登录。",
+      "expired": "登录已过期，请重新登录。"
+    }
+  },
+  "clients": {
+    "heading": "OIDC 客户端",
+    "new": "新建客户端",
+    "editTitle": "编辑 {{id}}",
+    "id": "Client ID",
+    "name": "名称",
+    "redirectUris": "回调地址（每行一个）",
+    "scopes": "Scope（空格分隔，openid 必含；offline_access 会签发 refresh token）",
+    "postLogoutRedirectUris": "注销后回跳地址（每行一个，可空）",
+    "loginEnabled": "允许登录",
+    "pkceRequired": "要求 PKCE（仅为不支持 PKCE 的应用关闭，如 Gitea）",
+    "create": "创建",
+    "save": "保存",
+    "cancel": "取消",
+    "status": "状态",
+    "actions": "操作",
+    "enabled": "启用",
+    "disabled": "已禁用",
+    "edit": "编辑",
+    "rotate": "轮换 secret",
+    "delete": "删除",
+    "empty": "暂无可管理的客户端。",
+    "secretOnce": "<strong>{{id}}</strong> 的 client secret 只显示这一次，请立即保存：",
+    "copy": "复制",
+    "saved": "已保存，隐藏",
+    "confirmRotate": "为 {{id}} 生成新 secret？旧 secret 立即失效，应用需同步更新。",
+    "confirmDelete": "删除客户端 {{id}}？已签发的 token 与应用会话不会因此撤回。",
+    "error": {
+      "400": "输入无效：检查 ID、回调地址（HTTPS、无通配符）与 scope（须含 openid）。",
+      "403": "当前登录没有客户端管理权限。",
+      "404": "客户端不存在。",
+      "409": "冲突：ID 已存在，或该客户端不是本服务可管理的类型。",
+      "unavailable": "身份服务暂时不可用，请稍后重试。",
+      "failed": "操作失败。"
+    }
+  }
+}

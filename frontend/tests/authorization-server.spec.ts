@@ -43,9 +43,9 @@ test("AD + passkey -> in-process authorization server: consent, tokens, userinfo
   await page.getByLabel("用户名", { exact: true }).fill("alice");
   await page.getByLabel("密码", { exact: true }).fill("fixture-password");
   await page.getByRole("button", { name: "继续", exact: true }).click();
-  await page.getByRole("button", { name: "创建 passkey", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "passkey 已创建", exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "用 passkey 验证", exact: true }).click();
+  await page.getByRole("button", { name: "创建 Passkey", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Passkey 已创建", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "用 Passkey 验证", exact: true }).click();
   // Resumed authorization request -> our consent page: requested access in plain words, then allow.
   await expect(page.getByRole("heading", { name: /请求访问你的账号$/ })).toBeVisible();
   await expect(page.getByText("你所在的组", { exact: true })).toBeVisible();
@@ -97,7 +97,7 @@ test("AD + passkey -> in-process authorization server: consent, tokens, userinfo
   await page.getByLabel("用户名", { exact: true }).fill("alice");
   await page.getByLabel("密码", { exact: true }).fill("fixture-password");
   await page.getByRole("button", { name: "继续", exact: true }).click();
-  await page.getByRole("button", { name: "用 passkey 验证", exact: true }).click();
+  await page.getByRole("button", { name: "用 Passkey 验证", exact: true }).click();
   await expect(page.getByRole("heading", { name: "OIDC 客户端" })).toBeVisible();
   expect(new URL(page.url()).pathname).toBe("/console");
   await expect(page.getByRole("row", { name: /fixture-rp/ })).toBeVisible();
