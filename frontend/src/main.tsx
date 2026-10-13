@@ -1,4 +1,5 @@
 import { createRoot } from "react-dom/client";
+import "./i18n";
 import { readPageContext } from "./page-context";
 import { AdminApp } from "./pages/AdminApp";
 import { ConsentPage } from "./pages/ConsentPage";

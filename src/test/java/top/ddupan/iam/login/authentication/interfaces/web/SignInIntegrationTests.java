@@ -96,10 +96,10 @@ class SignInIntegrationTests {
             .andExpect(redirectedUrl("/signin?error"));
         assertThat(session.getAttribute("SPRING_SECURITY_CONTEXT")).isNull();
         mvc.perform(get("/signin").with(https()).param("error", "").session(session))
-            .andExpect(content().string(Matchers.containsString("无法验证账号")));
+            .andExpect(content().string(Matchers.containsString("\"error\":\"invalid\"")));
         // A directory outage is the only failure told apart; account states stay the generic message.
         mvc.perform(get("/signin").with(https()).param("error", "unavailable").session(session))
-            .andExpect(content().string(Matchers.containsString("目录服务暂时不可用")));
+            .andExpect(content().string(Matchers.containsString("\"error\":\"unavailable\"")));
         mvc.perform(post("/signin/restart").with(https()).session(session).with(csrf()))
             .andExpect(redirectedUrl("/signin"));
         assertThat(session.isInvalid()).isTrue();
@@ -117,7 +117,7 @@ class SignInIntegrationTests {
             .andExpect(redirectedUrl("/signin?error=throttled"));
         assertThat(Directory.INSTANCE.binds.get()).isEqualTo(before);
         mvc.perform(get("/signin").with(https()).param("error", "throttled"))
-            .andExpect(content().string(Matchers.containsString("尝试次数过多")));
+            .andExpect(content().string(Matchers.containsString("\"error\":\"throttled\"")));
     }
 
     @Test

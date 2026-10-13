@@ -11,7 +11,7 @@ const STOP = process.env.STOP_FILE ?? "/c/stop-driver";
 const log = (...args) => console.log(new Date().toISOString(), ...args);
 
 const browser = await chromium.launch();
-const context = await browser.newContext({ ignoreHTTPSErrors: true });
+const context = await browser.newContext({ ignoreHTTPSErrors: true, locale: "zh-CN" });
 const page = await context.newPage();
 const cdp = await context.newCDPSession(page);
 await cdp.send("WebAuthn.enable");
@@ -40,11 +40,11 @@ async function drive(escaped) {
       await page.getByLabel("用户名", { exact: true }).fill("alice");
       await page.getByLabel("密码", { exact: true }).fill("fixture-password");
       await page.getByRole("button", { name: "继续", exact: true }).click();
-    } else if (await has("创建 passkey")) {
-      await page.getByRole("button", { name: "创建 passkey", exact: true }).click();
-      await page.getByRole("button", { name: "用 passkey 验证", exact: true }).waitFor({ timeout: 10000 }).catch(() => {});
-    } else if (await has("用 passkey 验证")) {
-      await page.getByRole("button", { name: "用 passkey 验证", exact: true }).click();
+    } else if (await has(/^创建 passkey$/i)) {
+      await page.getByRole("button", { name: /^创建 passkey$/i }).click();
+      await page.getByRole("button", { name: /^用 passkey 验证$/i }).waitFor({ timeout: 10000 }).catch(() => {});
+    } else if (await has(/^用 passkey 验证$/i)) {
+      await page.getByRole("button", { name: /^用 passkey 验证$/i }).click();
     } else if (await has("允许")) {
       await page.getByRole("button", { name: "允许", exact: true }).click();
     } else {
