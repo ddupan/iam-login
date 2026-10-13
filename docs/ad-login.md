@@ -1,13 +1,13 @@
 # AD 第一因素接入
 
-`/signin` 接收 AD 用户名（sAMAccountName）或本域 UPN，通过 Spring LDAP `ContextSource.getContext` 以用户身份执行 LDAPS bind，
-随后由 Spring Data LDAP 仓储复用这条已认证连接查询用户与组。
-不使用额外目录服务账号，不写入 AD，不复制 Authelia 的绑定密码。
+`/signin` 接收 AD 用户名（sAMAccountName）或本域 UPN，由 Spring Security 的
+`ActiveDirectoryLdapAuthenticationProvider` 以用户身份执行 LDAPS bind，并用同一条连接查询该用户条目。
+URL、base DN 与 JNDI 环境（忽略 referral、`objectGUID` 二进制、超时）取自 Boot 的 `spring.ldap.*`，
+与 Boot 的 `ContextSource` 一致。登录不需要目录服务账号，不写入 AD。
 
-领域仓储接口为 `UserRepository`，`User` 为领域模型。`VerifyPassword` 应用用例以
-try-with-resources 管理已认证用户仓储会话；基础设施的 `AdUserRepository` 通过
-`SimpleLdapRepository<AdUserEntry>`、`LdapTemplate`、ODM 实现读取与转换，关闭后不可继续查询。
-`AdUserEntry` 的 LDAP 注解不会进入领域对象。
+`User` 为领域模型。条目经 ODM 映射为 `AdUserEntry`（`AdUserDetailsMapper`，与其他读取共用
+`AdEntryMapper` 的截断检查），再转换为 `User`；`AdUserEntry` 的 LDAP 注解不会进入领域对象。
+外层 `DirectoryAuthenticationProvider` 负责登录限流和输入限制，并把结果收敛为只含密码因素的认证。
 
 成功后重定向到 `/signin/mfa`，显示目录账号、objectGUID、邮箱、直接所属组及组 DN。
 **密码成功本身不是完整登录成功。** Spring Security 先保存仅含 `FACTOR_PASSWORD`
@@ -23,8 +23,8 @@ try-with-resources 管理已认证用户仓储会话；基础设施的 `AdUserRe
   不把 Spring 的 `FACTOR_PASSWORD` 当作组。结果排序，不做应用专用组改写。
 - 此轮不展开嵌套组、不推导 primaryGroupID，也不宣称与 Authelia 的有效组集合完全一致。
   遇到 ranged memberOf 或不同 DN 同名 CN 拒绝映射，不静默丢组或合并不同主体。
-- AD bind 执行密码及账号状态检查；基础设施层将禁用、锁定、密码过期等 AD 子码转换为
-  应用层认证失败原因，不向领域层泄露 LDAP/Spring 异常。
+- AD bind 执行密码及账号状态检查；框架把禁用、锁定、密码过期等 AD 子码转换为对应异常
+  （`setConvertSubErrorCodesToExceptions`），页面统一显示为登录失败，不透露账号状态。
   搜索排除 computer 对象，只接受唯一用户条目和合法 objectGUID/sAMAccountName。
 - 邮箱作为目录属性展示，不声称 `email_verified=true`。
 
