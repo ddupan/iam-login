@@ -5,23 +5,19 @@ import javax.naming.ldap.LdapContext;
 import org.springframework.aot.hint.RuntimeHints;
 import org.springframework.aot.hint.RuntimeHintsRegistrar;
 import org.springframework.aot.hint.annotation.RegisterReflectionForBinding;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.ImportRuntimeHints;
 import org.springframework.ldap.core.DirContextProxy;
+import top.ddupan.iam.login.authentication.infrastructure.ad.AdProperties;
 import top.ddupan.iam.login.authentication.infrastructure.ad.AdUserEntry;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
-import top.ddupan.iam.login.authentication.application.VerifyPassword;
-import top.ddupan.iam.login.authentication.application.port.PasswordAuthenticator;
 
-/** Composition root: dependencies point inward, framework wiring stays outside the model. */
+/** Directory settings and the native-image metadata the LDAP mapping needs. */
 @Configuration(proxyBeanMethods = false)
+@EnableConfigurationProperties(AdProperties.class)
 @RegisterReflectionForBinding(AdUserEntry.class)
 @ImportRuntimeHints(AuthenticationConfiguration.DirectoryHints.class)
 class AuthenticationConfiguration {
-    @Bean
-    VerifyPassword verifyPassword(PasswordAuthenticator authenticator) {
-        return new VerifyPassword(authenticator);
-    }
     static class DirectoryHints implements RuntimeHintsRegistrar {
         @Override
         public void registerHints(RuntimeHints hints, ClassLoader classLoader) {

@@ -1,24 +1,30 @@
 package top.ddupan.iam.login.authentication.infrastructure.security;
 
 import java.util.List;
+import java.util.Locale;
+import org.springframework.security.authentication.AccountStatusException;
 import org.springframework.security.authentication.AuthenticationProvider;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.InternalAuthenticationServiceException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.authority.FactorGrantedAuthority;
+import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.web.authentication.WebAuthenticationDetails;
-import top.ddupan.iam.login.authentication.application.VerifyPassword;
-import top.ddupan.iam.login.authentication.application.port.PasswordVerificationException;
-import top.ddupan.iam.login.authentication.domain.UserRepository;
+import top.ddupan.iam.login.authentication.infrastructure.ad.AdUser;
 
-/** Bridges directory authentication into Spring Security's form-login lifecycle. */
+/**
+ * Sign-in throttling and input limits around the directory's own provider, and the result reduced to what the rest
+ * of the service uses: a directory principal holding the password factor.
+ */
 public final class DirectoryAuthenticationProvider implements AuthenticationProvider {
-    private final VerifyPassword passwords;
+    private final AuthenticationProvider directory;
+    private final String domain;
     private final SignInThrottle throttle;
 
-    public DirectoryAuthenticationProvider(VerifyPassword passwords, SignInThrottle throttle) {
-        this.passwords = passwords;
+    public DirectoryAuthenticationProvider(AuthenticationProvider directory, String domain, SignInThrottle throttle) {
+        this.directory = directory;
+        this.domain = domain.toLowerCase(Locale.ROOT);
         this.throttle = throttle;
     }
 
@@ -27,24 +33,36 @@ public final class DirectoryAuthenticationProvider implements AuthenticationProv
         // The remote address honours X-Forwarded-For from trusted proxies (server.forward-headers-strategy).
         var address = request.getDetails() instanceof WebAuthenticationDetails details
             ? String.valueOf(details.getRemoteAddress()) : "";
-        if (throttle.blocked(request.getName(), address)) throw new SignInThrottledException();
+        String username = request.getName();
+        if (throttle.blocked(username, address)) throw new SignInThrottledException();
+        String password = request.getCredentials() instanceof String value ? value : null;
+        Authentication result;
         try {
-            var user = passwords.verify(request.getName(),
-                request.getCredentials() instanceof String password ? password : null);
-            throttle.succeeded(request.getName());
-            // Directory groups remain profile data, not local application authorities.
-            return UsernamePasswordAuthenticationToken.authenticated(new DirectoryPrincipal(user), null,
-                List.of(FactorGrantedAuthority.fromAuthority(FactorGrantedAuthority.PASSWORD_AUTHORITY)));
-        } catch (PasswordVerificationException ex) {
-            if (ex.reason() == PasswordVerificationException.Reason.UNAVAILABLE) {
-                throw new InternalAuthenticationServiceException("Directory unavailable");
-            }
-            // Locked, disabled and expired count too: the page reports them all as a failure.
-            throttle.failed(request.getName(), address);
+            // Malformed input is a failed attempt too, but never reaches the directory.
+            if (!wellFormed(username, password)) throw new BadCredentialsException("Malformed credentials");
+            result = directory.authenticate(UsernamePasswordAuthenticationToken.unauthenticated(username, password));
+        } catch (BadCredentialsException | AccountStatusException | UsernameNotFoundException ex) {
+            // Locked, disabled and expired count too: the page reports them all as one failure.
+            throttle.failed(username, address);
             throw new BadCredentialsException("Unable to verify credentials");
-        } catch (UserRepository.AccessFailure ex) {
+        } catch (RuntimeException ex) {
+            // Connection, TLS and mapping failures: the directory, not the user, is the problem.
             throw new InternalAuthenticationServiceException("Directory unavailable");
         }
+        if (result == null || !(result.getPrincipal() instanceof AdUser user)) {
+            throw new InternalAuthenticationServiceException("Directory unavailable");
+        }
+        throttle.succeeded(username);
+        // Directory groups remain profile data, not local application authorities.
+        return UsernamePasswordAuthenticationToken.authenticated(new DirectoryPrincipal(user.user()), null,
+            List.of(FactorGrantedAuthority.fromAuthority(FactorGrantedAuthority.PASSWORD_AUTHORITY)));
+    }
+
+    private boolean wellFormed(String username, String password) {
+        return username != null && !username.isBlank() && username.length() <= 256
+            && !username.contains("\\") && username.equals(username.strip())
+            && (!username.contains("@") || username.toLowerCase(Locale.ROOT).endsWith("@" + domain))
+            && password != null && !password.isEmpty() && password.length() <= 1024;
     }
 
     @Override

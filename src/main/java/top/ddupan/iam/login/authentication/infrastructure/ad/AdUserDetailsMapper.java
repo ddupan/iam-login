@@ -2,49 +2,45 @@ package top.ddupan.iam.login.authentication.infrastructure.ad;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.util.Collection;
 import java.util.List;
-import java.util.Optional;
 import java.util.TreeMap;
 import java.util.UUID;
 import javax.naming.NamingException;
 import javax.naming.ldap.LdapName;
-import org.springframework.dao.DataAccessException;
-import org.springframework.data.ldap.repository.LdapRepository;
-import org.springframework.ldap.core.support.SingleContextSource;
-import top.ddupan.iam.login.authentication.application.port.AuthenticatedUserSession;
+import org.springframework.ldap.core.DirContextAdapter;
+import org.springframework.ldap.core.DirContextOperations;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.ldap.userdetails.UserDetailsContextMapper;
 import top.ddupan.iam.login.authentication.domain.User.GroupMembership;
 import top.ddupan.iam.login.authentication.domain.User.UserId;
 import top.ddupan.iam.login.authentication.domain.User;
 import top.ddupan.iam.login.authentication.domain.UserRepository;
-import static org.springframework.ldap.query.LdapQueryBuilder.query;
 
-/** One authenticated connection and one Spring Data repository per use-case scope. */
-final class AdUserRepository implements UserRepository, AuthenticatedUserSession {
-    private final LdapRepository<AdUserEntry> entries;
-    private final SingleContextSource connection;
+/**
+ * Turns the entry the AD provider found, read over the user's own bind, into our user. Goes through the same ODM
+ * mapping (and truncation check) as any other read of {@link AdUserEntry}.
+ */
+final class AdUserDetailsMapper implements UserDetailsContextMapper {
+    private final AdEntryMapper entries = new AdEntryMapper();
     private final String authority;
-    private final String loginName;
-    private boolean closed;
 
-    AdUserRepository(LdapRepository<AdUserEntry> entries, SingleContextSource connection,
-            String authority, String loginName) {
-        this.entries = entries;
-        this.connection = connection;
+    AdUserDetailsMapper(String authority) {
         this.authority = authority;
-        this.loginName = loginName;
     }
 
     @Override
-    public Optional<User> findByLoginName(String name) {
-        requireOpen();
-        try {
-            return entries.findOne(query().where("objectClass").is("user")
-                .and("objectClass").not().is("computer")
-                .and(query().where("sAMAccountName").is(name).or("userPrincipalName").is(name)))
-                .map(this::toUser);
-        } catch (org.springframework.ldap.NamingException | DataAccessException | IllegalArgumentException ex) {
-            throw new UserRepository.AccessFailure();
-        }
+    public UserDetails mapUserFromContext(DirContextOperations context, String username,
+            Collection<? extends GrantedAuthority> authorities) {
+        var entry = entries.mapFromLdapDataEntry(context, AdUserEntry.class);
+        if (entry == null) throw new UserRepository.AccessFailure();
+        return new AdUser(toUser(entry));
+    }
+
+    @Override
+    public void mapUserToContext(UserDetails user, DirContextAdapter context) {
+        throw new UnsupportedOperationException("The directory is read-only here");
     }
 
     private User toUser(AdUserEntry entry) {
@@ -72,12 +68,5 @@ final class AdUserRepository implements UserRepository, AuthenticatedUserSession
             | (long) Short.toUnsignedInt(little.getShort()) << 16
             | Short.toUnsignedInt(little.getShort());
         return new UUID(most, ByteBuffer.wrap(bytes, 8, 8).getLong()).toString();
-    }
-
-    @Override public String loginName() { requireOpen(); return loginName; }
-    @Override public UserRepository users() { requireOpen(); return this; }
-    private void requireOpen() { if (closed) throw new IllegalStateException("User repository scope is closed"); }
-    @Override public void close() {
-        if (!closed) { closed = true; connection.destroy(); }
     }
 }

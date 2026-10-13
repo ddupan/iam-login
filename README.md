@@ -90,17 +90,15 @@ JVM、AOT、Native 测试及原生应用 HTTP 检查已通过，实测范围与�
 
 ```text
 interfaces/web → infrastructure/security（principal）+ domain
-infrastructure/security → application → domain
-infrastructure/ad → application/port + domain
+infrastructure/security → infrastructure/ad（AdUser）+ domain
+infrastructure/ad → domain
 configuration → 装配上述实现
 ```
 
 - `authentication/domain`：`User`、`UserRepository`；稳定主体与组成员关系属于领域模型，不依赖 Spring、Servlet、LDAP 或持久化注解。
-- `authentication/application`：`VerifyPassword` 用例，编排密码认证与同连接用户仓储查询；
-  `port` 描述密码认证及其用户仓储会话，不暴露 `DirContext`。
-- `authentication/infrastructure/ad`：AD bind、Spring Data LDAP 用户仓储、LDAP 实体与领域映射。
-  使用同一次用户 bind 的连接，查询结束关闭，不新增服务账号，不保存用户密码。
-- `authentication/infrastructure/security`：Provider 将目录用户转换为仅含密码因素的认证结果。
+- `authentication/infrastructure/ad`：Spring Security 的 `ActiveDirectoryLdapAuthenticationProvider`（按 `spring.ldap.*` 配置）、
+  LDAP 实体（ODM）与领域映射。登录用用户自己的 bind 读取其条目，不保存用户密码。
+- `authentication/infrastructure/security`：Provider 外包登录限流与输入限制，将目录用户转换为仅含密码因素的认证结果。
 - `authentication/infrastructure/persistence`：封装注册并发锁及事务，不把表结构带入 Security 策略。
 - `authentication/infrastructure/webauthn`：凭据归属与注册策略、challenge 仓储扩展；密码学校验和 JDBC 存储交给 Spring Security。
 - `authentication/interfaces/web`：登录页面与上下文转换；不处理密码 POST、认证会话或退出。
