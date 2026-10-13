@@ -1,0 +1,26 @@
+[
+  {
+    "test-name": "oidcc-scope-address",
+    "variant": "*",
+    "configuration-filename": "*iam-login.json",
+    "comment": "address scope not offered: AD holds no postal address for our users"
+  },
+  {
+    "test-name": "oidcc-scope-phone",
+    "variant": "*",
+    "configuration-filename": "*iam-login.json",
+    "comment": "phone scope not offered: AD holds no verified phone numbers"
+  },
+  {
+    "test-name": "oidcc-scope-all",
+    "variant": "*",
+    "configuration-filename": "*iam-login.json",
+    "comment": "needs address and phone, which are not offered (see above)"
+  },
+  {
+    "test-name": "oidcc-unsigned-request-object-supported-correctly-or-rejected-as-unsupported",
+    "variant": "*",
+    "configuration-filename": "*iam-login.json",
+    "comment": "request objects are rejected with request_not_supported, which the spec permits"
+  }
+]

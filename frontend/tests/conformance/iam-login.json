@@ -1,0 +1,19 @@
+{
+  "alias": "iam-login",
+  "description": "iam-login (conformanceFixture)",
+  "server": {
+    "discoveryUrl": "https://localhost:18083/.well-known/openid-configuration"
+  },
+  "client": {
+    "client_id": "conformance-1",
+    "client_secret": "conformance-1-secret"
+  },
+  "client2": {
+    "client_id": "conformance-2",
+    "client_secret": "conformance-2-secret"
+  },
+  "client_secret_post": {
+    "client_id": "conformance-1",
+    "client_secret": "conformance-1-secret"
+  }
+}

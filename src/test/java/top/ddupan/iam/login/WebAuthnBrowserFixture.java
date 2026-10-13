@@ -88,6 +88,9 @@ public final class WebAuthnBrowserFixture {
                         .reuseRefreshTokens(false).build())
                     .build());
             }
+            // The app reports ready before these clients exist; scripts/conformance waits for this line.
+            System.out.println("CONFORMANCE_CLIENTS_REGISTERED");
+            System.out.flush();
         }
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             context.close(); directory.close(); database.stop();

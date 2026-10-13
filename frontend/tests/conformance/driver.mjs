@@ -1,7 +1,8 @@
-// Spike tooling: drives the OpenID conformance suite's front-channel steps with a real browser, in place of
+// Drives the OpenID conformance suite's front-channel steps with a real browser, in place of
 // the suite's HtmlUnit runner (which cannot run our ES-module login page, nor WebAuthn). One browser context
 // for the whole run: the first login registers a passkey on a virtual authenticator, later ones use it.
-// Runs until the file named by STOP_FILE exists. Test-only; points at loopback fixtures.
+// Runs until the file named by STOP_FILE exists (scripts/conformance just removes the container).
+// Test-only; points at loopback fixtures.
 import { chromium } from "@playwright/test";
 import { existsSync } from "node:fs";
 
@@ -21,7 +22,20 @@ await cdp.send("WebAuthn.addVirtualAuthenticator", { options: {
 } });
 const api = await (await import("@playwright/test")).request.newContext({ ignoreHTTPSErrors: true, baseURL: SUITE });
 
-async function drive(escaped) {
+// Modules that cannot judge an outcome themselves (an OP error page instead of an error redirect, a login page
+// that prompt=login must show again) leave an image placeholder and wait for it, as the suite's own runner
+// fills it with the page it sees. Filling it marks the module REVIEW (human check), never PASSED.
+async function fillPlaceholders(id) {
+  const images = await api.get(`/api/log/${id}/images`).then(r => r.ok() ? r.json() : []).catch(() => []);
+  for (const entry of images.filter(e => e.upload && !e.img)) {
+    const png = (await page.screenshot({ fullPage: true })).toString("base64");
+    const response = await api.post(`/api/log/${id}/images/${entry.upload}`,
+      { headers: { "content-type": "text/plain" }, data: `data:image/png;base64,${png}` });
+    log(id, "screenshot for placeholder", entry.upload, response.status());
+  }
+}
+
+async function drive(id, escaped) {
   // The suite's browser API returns URLs HTML-escaped ("&amp;"); unescaped, parameters such as nonce would
   // reach the OP as "amp;nonce" and every test would fail for reasons that are not the OP's.
   const url = escaped.replaceAll("&amp;", "&");
@@ -35,6 +49,7 @@ async function drive(escaped) {
       return;
     }
     if (!here.startsWith(OP)) { log("left OP to", here); return; }
+    await fillPlaceholders(id);
     const has = name => page.getByRole("button", { name, exact: true }).isVisible().catch(() => false);
     if (await page.getByRole("heading", { name: "登录", exact: true }).isVisible().catch(() => false)) {
       await page.getByLabel("用户名", { exact: true }).fill("alice");
@@ -68,7 +83,7 @@ while (!existsSync(STOP)) {
       if (!started.has(id)) { started.add(id); await context.clearCookies(); }
       await api.post(`/api/runner/browser/${id}/visit?url=${encodeURIComponent(url)}`);
       log(id, "visit", url.slice(0, 120));
-      await drive(url);
+      await drive(id, url);
     }
   }
   await new Promise(resolve => setTimeout(resolve, 1000));

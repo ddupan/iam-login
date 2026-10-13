@@ -1,0 +1,32 @@
+name: conformance
+# OpenID Foundation conformance suite, run by hand (Actions → conformance → Run workflow): it takes too long and
+# pulls too much for every PR.
+# Runs on "iam-build", not the pod pool: suite JVM + MongoDB + the app (Gradle, Testcontainers PostgreSQL)
+# + Chromium do not fit a 4Gi pool Pod, and the runner's persistent disk keeps the suite build cached
+# (scripts/conformance), so a run does not depend on Maven Central over the flaky WAN.
+on:
+  workflow_dispatch:
+
+jobs:
+  conformance:
+    runs-on: iam-build
+    timeout-minutes: 90
+    env:
+      IAM_GRADLE_CACHE: /srv/iam/ci/gradle
+      IAM_NPM_CACHE: /srv/iam/ci/npm
+      IAM_CONFORMANCE_CACHE: /srv/iam/ci/conformance
+      IAM_BUILD_CPUS: "4"
+      IAM_BUILD_MEMORY: 3g
+    steps:
+      - name: Remove containers left by cancelled runs
+        # Capacity 1: no other job of this runner is running, so every labelled container is an orphan.
+        run: docker ps -aq --filter label=iam-login.ci=1 | xargs -r docker rm -f
+      - uses: actions/checkout@v4
+      - name: OpenID conformance suite
+        run: scripts/conformance
+      - name: Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: conformance-results
+          path: build/conformance/

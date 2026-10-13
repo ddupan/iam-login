@@ -1,0 +1,56 @@
+[
+  {
+    "test-name": "oidcc-userinfo-post-body",
+    "variant": "*",
+    "configuration-filename": "*iam-login.json",
+    "current-block": "",
+    "condition": "UserInfoEndpointWithAccessTokenInBodyNotSupported",
+    "expected-result": "warning",
+    "comment": "userinfo accepts the access token only in the Authorization header; sending it in the form body is a MAY (RFC 6750 2.2) and not implemented (docs/authorization-server.md)"
+  },
+  {
+    "test-name": "oidcc-scope-profile",
+    "variant": "*",
+    "configuration-filename": "*iam-login.json",
+    "current-block": "",
+    "condition": "VerifyScopesReturnedInUserInfoClaims",
+    "expected-result": "warning",
+    "comment": "userinfo returns only name and preferred_username for profile: AD has no source for the other profile claims (nickname, birthdate, ...)"
+  },
+  {
+    "test-name": "oidcc-scope-email",
+    "variant": "*",
+    "configuration-filename": "*iam-login.json",
+    "current-block": "Verify authorization endpoint response",
+    "condition": "EnsureIdTokenDoesNotContainEmailForScopeEmail",
+    "expected-result": "warning",
+    "comment": "email is issued in the ID token rather than only via userinfo; a SHOULD in OIDC Core 5.4 (docs/authorization-server.md)"
+  },
+  {
+    "test-name": "oidcc-alternate-happy-flow",
+    "variant": "*",
+    "configuration-filename": "*iam-login.json",
+    "current-block": "Verify authorization endpoint response",
+    "condition": "EnsureIdTokenDoesNotContainEmailForScopeEmail",
+    "expected-result": "warning",
+    "comment": "same as oidcc-scope-email: email is issued in the ID token"
+  },
+  {
+    "test-name": "oidcc-ensure-request-with-acr-values-succeeds",
+    "variant": "*",
+    "configuration-filename": "*iam-login.json",
+    "current-block": "Verify authorization endpoint response",
+    "condition": "ValidateIdTokenACRClaimAgainstAcrValuesRequest",
+    "expected-result": "warning",
+    "comment": "acr / acr_values are not implemented (docs/authorization-server.md); acr_values is a voluntary claim request"
+  },
+  {
+    "test-name": "oidcc-claims-essential",
+    "variant": "*",
+    "configuration-filename": "*iam-login.json",
+    "current-block": "",
+    "condition": "EnsureUserInfoContainsName",
+    "expected-result": "warning",
+    "comment": "the claims request parameter is not implemented (docs/authorization-server.md), so an essential name is not returned via userinfo"
+  }
+]
