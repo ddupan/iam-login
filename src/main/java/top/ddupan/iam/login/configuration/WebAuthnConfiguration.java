@@ -16,6 +16,8 @@ import org.springframework.security.web.webauthn.api.UserVerificationRequirement
 import org.springframework.security.web.webauthn.management.*;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
+import top.ddupan.iam.login.account.infrastructure.persistence.Grants;
+import top.ddupan.iam.login.account.infrastructure.persistence.Passkeys;
 import top.ddupan.iam.login.authentication.infrastructure.persistence.CredentialRegistration;
 import top.ddupan.iam.login.authentication.infrastructure.webauthn.*;
 
@@ -46,7 +48,7 @@ class WebAuthnConfiguration {
     @Bean
     WebAuthnRelyingPartyOperations relyingParty(WebAuthnProperties properties, MfaPolicy policy,
             PublicKeyCredentialUserEntityRepository users, UserCredentialRepository credentials,
-            DSLContext db, PlatformTransactionManager transactions) {
+            CredentialRegistration registrations) {
         var delegate = new Webauthn4JRelyingPartyOperations(users, credentials,
             PublicKeyCredentialRpEntity.builder().id(properties.rpId()).name("IAM Login").build(),
             Set.of(properties.origin()));
@@ -57,7 +59,23 @@ class WebAuthnConfiguration {
         delegate.setCustomizeRequestOptions(options -> options.timeout(Duration.ofMinutes(5))
             .userVerification(UserVerificationRequirement.REQUIRED));
         return new DirectoryRelyingPartyOperations(delegate, policy, users, credentials,
-            new CredentialRegistration(db, new TransactionTemplate(transactions)));
+            registrations);
+    }
+
+    @Bean
+    CredentialRegistration credentialRegistration(DSLContext db, PlatformTransactionManager transactions) {
+        return new CredentialRegistration(db, new TransactionTemplate(transactions));
+    }
+
+    // The account page's own passkeys and granted applications (AccountController).
+    @Bean
+    Passkeys passkeys(DSLContext db, CredentialRegistration registrations) {
+        return new Passkeys(db, registrations);
+    }
+
+    @Bean
+    Grants grants(DSLContext db, PlatformTransactionManager transactions) {
+        return new Grants(db, new TransactionTemplate(transactions));
     }
 
     @Bean

@@ -63,6 +63,9 @@ import static org.assertj.core.api.Assertions.*;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+import static top.ddupan.iam.login.persistence.schema.Tables.OAUTH2_AUTHORIZATION;
+import static top.ddupan.iam.login.persistence.schema.Tables.OAUTH2_AUTHORIZATION_CONSENT;
+import static top.ddupan.iam.login.persistence.schema.Tables.OAUTH2_REGISTERED_CLIENT;
 import static top.ddupan.iam.login.persistence.schema.Tables.USER_CREDENTIALS;
 import static top.ddupan.iam.login.persistence.schema.Tables.USER_ENTITIES;
 import static top.ddupan.iam.login.persistence.schema.Tables.WEBAUTHN_CHALLENGE;
@@ -217,6 +220,95 @@ class WebAuthnIntegrationTests {
                 .issuedAt(Instant.now().minusSeconds(601)).build())));
         mvc.perform(post("/webauthn/register/options").session(session).with(https()).with(csrf()))
             .andExpect(status().is3xxRedirection());
+    }
+
+    @Test
+    void accountPageNeedsBothFreshFactorsAndKeepsTheLastPasskey(@Autowired PublicKeyCredentialUserEntityRepository users,
+            @Autowired UserCredentialRepository credentials) throws Exception {
+        mvc.perform(get("/account").with(https())).andExpect(redirectedUrl("/signin"));
+        var session = login();
+        mvc.perform(get("/account").session(session).with(https())).andExpect(redirectedUrlPattern("/signin/mfa?*"));
+        mvc.perform(post("/webauthn/register/options").session(session).with(https()).with(csrf())).andExpect(status().isOk());
+        var name = ((SecurityContext) session.getAttribute("SPRING_SECURITY_CONTEXT")).getAuthentication().getName();
+        var owner = users.findByUsername(name).getId();
+        var first = credential(credentials, owner, "laptop");
+        var second = credential(credentials, owner, "phone");
+        // Another account's passkey: its id must match nothing through this account's page.
+        var stranger = Bytes.random();
+        db.insertInto(USER_ENTITIES).set(USER_ENTITIES.ID, stranger.toBase64UrlString()).set(USER_ENTITIES.NAME, "example.test:stranger")
+            .set(USER_ENTITIES.DISPLAY_NAME, "stranger").execute();
+        var foreign = credential(credentials, stranger, "theirs");
+        try {
+            mvc.perform(put("/account/passkeys/" + first + "/label").session(session).with(https()).with(csrf())
+                .contentType("application/json").content("{\"label\":\"x\"}")).andExpect(redirectedUrlPattern("/signin/mfa?*"));
+            secondFactor(session);
+            mvc.perform(get("/account").session(session).with(https())).andExpect(status().isOk())
+                .andExpect(content().string(Matchers.containsString("\"step\":\"account\"")))
+                .andExpect(content().string(Matchers.containsString("laptop")))
+                .andExpect(content().string(Matchers.not(Matchers.containsString("theirs"))));
+            mvc.perform(put("/account/passkeys/" + first + "/label").session(session).with(https())
+                .contentType("application/json").content("{\"label\":\"x\"}")).andExpect(status().isForbidden());
+            mvc.perform(put("/account/passkeys/" + first + "/label").session(session).with(https()).with(csrf())
+                .contentType("application/json").content("{\"label\":\"  work laptop  \"}")).andExpect(status().isNoContent());
+            assertThat(credentials.findByCredentialId(Bytes.fromBase64(first)).getLabel()).isEqualTo("work laptop");
+            mvc.perform(put("/account/passkeys/" + first + "/label").session(session).with(https()).with(csrf())
+                .contentType("application/json").content("{\"label\":\" \"}")).andExpect(status().isBadRequest())
+                .andExpect(jsonPath("error").value("invalid"));
+            mvc.perform(put("/account/passkeys/" + foreign + "/label").session(session).with(https()).with(csrf())
+                .contentType("application/json").content("{\"label\":\"mine\"}")).andExpect(status().isNotFound());
+            mvc.perform(delete("/account/passkeys/" + foreign).session(session).with(https()).with(csrf()))
+                .andExpect(status().isNotFound());
+            mvc.perform(delete("/account/passkeys/" + second).session(session).with(https()).with(csrf()))
+                .andExpect(status().isNoContent());
+            mvc.perform(delete("/account/passkeys/" + first).session(session).with(https()).with(csrf()))
+                .andExpect(status().isConflict()).andExpect(jsonPath("error").value("last"));
+            assertThat(credentials.findByUserId(owner)).hasSize(1);
+            assertThat(credentials.findByUserId(stranger)).hasSize(1);
+        } finally {
+            db.deleteFrom(USER_CREDENTIALS).execute();
+            db.deleteFrom(USER_ENTITIES).where(USER_ENTITIES.ID.eq(stranger.toBase64UrlString())).execute();
+        }
+    }
+
+    @Test
+    void revokingAnApplicationRemovesItsConsentAndAuthorizations() throws Exception {
+        var session = login();
+        secondFactor(session);
+        var name = ((SecurityContext) session.getAttribute("SPRING_SECURITY_CONTEXT")).getAuthentication().getName();
+        db.insertInto(OAUTH2_REGISTERED_CLIENT).set(OAUTH2_REGISTERED_CLIENT.ID, "rp-id").set(OAUTH2_REGISTERED_CLIENT.CLIENT_ID, "rp")
+            .set(OAUTH2_REGISTERED_CLIENT.CLIENT_NAME, "Fixture RP").set(OAUTH2_REGISTERED_CLIENT.CLIENT_AUTHENTICATION_METHODS, "client_secret_basic")
+            .set(OAUTH2_REGISTERED_CLIENT.AUTHORIZATION_GRANT_TYPES, "authorization_code").set(OAUTH2_REGISTERED_CLIENT.SCOPES, "openid,groups")
+            .set(OAUTH2_REGISTERED_CLIENT.CLIENT_SETTINGS, "{}").set(OAUTH2_REGISTERED_CLIENT.TOKEN_SETTINGS, "{}").execute();
+        try {
+            db.insertInto(OAUTH2_AUTHORIZATION_CONSENT).set(OAUTH2_AUTHORIZATION_CONSENT.REGISTERED_CLIENT_ID, "rp-id")
+                .set(OAUTH2_AUTHORIZATION_CONSENT.PRINCIPAL_NAME, name).set(OAUTH2_AUTHORIZATION_CONSENT.AUTHORITIES, "SCOPE_openid,SCOPE_groups").execute();
+            for (var principal : List.of(name, "example.test:someone-else")) {
+                db.insertInto(OAUTH2_AUTHORIZATION).set(OAUTH2_AUTHORIZATION.ID, UUID.randomUUID().toString())
+                    .set(OAUTH2_AUTHORIZATION.REGISTERED_CLIENT_ID, "rp-id").set(OAUTH2_AUTHORIZATION.PRINCIPAL_NAME, principal)
+                    .set(OAUTH2_AUTHORIZATION.AUTHORIZATION_GRANT_TYPE, "authorization_code")
+                    .set(OAUTH2_AUTHORIZATION.AUTHORIZED_SCOPES, "openid,offline_access").execute();
+            }
+            mvc.perform(get("/account").session(session).with(https())).andExpect(status().isOk())
+                .andExpect(content().string(Matchers.containsString("Fixture RP")))
+                .andExpect(content().string(Matchers.containsString("offline_access")));
+            mvc.perform(delete("/account/apps/rp").session(session).with(https()).with(csrf())).andExpect(status().isNoContent());
+            assertThat(db.fetchCount(OAUTH2_AUTHORIZATION_CONSENT)).isZero();
+            assertThat(db.fetch(OAUTH2_AUTHORIZATION).getValues(OAUTH2_AUTHORIZATION.PRINCIPAL_NAME)).containsExactly("example.test:someone-else");
+            mvc.perform(delete("/account/apps/rp").session(session).with(https()).with(csrf())).andExpect(status().isNotFound());
+        } finally {
+            db.deleteFrom(OAUTH2_AUTHORIZATION).execute();
+            db.deleteFrom(OAUTH2_AUTHORIZATION_CONSENT).execute();
+            db.deleteFrom(OAUTH2_REGISTERED_CLIENT).where(OAUTH2_REGISTERED_CLIENT.ID.eq("rp-id")).execute();
+        }
+    }
+
+    private static String credential(UserCredentialRepository credentials, Bytes owner, String label) {
+        var id = Bytes.random();
+        credentials.save(ImmutableCredentialRecord.builder().credentialType(PublicKeyCredentialType.PUBLIC_KEY)
+            .credentialId(id).userEntityUserId(owner).publicKey(new ImmutablePublicKeyCose(Bytes.random().getBytes()))
+            .signatureCount(0).uvInitialized(true).backupEligible(false).backupState(false)
+            .created(Instant.now()).lastUsed(Instant.now()).label(label).build());
+        return id.toBase64UrlString();
     }
 
     private static final String AUTH_URL = "http://localhost:14444/oauth2/auth?client_id=gitea-fixture&response_type=code";

@@ -23,7 +23,6 @@
     "switchAccount": "换一个账号",
     "lostFactor": "两步验证方式都丢了？请联系管理员",
     "secondFactorUnavailable": "两步验证暂不可用，请联系管理员。",
-    "signedIn": "已登录",
     "error": {
       "invalid": "无法验证账号，请检查用户名和密码。",
       "unavailable": "目录服务暂时不可用，请稍后重试。",
@@ -120,6 +119,69 @@
       "409": "冲突：ID 已存在，或该客户端不是本服务可管理的类型。",
       "unavailable": "身份服务暂时不可用，请稍后重试。",
       "failed": "操作失败。"
+    }
+  },
+  "account": {
+    "title": "我的账户 · IAM",
+    "heading": "我的账户",
+    "nav": {
+      "label": "主导航",
+      "account": "我的账户",
+      "console": "管理控制台"
+    },
+    "verifyAgain": "重新验证",
+    "cancel": "取消",
+    "save": "保存",
+    "profile": {
+      "heading": "账户信息",
+      "readOnly": "来自 AD，只读。修改请在 AD 中进行",
+      "username": "用户名",
+      "directory": "目录",
+      "displayName": "显示名",
+      "email": "邮箱",
+      "groups": "直接所属组"
+    },
+    "passkeys": {
+      "heading": "Passkey",
+      "lead": "两步验证方式。进入此页需要最近 10 分钟内完成过密码和两步验证。",
+      "add": "添加 Passkey",
+      "defaultLabel": "Passkey",
+      "created": "创建于 {{time}}",
+      "lastUsed": "上次使用 {{time}}",
+      "rename": "改名",
+      "remove": "删除",
+      "onlyFactor": "这是唯一的两步验证方式，不能删除。请先添加另一个 Passkey。",
+      "renameTitle": "Passkey 改名",
+      "label": "名称",
+      "removeTitle": "删除「{{label}}」？",
+      "removeLead": "删除后它不能再用于登录这个账号。设备上保存的 Passkey 需要在设备上另行移除。"
+    },
+    "apps": {
+      "heading": "已授权的应用",
+      "lead": "撤销后，应用的长期访问立即失效，下次登录需要重新确认。",
+      "empty": "还没有授权过任何应用。",
+      "app": "应用",
+      "scopes": "权限",
+      "lastIssued": "最近签发",
+      "actions": "操作",
+      "separator": "、",
+      "revoke": "撤销",
+      "revokeTitle": "撤销对 {{app}} 的授权？",
+      "revokeLead": "应用已持有的访问 token 在过期前仍然有效；长期访问（refresh token）立即失效。"
+    },
+    "scope": {
+      "openid": "身份",
+      "profile": "资料",
+      "email": "邮箱",
+      "groups": "组",
+      "offline_access": "长期访问"
+    },
+    "error": {
+      "expired": "验证已超过 10 分钟，需要重新验证后才能修改。",
+      "invalid": "名称不能为空，且不超过 64 个字符。",
+      "missing": "该项已不存在，请刷新页面。",
+      "last": "不能删除唯一的两步验证方式。",
+      "failed": "操作失败，请稍后重试。"
     }
   }
 }

@@ -43,26 +43,13 @@ export function SignInPage({ context }: { context: SignInContext }) {
     );
   }
   const who = context.identity.username;
-  if (context.step === "mfa-pending") {
-    return (
-      <Single below={<><Restart context={context} label={t("signin.switchAccount")} /><span>{t("signin.lostFactor")}</span></>}>
-        <Steps current={2} />
-        {context.app && context.passkey === "authenticate" && <ContinueTo app={context.app} />}
-        {context.passkey === "unavailable"
-          ? <Alert>{t("signin.secondFactorUnavailable")}</Alert>
-          : <Passkey csrf={context.csrf} initial={context.passkey} who={who} />}
-      </Single>
-    );
-  }
   return (
-    <Single>
-      <div className="lead-block"><h1>{t("signin.signedIn")}</h1></div>
-      <div className="who"><span className="avatar" aria-hidden="true">{who.slice(0, 1).toUpperCase()}</span>
-        <div><span>{who}</span><span>{context.identity.email || t("common.noEmail")}</span></div></div>
-      {context.identity.groups.length > 0 && (
-        <div className="chips" aria-label={t("common.groups")}>{context.identity.groups.map(group => <span key={group} className="chip">{group}</span>)}</div>
-      )}
-      <SubmitForm action={context.action} csrf={context.csrf} label={t("common.signOut")} className="secondary" />
+    <Single below={<><Restart context={context} label={t("signin.switchAccount")} /><span>{t("signin.lostFactor")}</span></>}>
+      <Steps current={2} />
+      {context.app && context.passkey === "authenticate" && <ContinueTo app={context.app} />}
+      {context.passkey === "unavailable"
+        ? <Alert>{t("signin.secondFactorUnavailable")}</Alert>
+        : <Passkey csrf={context.csrf} initial={context.passkey} who={who} />}
     </Single>
   );
 }

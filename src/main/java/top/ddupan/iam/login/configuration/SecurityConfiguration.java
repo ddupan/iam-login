@@ -62,7 +62,7 @@ class SecurityConfiguration {
             .build();
         var mfa = webAuthn.getIfAvailable();
         // /oauth2/** belongs to the authorization server's own chain.
-        http.securityMatcher("/signin", "/signin/**", "/assets/**", "/webauthn/**", "/login/webauthn")
+        http.securityMatcher("/signin", "/signin/**", "/assets/**", "/webauthn/**", "/login/webauthn", "/account", "/account/**")
             .redirectToHttps(Customizer.withDefaults())
             .authenticationManager(new ProviderManager(
                 new DirectoryAuthenticationProvider(ActiveDirectory.provider(ad, ldap), ad.domain(),
@@ -71,13 +71,17 @@ class SecurityConfiguration {
                 if (mfa != null) {
                     auth.requestMatchers("/signin/complete").access(mfa.policy.complete);
                     auth.requestMatchers("/signin/consent").access(mfa.policy.complete);
+                    // Both factors fresh (10 minutes) for the page and every change on it: the re-verification
+                    // before adding, renaming or removing a factor or revoking an application.
+                    auth.requestMatchers("/account", "/account/**").access(mfa.policy.complete);
                     auth.requestMatchers(HttpMethod.POST, "/webauthn/register")
                         .access(mfa.policy.password);
                 }
                 // /signin/device decides itself: it saves the request before sending a visitor to sign in.
                 auth.requestMatchers("/error", "/signin", "/signin/password", "/signin/device", "/assets/**").permitAll()
                 .requestMatchers("/signin/mfa").access(passwordFactor.authenticated())
-                // Credential deletion and all unimplemented routes remain closed.
+                // The framework's credential deletion (DELETE /webauthn/register/{id}, no last-factor rule) and all
+                // unimplemented routes remain closed; removal goes through /account.
                 .anyRequest().denyAll();
             })
             .formLogin(form -> form.loginPage("/signin").loginProcessingUrl("/signin/password")
@@ -99,8 +103,12 @@ class SecurityConfiguration {
             .exceptionHandling(exceptions -> exceptions
                 .defaultAuthenticationEntryPointFor(new LoginUrlAuthenticationEntryPoint("/signin"),
                     PathPatternRequestMatcher.withDefaults().matcher("/signin/**"))
+                .defaultAuthenticationEntryPointFor(new LoginUrlAuthenticationEntryPoint("/signin"),
+                    PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/account"))
                 .defaultAuthenticationEntryPointFor(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED),
                     AnyRequestMatcher.INSTANCE))
+            // Not even for /account: form login's success handler clears the saved request, which would drop an
+            // authorization request saved by the authorization server's chain. /signin/complete lands on /account.
             .requestCache(cache -> cache.disable())
             .headers(headers -> headers.contentSecurityPolicy(csp -> csp.policyDirectives(
                 PageRenderer.CONTENT_SECURITY_POLICY)));

@@ -10,7 +10,7 @@ type PageBase = {
 export type SignInContext = PageBase & { app: string } & (
   | { step: "password" }
   | {
-      step: "mfa-pending" | "mfa-complete";
+      step: "mfa-pending";
       passkey: "unavailable" | "register" | "authenticate";
       identity: {
         username: string;
@@ -50,9 +50,17 @@ export type DeviceContext = PageBase & {
 
 export type AdminContext = { step: "admin"; authority: string; clientId: string };
 
-export type PageContext = SignInContext | ConsentContext | DeviceContext | AdminContext;
+export type AccountContext = PageBase & {
+  step: "account";
+  profile: { username: string; displayName: string; email: string; directory: string; groups: string[] };
+  /** Times are ISO instants, "" when unknown. */
+  passkeys: { id: string; label: string; created: string; lastUsed: string }[];
+  apps: { clientId: string; name: string; scopes: string[]; lastIssued: string }[];
+};
 
-const STEPS = ["admin", "password", "mfa-pending", "mfa-complete", "consent", "device"];
+export type PageContext = SignInContext | ConsentContext | DeviceContext | AdminContext | AccountContext;
+
+const STEPS = ["admin", "password", "mfa-pending", "consent", "device", "account"];
 
 export function readPageContext(): PageContext {
   const data = document.getElementById("login-context")?.textContent;

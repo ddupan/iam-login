@@ -3,11 +3,45 @@ import { useTranslation } from "react-i18next";
 import type { CsrfToken } from "../page-context";
 import { Alert } from "./Chrome";
 
-type Problem = "expired" | "unsupported" | "cancelled" | "timeout" | "failed";
+export type Problem = "expired" | "unsupported" | "cancelled" | "timeout" | "failed";
 
 /** A failure whose message is a catalogue key, so the text follows the page language. */
-class Failure extends Error {
+export class Failure extends Error {
   constructor(readonly problem: Problem) { super(problem); }
+}
+
+/** What went wrong, as a catalogue key: a DOMException is the browser's own cancel or timeout. */
+export function problem(cause: unknown): Problem {
+  return cause instanceof DOMException ? "timeout" : cause instanceof Failure ? cause.problem : "failed";
+}
+
+function supported() {
+  if (!PublicKeyCredential.parseCreationOptionsFromJSON || !PublicKeyCredential.parseRequestOptionsFromJSON) {
+    throw new Failure("unsupported");
+  }
+}
+
+async function post(csrf: CsrfToken, path: string, body?: unknown) {
+  const response = await fetch(path, {
+    method: "POST", credentials: "same-origin", redirect: "error",
+    headers: { "Content-Type": "application/json", [csrf.headerName]: csrf.value },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  if (!response.ok || !response.headers.get("content-type")?.includes("application/json")) {
+    throw new Failure("expired");
+  }
+  return response.json();
+}
+
+/** The registration ceremony: the server decides whether this session may add a credential. */
+export async function registerPasskey(csrf: CsrfToken, label: string) {
+  supported();
+  const options = await post(csrf, "/webauthn/register/options");
+  const credential = await navigator.credentials.create({
+    publicKey: PublicKeyCredential.parseCreationOptionsFromJSON(options),
+  }) as PublicKeyCredential | null;
+  if (!credential) throw new Failure("cancelled");
+  await post(csrf, "/webauthn/register", { publicKey: { credential: credential.toJSON(), label } });
 }
 
 /** Registers (first time) or verifies a passkey; the server owns every factor decision. */
@@ -18,49 +52,30 @@ export function Passkey({ csrf, initial, who }: { csrf: CsrfToken; initial: "reg
   const [error, setError] = useState<Problem | null>(null);
   const [registered, setRegistered] = useState(false);
 
-  async function post(path: string, body?: unknown) {
-    const response = await fetch(path, {
-      method: "POST", credentials: "same-origin", redirect: "error",
-      headers: { "Content-Type": "application/json", [csrf.headerName]: csrf.value },
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
-    if (!response.ok || !response.headers.get("content-type")?.includes("application/json")) {
-      throw new Failure("expired");
-    }
-    return response.json();
-  }
-
   async function perform() {
     setBusy(true);
     setError(null);
     try {
-      if (!PublicKeyCredential.parseCreationOptionsFromJSON || !PublicKeyCredential.parseRequestOptionsFromJSON) {
-        throw new Failure("unsupported");
-      }
+      supported();
       if (step === "register") {
-        const options = await post("/webauthn/register/options");
-        const credential = await navigator.credentials.create({
-          publicKey: PublicKeyCredential.parseCreationOptionsFromJSON(options),
-        }) as PublicKeyCredential | null;
-        if (!credential) throw new Failure("cancelled");
-        await post("/webauthn/register", { publicKey: { credential: credential.toJSON(), label: "Passkey" } });
+        await registerPasskey(csrf, "Passkey");
         setRegistered(true);
         setStep("authenticate");
       } else {
-        const options = await post("/webauthn/authenticate/options");
+        const options = await post(csrf, "/webauthn/authenticate/options");
         const credential = await navigator.credentials.get({
           publicKey: PublicKeyCredential.parseRequestOptionsFromJSON(options),
         }) as PublicKeyCredential | null;
         if (!credential) throw new Failure("cancelled");
         // Spring Security answers with the request that was interrupted for login (it consumes the saved
         // request); "/" means there was none, and the sign-in result page decides what comes next.
-        const result = await post("/login/webauthn", credential.toJSON());
+        const result = await post(csrf, "/login/webauthn", credential.toJSON());
         const target = typeof result.redirectUrl === "string" ? new URL(result.redirectUrl, window.location.origin) : null;
         window.location.assign(target && target.origin === window.location.origin && target.pathname !== "/"
           ? target.toString() : "/signin/complete");
       }
     } catch (cause) {
-      setError(cause instanceof DOMException ? "timeout" : cause instanceof Failure ? cause.problem : "failed");
+      setError(problem(cause));
     } finally {
       setBusy(false);
     }

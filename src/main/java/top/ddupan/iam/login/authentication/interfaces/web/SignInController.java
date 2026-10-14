@@ -54,17 +54,14 @@ public class SignInController {
             : policy.enrolled(principal.getName()) ? "authenticate" : "register", app(request, response));
     }
 
+    /** Both factors done: an authorization request interrupted for login resumes, otherwise the account page. */
     @GetMapping(value = "/signin/complete", produces = MediaType.TEXT_HTML_VALUE)
-    ResponseEntity<String> complete(@AuthenticationPrincipal DirectoryPrincipal principal, CsrfToken csrf,
-            HttpServletRequest request, HttpServletResponse response) {
-        // An authorization request interrupted for login resumes here.
+    ResponseEntity<String> complete(HttpServletRequest request, HttpServletResponse response) {
         var cache = new HttpSessionRequestCache();
         var saved = cache.getRequest(request, response);
-        if (saved != null) {
-            cache.removeRequest(request, response);
-            return ResponseEntity.status(303).header("Cache-Control", "no-store").location(URI.create(saved.getRedirectUrl())).build();
-        }
-        return identity(principal, csrf, "mfa-complete", "authenticate", "");
+        if (saved != null) cache.removeRequest(request, response);
+        return ResponseEntity.status(303).header("Cache-Control", "no-store")
+            .location(URI.create(saved != null ? saved.getRedirectUrl() : "/account")).build();
     }
 
     private ResponseEntity<String> identity(DirectoryPrincipal principal, CsrfToken csrf, String step, String passkey,
