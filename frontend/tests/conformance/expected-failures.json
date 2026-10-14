@@ -52,5 +52,14 @@
     "condition": "EnsureUserInfoContainsName",
     "expected-result": "warning",
     "comment": "the claims request parameter is not implemented (docs/authorization-server.md), so an essential name is not returned via userinfo"
+  },
+  {
+    "test-name": "oidcc-server-rotate-keys",
+    "variant": "*",
+    "configuration-filename": "*iam-login.json",
+    "current-block": "",
+    "condition": "VerifyNewJwksHasNewSigningKey",
+    "expected-result": "failure",
+    "comment": "the module expects the OP keys to be rotated by hand before it starts; rotation here is a redeploy with a new key first in iam.signing-keys (docs/authorization-server.md), which this run cannot do"
   }
 ]

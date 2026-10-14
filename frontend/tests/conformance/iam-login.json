@@ -6,14 +6,14 @@
   },
   "client": {
     "client_id": "conformance-1",
-    "client_secret": "conformance-1-secret"
+    "client_secret": "conformance-1-conformance-client-secret"
   },
   "client2": {
     "client_id": "conformance-2",
-    "client_secret": "conformance-2-secret"
+    "client_secret": "conformance-2-conformance-client-secret"
   },
   "client_secret_post": {
     "client_id": "conformance-1",
-    "client_secret": "conformance-1-secret"
+    "client_secret": "conformance-1-conformance-client-secret"
   }
 }
