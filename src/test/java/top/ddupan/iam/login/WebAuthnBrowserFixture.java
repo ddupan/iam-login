@@ -72,7 +72,9 @@ public final class WebAuthnBrowserFixture {
             var clients = context.getBean(RegisteredClientRepository.class);
             for (var id : List.of("conformance-1", "conformance-2")) {
                 clients.save(RegisteredClient.withId(id)
-                    .clientId(id).clientSecret("{noop}" + id + "-secret")
+                    .clientId(id)
+                    // >= 32 bytes: the logout plan signs an HS256 id_token_hint with it.
+                    .clientSecret("{noop}" + id + "-conformance-client-secret")
                     .clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_BASIC)
                     .clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_POST)
                     .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
@@ -88,6 +90,9 @@ public final class WebAuthnBrowserFixture {
                         .reuseRefreshTokens(false).build())
                     .build());
             }
+            // The app reports ready before these clients exist; scripts/conformance waits for this line.
+            System.out.println("CONFORMANCE_CLIENTS_REGISTERED");
+            System.out.flush();
         }
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             context.close(); directory.close(); database.stop();

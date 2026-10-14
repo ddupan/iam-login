@@ -1,0 +1,131 @@
+#!/usr/bin/env bash
+# OpenID Foundation conformance suite against conformanceFixture: every OP plan iam-login can take part in —
+# Basic OP, Config OP and RP-Initiated Logout OP certification, plus the comprehensive plan with client_secret_post.
+# Not run, because the feature is not offered: implicit/hybrid and form_post (OAuth 2.1 code flow only), dynamic
+# registration (and 3rd-party-initiated login, which requires it), session management, front/back-channel logout.
+# The suite's own HtmlUnit runner cannot run our ES-module login page nor WebAuthn, so
+# frontend/tests/conformance/driver.mjs (Playwright) performs every browser step instead.
+# Fails on any failure, warning or skip not listed in frontend/tests/conformance/expected-{failures,skips}.json,
+# and on a listed one that no longer happens (run-test-plan.py's own rule), so the list cannot silently go stale.
+# Results (HTML/JSON export, logs) land in $IAM_CONFORMANCE_OUT, default build/conformance.
+# Test-only: everything listens on loopback and is removed on exit. Uses ports 8443-8445, 18080, 18083, 27018.
+set -euo pipefail
+
+repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+# release-v5.3.1 is the version the 2026-10 spike certified against; bump deliberately, since a newer suite
+# adds checks and may turn the run red without any change here.
+suite_tag=release-v5.3.1
+cache=${IAM_CONFORMANCE_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/iam-login/conformance}
+out=${IAM_CONFORMANCE_OUT:-$repo_root/build/conformance}
+# Images the suite's own docker-compose-dev.yml / builder-compose.yml use, pinned. The Maven image also runs
+# the server: it is the same JDK the jar was built with, and one image fewer to pull over the flaky WAN.
+maven=maven:3.9.11-eclipse-temurin-21
+mongo=mongo:6.0.13
+nginx=nginx:1.27.3
+python=python:3.13.7-slim
+playwright=mcr.microsoft.com/playwright:v1.63.0-noble   # matches @playwright/test in frontend/package.json
+suite_host=localhost.emobix.co.uk   # the suite's dev base URL; its public DNS points at 127.0.0.1
+docker_cmd=(docker)
+if [[ ${IAM_DOCKER_USE_SUDO:-0} == 1 ]]; then docker_cmd=(sudo -n docker); fi
+
+# Under CI, label every container so the next job can remove what a cancelled run left behind
+# (cancelling a host-mode job kills this script, not the container). Manual runs stay unlabelled.
+ci_label=()
+[[ ${GITHUB_ACTIONS:-} == true ]] && ci_label=(--label iam-login.ci=1)
+# Host networking throughout: the suite must reach the OP at https://localhost:18083 (the issuer, so it
+# cannot be renamed), and the browser both. The suite host is pinned in /etc/hosts rather than resolved,
+# because its record lives in public DNS and the WAN fails at random.
+run=("${docker_cmd[@]}" run "${ci_label[@]}" --network host --add-host "$suite_host:127.0.0.1")
+as_me=(--user "$(id -u):$(id -g)" -e HOME=/tmp)
+containers=(iam-conf-mongo iam-conf-suite iam-conf-nginx iam-conf-driver iam-conf-fixture)
+
+mkdir -p -- "$cache" "$out"
+cache=$(cd -- "$cache" && pwd)
+out=$(cd -- "$out" && pwd)
+rm -rf -- "${out:?}"/*
+mkdir -- "$out/results"
+work=$(mktemp -d)
+cleanup() {
+  local status=$?
+  # Container logs are part of the evidence; collect them before the containers go.
+  for name in iam-conf-suite iam-conf-driver; do
+    "${docker_cmd[@]}" logs "$name" > "$out/${name#iam-conf-}.log" 2>&1 || true
+  done
+  if ((status != 0)) && [[ -f $out/fixture.log ]]; then
+    echo "--- fixture.log (last 40 lines)" >&2; tail -n 40 "$out/fixture.log" >&2
+  fi
+  "${docker_cmd[@]}" rm -f "${containers[@]}" >/dev/null 2>&1 || true
+  rm -rf -- "$work"
+}
+trap cleanup EXIT
+
+wait_for() {  # wait_for <seconds> <description> <command...>
+  local limit=$1 what=$2; shift 2
+  for _ in $(seq "$limit"); do "$@" >/dev/null 2>&1 && return 0; sleep 1; done
+  echo "timed out waiting for $what" >&2; return 1
+}
+retry() {  # retry <command...>: for anything that fetches from the internet
+  local attempt
+  for attempt in 1 2 3 4 5; do
+    "$@" && return 0
+    echo "attempt $attempt failed: $*" >&2; sleep $((attempt * 10))
+  done
+  return 1
+}
+
+# Suite server jar and Python runner deps, built once per tag and cached: rebuilding each run would put ~300 MB
+# of Maven downloads on the flaky WAN every run for an identical result.
+suite=$cache/$suite_tag
+if [[ ! -f $suite/fapi-test-suite.jar ]]; then
+  rm -rf -- "$suite"; mkdir -p -- "$suite"
+  retry git -c advice.detachedHead=false clone -q --depth 1 -b "$suite_tag" https://gitlab.com/openid/conformance-suite.git "$suite/src" \
+    || { rm -rf -- "$suite/src"; exit 1; }
+  # Maven resumes from the local repository, so a retry only re-fetches what the last attempt missed.
+  retry "${run[@]}" --rm "${as_me[@]}" -v "$cache/m2:/m2" -v "$suite/src:/src" -w /src --entrypoint mvn "$maven" \
+    -B -q -Dmaven.repo.local=/m2/repository -DskipTests=true package
+  retry "${run[@]}" --rm "${as_me[@]}" -v "$suite:/suite" "$python" \
+    pip install -q --disable-pip-version-check --target /suite/pydeps -r /suite/src/scripts/requirements.txt
+  cp "$suite/src/target/fapi-test-suite.jar" "$suite/"
+fi
+for image in "$mongo" "$nginx" "$playwright"; do retry "${docker_cmd[@]}" pull -q "$image" >/dev/null; done
+
+"${run[@]}" -d --name iam-conf-mongo "$mongo" --bind_ip 127.0.0.1 --port 27018 >/dev/null
+"${run[@]}" -d --name iam-conf-suite "${as_me[@]}" -v "$suite:/suite:ro" --entrypoint java "$maven" \
+  -Xmx1g -jar /suite/fapi-test-suite.jar --server.address=127.0.0.1 --server.port=18080 \
+  --spring.mongodb.uri=mongodb://127.0.0.1:27018/test_suite --fintechlabs.devmode=true \
+  --fintechlabs.base_url=https://$suite_host:8443 --fintechlabs.base_mtls_url=https://$suite_host:8444 >/dev/null
+
+# The suite's dev nginx config, moved to loopback (8080 and Docker's DNS name "server" are not ours to take
+# on a shared host); its certificate is generated here instead of in an image build that needs apt.
+sed -e 's/listen \(844[345]\)/listen 127.0.0.1:\1/' -e 's#http://server:8080#http://127.0.0.1:18080#' \
+  "$suite/src/nginx/nginx-static.conf" > "$work/nginx.conf"
+openssl req -x509 -nodes -days 1 -newkey rsa:2048 -subj "/CN=$suite_host" \
+  -keyout "$work/nginx.key" -out "$work/nginx.crt" 2>/dev/null
+chmod a+r "$work"/nginx.*
+"${run[@]}" -d --name iam-conf-nginx -v "$work/nginx.conf:/etc/nginx/nginx.conf:ro" \
+  -v "$work/nginx.crt:/etc/ssl/certs/nginx-selfsigned.crt:ro" \
+  -v "$work/nginx.key:/etc/ssl/private/nginx-selfsigned.key:ro" "$nginx" >/dev/null
+
+IAM_DOCKER_NAME=iam-conf-fixture "$repo_root/scripts/gradle-in-docker" conformanceFixture \
+  -x processTestAot -x compileAotTestJava -x processAotTestResources > "$out/fixture.log" 2>&1 &
+wait_for 900 "conformanceFixture" grep -q CONFORMANCE_CLIENTS_REGISTERED "$out/fixture.log"
+wait_for 120 "conformance suite" curl -sfk -o /dev/null "https://$suite_host:8443/api/runner/available" \
+  --resolve "$suite_host:8443:127.0.0.1"
+
+# node_modules (with @playwright/test) is already there: gradle-in-docker ran frontend-in-docker.
+"${run[@]}" -d --name iam-conf-driver "${as_me[@]}" --ipc=host -v "$repo_root/frontend:/w:ro" -w /w \
+  -e STOP_FILE=/nonexistent "$playwright" node tests/conformance/driver.mjs >/dev/null
+
+status=0
+"${run[@]}" --rm "${as_me[@]}" -v "$suite:/suite:ro" -v "$repo_root/frontend/tests/conformance:/cfg:ro" \
+  -v "$out:/out" -w /suite/src -e PYTHONPATH=/suite/pydeps -e PYTHONUNBUFFERED=1 -e CONFORMANCE_DEV_MODE=1 \
+  -e CONFORMANCE_SERVER=https://$suite_host:8443/ "$python" \
+  python3 scripts/run-test-plan.py --verbose --export-dir /out/results \
+    --expected-failures-file /cfg/expected-failures.json \
+    --expected-skips-file /cfg/expected-skips.json \
+    'oidcc-basic-certification-test-plan[server_metadata=discovery][client_registration=static_client]' /cfg/iam-login.json \
+    oidcc-config-certification-test-plan /cfg/iam-login.json \
+    'oidcc-rp-initiated-logout-certification-test-plan[response_type=code][client_registration=static_client]' /cfg/iam-login.json \
+    'oidcc-test-plan[client_auth_type=client_secret_post][response_type=code][response_mode=default][client_registration=static_client]' /cfg/iam-login.json \
+  2>&1 | tee "$out/run-test-plan.log" || status=$?
+exit "$status"
