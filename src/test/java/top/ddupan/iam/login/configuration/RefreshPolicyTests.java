@@ -17,6 +17,7 @@ import org.springframework.security.oauth2.server.authorization.authentication.O
 import org.springframework.security.oauth2.server.authorization.authentication.OAuth2RefreshTokenAuthenticationToken;
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClient;
 import top.ddupan.iam.login.authentication.domain.User;
+import top.ddupan.iam.login.authentication.domain.UserRepository;
 import top.ddupan.iam.login.authentication.infrastructure.security.DirectoryPrincipal;
 import top.ddupan.iam.login.authorization.infrastructure.persistence.Subjects;
 import static org.assertj.core.api.Assertions.*;
@@ -39,14 +40,23 @@ class RefreshPolicyTests {
             new OAuth2ClientAuthenticationToken(client, ClientAuthenticationMethod.CLIENT_SECRET_BASIC, null), Set.of(), Map.of());
         var subjects = mock(Subjects.class);
         when(subjects.find(user.id())).thenReturn(Optional.of("subject"));
-        assertThat(gate(authorizations, subjects).authenticate(request)).as("allowed: defer to the framework").isNull();
+        var users = mock(UserRepository.class);
+        when(users.findActive(user.id())).thenReturn(Optional.of(user));
+        var gate = new AuthorizationServerConfiguration.RefreshPolicy(authorizations, subjects, users);
+        assertThat(gate.authenticate(request)).as("allowed: defer to the framework").isNull();
+
+        when(users.findActive(user.id())).thenReturn(Optional.empty());
+        rejected(gate, request, "invalid_grant");   // disabled or deleted in the directory
+        when(users.findActive(user.id())).thenThrow(new UserRepository.AccessFailure());
+        rejected(gate, request, "server_error");
+
         when(subjects.find(user.id())).thenReturn(Optional.empty());
-        assertThatThrownBy(() -> gate(authorizations, subjects).authenticate(request))
-            .isInstanceOfSatisfying(OAuth2AuthenticationException.class, ex -> assertThat(ex.getError().getErrorCode()).isEqualTo("invalid_grant"));
+        rejected(gate, request, "invalid_grant");
     }
 
-    private static AuthorizationServerConfiguration.RefreshPolicy gate(OAuth2AuthorizationService authorizations,
-            Subjects subjects) {
-        return new AuthorizationServerConfiguration.RefreshPolicy(authorizations, subjects);
+    private static void rejected(AuthorizationServerConfiguration.RefreshPolicy gate,
+            OAuth2RefreshTokenAuthenticationToken request, String error) {
+        assertThatThrownBy(() -> gate.authenticate(request))
+            .isInstanceOfSatisfying(OAuth2AuthenticationException.class, ex -> assertThat(ex.getError().getErrorCode()).isEqualTo(error));
     }
 }

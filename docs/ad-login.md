@@ -3,7 +3,7 @@
 `/signin` 接收 AD 用户名（sAMAccountName）或本域 UPN，由 Spring Security 的
 `ActiveDirectoryLdapAuthenticationProvider` 以用户身份执行 LDAPS bind，并用同一条连接查询该用户条目。
 URL、base DN 与 JNDI 环境（忽略 referral、`objectGUID` 二进制、超时）取自 Boot 的 `spring.ldap.*`，
-与 Boot 的 `ContextSource` 一致。登录不需要目录服务账号，不写入 AD。
+与 Boot 的 `ContextSource` 一致。登录本身不用服务账号，不写入 AD。
 
 `User` 为领域模型。条目经 ODM 映射为 `AdUserEntry`（`AdUserDetailsMapper`，与其他读取共用
 `AdEntryMapper` 的截断检查），再转换为 `User`；`AdUserEntry` 的 LDAP 注解不会进入领域对象。
@@ -66,9 +66,11 @@ server:
         same-site: lax
 ```
 
-AD 连接使用 Boot 自动配置的 `ContextSource`（`spring.ldap.*`），用户以自身凭据 bind；只读上下文为匿名
-（没有服务账号），Boot 的 LDAP health 检查只打开一次 LDAPS 连接，因此整体 `/actuator/health` 反映 AD
-是否可达。
+登录时用户以自身凭据 bind。Boot 自动配置的 `ContextSource`（`spring.ldap.*`）以只读服务账号
+（`spring.ldap.username/password`，Samba AD 拒绝匿名查询）bind，用于用户不在场时读目录：`AdUsers`
+（`UserRepository`）按 `objectGUID` 查找账号，改名后仍能找到；`userAccountControl` 含禁用位或条目已删除
+时视为不存在。Boot 的 `LdapTemplate` 使用 `AdEntryMapper`，同样拒绝截断的 `memberOf`。整体
+`/actuator/health` 含这条连接，因此也反映服务账号能否登录。
 
 证书与私钥使用外部受管文件，不加入仓库。开发验收可使用本机的 Tailscale HTTPS 域名
 及相应证书；用匹配证书的主机名打开，不能用 LAN IP 替代域名后跳过警告。

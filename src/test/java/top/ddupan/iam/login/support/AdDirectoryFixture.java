@@ -25,6 +25,11 @@ public final class AdDirectoryFixture implements AutoCloseable {
     static final String BASE = "dc=example,dc=test";
     static final String USER_DN = "cn=Alice," + BASE;
     static final byte[] GUID = HexFormat.of().parseHex("33221100554477668899aabbccddeeff");
+    static final String SERVICE_DN = "cn=svc," + BASE;
+    /** The read-only service account, as spring.ldap.username/password. */
+    public static final String SERVICE_USER = "svc@example.test", SERVICE_PASSWORD = "service-password";
+    /** objectGUID of a disabled account (userAccountControl 514), as the UUID AD's byte order gives. */
+    public static final String DISABLED_GUID = "0000000a-000b-000c-0d0e-0f1011121314";
     private final SSLContext original;
     private final InMemoryDirectoryServer ldap;
     public final AtomicInteger binds = new AtomicInteger();
@@ -77,6 +82,8 @@ public final class AdDirectoryFixture implements AutoCloseable {
                         request.setRequest(new SimpleBindRequest(USER_DN, request.getRequest().getPassword().getValue()));
                     } else if (name.equalsIgnoreCase("bob@example.test")) {
                         request.setRequest(new SimpleBindRequest("cn=Bob," + BASE, request.getRequest().getPassword().getValue()));
+                    } else if (name.equalsIgnoreCase("svc@example.test")) {
+                        request.setRequest(new SimpleBindRequest(SERVICE_DN, request.getRequest().getPassword().getValue()));
                     } else if (!name.equals(USER_DN) && !name.equals("cn=Bob," + BASE)) {
                         throw new LDAPException(ResultCode.INVALID_CREDENTIALS, "Invalid credentials");
                     }
@@ -96,6 +103,7 @@ public final class AdDirectoryFixture implements AutoCloseable {
                 new Attribute("mail", "alice@example.test"),
                 new Attribute("objectGUID", GUID),
                 // Three groups: stored as ImmutableCollections.ListN, the shape native serialization needs hints for.
+                new Attribute("userAccountControl", "512"),
                 new Attribute("memberOf", "CN=gitea-admins," + BASE, "CN=MixedCase," + BASE, "CN=staff," + BASE)));
             ldap.add(new Entry("cn=Bob," + BASE,
                 new Attribute("objectClass", "user"),
@@ -104,7 +112,19 @@ public final class AdDirectoryFixture implements AutoCloseable {
                 new Attribute("userPrincipalName", "bob@example.test"),
                 new Attribute("userPassword", "fixture-password"),
                 new Attribute("displayName", "Bob"),
+                new Attribute("userAccountControl", "512"),
                 new Attribute("objectGUID", new byte[16])));
+            ldap.add(new Entry("cn=Carol," + BASE,
+                new Attribute("objectClass", "user"),
+                new Attribute("sAMAccountName", "carol"),
+                new Attribute("userAccountControl", "514"),
+                new Attribute("objectGUID", HexFormat.of().parseHex("0a0000000b000c000d0e0f1011121314"))));
+            ldap.add(new Entry(SERVICE_DN,
+                new Attribute("objectClass", "user"),
+                new Attribute("sAMAccountName", "svc"),
+                new Attribute("userAccountControl", "66048"),
+                new Attribute("userPassword", SERVICE_PASSWORD),
+                new Attribute("objectGUID", HexFormat.of().parseHex("ffffffffffffffffffffffffffffffff"))));
         } catch (Exception ex) { throw new ExceptionInInitializerError(ex); }
     }
 

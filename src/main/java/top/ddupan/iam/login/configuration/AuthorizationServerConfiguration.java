@@ -13,8 +13,10 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import org.jooq.DSLContext;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -85,6 +87,7 @@ import org.springframework.security.web.authentication.preauth.AbstractPreAuthen
 import org.springframework.security.web.savedrequest.HttpSessionRequestCache;
 import org.springframework.security.web.util.matcher.MediaTypeRequestMatcher;
 import top.ddupan.iam.login.authentication.domain.User;
+import top.ddupan.iam.login.authentication.domain.UserRepository;
 import top.ddupan.iam.login.authentication.infrastructure.security.DirectoryPrincipal;
 import top.ddupan.iam.login.authentication.infrastructure.webauthn.MfaPolicy;
 import top.ddupan.iam.login.authorization.infrastructure.persistence.Subjects;
@@ -106,7 +109,7 @@ class AuthorizationServerConfiguration {
     @Bean @Order(2)
     SecurityFilterChain authorizationServer(HttpSecurity http, MfaPolicy mfa,
             Subjects subjects, OAuth2AuthorizationService authorizations, RegisteredClientRepository clients,
-            AuthorizationServerSettings settings) throws Exception {
+            AuthorizationServerSettings settings, ObjectProvider<UserRepository> users) throws Exception {
         var requiredFactors = mfa.complete;
         // Registered at the authorization endpoint's position before the endpoint itself (added later, while
         // building); filters of equal order keep insertion order, so this runs first.
@@ -168,7 +171,9 @@ class AuthorizationServerConfiguration {
                     .authenticationProvider(new DeviceMfaGate(OAuth2DeviceVerificationAuthenticationToken.class, requiredFactors))
                     .authenticationProvider(new DeviceMfaGate(OAuth2DeviceAuthorizationConsentAuthenticationToken.class, requiredFactors)))
                 .tokenEndpoint(endpoint -> endpoint.authenticationProviders(providers ->
-                    providers.addFirst(new RefreshPolicy(authorizations, subjects))));
+                    providers.addFirst(new RefreshPolicy(authorizations, subjects,
+                        // Without AD nothing can vouch for a directory account any more.
+                        users.getIfAvailable(() -> id -> Optional.empty())))));
         })
             // Only the user-facing endpoint needs a human with both factors; token, introspection and
             // revocation authenticate the client, and discovery/JWKS are public. The endpoint filter runs after
@@ -346,10 +351,11 @@ class AuthorizationServerConfiguration {
 
     /**
      * Refresh does not pass through login, so policy that must still hold is re-checked here: the client must
-     * still be enabled for login, and the account must still have its subject. Either change stops refresh
-     * immediately (Hydra could not do this).
+     * still be enabled for login, and the account must still have its subject and still exist, enabled, in the
+     * directory. Any of these changes stops refresh immediately (Hydra could not do this).
      */
-    record RefreshPolicy(OAuth2AuthorizationService authorizations, Subjects subjects) implements AuthenticationProvider {
+    record RefreshPolicy(OAuth2AuthorizationService authorizations, Subjects subjects, UserRepository users)
+            implements AuthenticationProvider {
         @Override public Authentication authenticate(Authentication request) throws AuthenticationException {
             var refresh = (OAuth2RefreshTokenAuthenticationToken) request;
             if (refresh.getPrincipal() instanceof OAuth2ClientAuthenticationToken client && client.getRegisteredClient() != null
@@ -359,12 +365,21 @@ class AuthorizationServerConfiguration {
             var authorization = authorizations.findByToken(refresh.getRefreshToken(), OAuth2TokenType.REFRESH_TOKEN);
             var stored = authorization == null ? null : authorization.<Authentication>getAttribute(Principal.class.getName());
             if (stored != null && stored.getPrincipal() instanceof DirectoryPrincipal principal
-                    && subjects.find(principal.user().id()).isEmpty()) {
+                    && (subjects.find(principal.user().id()).isEmpty() || inactive(principal.user().id()))) {
                 throw new OAuth2AuthenticationException(OAuth2ErrorCodes.INVALID_GRANT);
             }
             return null; // allowed: the framework's refresh provider does the actual work
         }
         @Override public boolean supports(Class<?> type) { return OAuth2RefreshTokenAuthenticationToken.class.isAssignableFrom(type); }
+
+        private boolean inactive(User.UserId id) {
+            try {
+                return users.findActive(id).isEmpty();
+            } catch (UserRepository.AccessFailure ex) {
+                // Directory unreachable: no new tokens, but the grant stays valid for a retry.
+                throw new OAuth2AuthenticationException(OAuth2ErrorCodes.SERVER_ERROR);
+            }
+        }
     }
 
     @Bean Subjects subjects(DSLContext db) {

@@ -35,7 +35,7 @@ final class AdUserDetailsMapper implements UserDetailsContextMapper {
             Collection<? extends GrantedAuthority> authorities) {
         var entry = entries.mapFromLdapDataEntry(context, AdUserEntry.class);
         if (entry == null) throw new UserRepository.AccessFailure();
-        return new AdUser(toUser(entry));
+        return new AdUser(toUser(entry, authority));
     }
 
     @Override
@@ -43,7 +43,7 @@ final class AdUserDetailsMapper implements UserDetailsContextMapper {
         throw new UnsupportedOperationException("The directory is read-only here");
     }
 
-    private User toUser(AdUserEntry entry) {
+    static User toUser(AdUserEntry entry, String authority) {
         var groups = new TreeMap<String, GroupMembership>();
         for (String dn : entry.getMemberOf() == null ? List.<String>of() : entry.getMemberOf()) {
             try {
@@ -68,5 +68,13 @@ final class AdUserDetailsMapper implements UserDetailsContextMapper {
             | (long) Short.toUnsignedInt(little.getShort()) << 16
             | Short.toUnsignedInt(little.getShort());
         return new UUID(most, ByteBuffer.wrap(bytes, 8, 8).getLong()).toString();
+    }
+
+    /** The inverse of {@link #guid}: AD stores the first three fields little-endian. */
+    static byte[] guidBytes(UUID guid) {
+        long most = guid.getMostSignificantBits();
+        return ByteBuffer.allocate(16).order(ByteOrder.LITTLE_ENDIAN)
+            .putInt((int) (most >>> 32)).putShort((short) (most >>> 16)).putShort((short) most)
+            .order(ByteOrder.BIG_ENDIAN).putLong(guid.getLeastSignificantBits()).array();
     }
 }

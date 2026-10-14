@@ -17,4 +17,5 @@ public final class AdUserEntry {
     @Attribute(name = "displayName") private String displayName;
     @Attribute(name = "mail") private String email;
     @Attribute(name = "memberOf") private List<String> memberOf;
+    @Attribute(name = "userAccountControl") private String accountControl;
 }

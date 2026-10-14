@@ -83,6 +83,8 @@ class WebAuthnIntegrationTests {
     @DynamicPropertySource
     static void properties(DynamicPropertyRegistry r) {
         r.add("spring.ldap.urls", () -> Fixtures.DIRECTORY.url());
+        r.add("spring.ldap.username", () -> AdDirectoryFixture.SERVICE_USER);
+        r.add("spring.ldap.password", () -> AdDirectoryFixture.SERVICE_PASSWORD);
         r.add("spring.datasource.url", () -> Fixtures.DATABASE.getJdbcUrl());
         r.add("spring.datasource.username", () -> Fixtures.DATABASE.getUsername());
         r.add("spring.datasource.password", () -> Fixtures.DATABASE.getPassword());

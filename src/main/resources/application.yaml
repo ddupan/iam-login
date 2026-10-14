@@ -1,11 +1,15 @@
 spring:
   application:
     name: iam-login
-  # AD connection (urls and base are set per environment; iam.ad.domain completes it). Users bind
-  # with their own credentials; read-only contexts stay anonymous because there is no service
-  # account, which is also all Boot's LDAP health check needs (it only opens a connection).
+  # AD connection (urls and base are set per environment; iam.ad.domain completes it). Sign-in binds
+  # as the user; Boot's own connection (reads without the user present, e.g. on refresh, and the
+  # health check) binds as the read-only service account in spring.ldap.username/password, set per
+  # environment — Samba AD refuses anonymous searches.
   ldap:
-    anonymous-read-only: true
+    # AD returns continuation references (DomainDnsZones, ...) with every subtree search from the domain
+    # root; with referrals ignored JNDI reports them as PartialResultException, failing a successful read.
+    template:
+      ignore-partial-result-exception: true
     base-environment:
       "[java.naming.referral]": ignore
       "[java.naming.ldap.attributes.binary]": objectGUID
