@@ -9,7 +9,7 @@ AD 仍为用户与组权威；凭据按目录 authority + objectGUID 关联，�
 1. `/signin` 使用原生表单 POST 验证 AD 密码，建立 `FACTOR_PASSWORD`。
 2. `/signin/mfa`：没有凭据时注册 passkey；已有凭据时验证 passkey。
 3. 注册只保存凭据，必须再次实际验证，才取得 `FACTOR_WEBAUTHN`。
-4. `/signin/complete` 要求两种因素均在 10 分钟内有效；单独访问显示验证结果；存在被打断的授权请求时恢复该请求（见[内置授权服务器](authorization-server.md)）。
+4. `/signin/complete` 要求两种因素均在 10 分钟内有效；存在被打断的授权请求时恢复该请求（见[内置授权服务器](authorization-server.md)），否则进入账户页 `/account`。
 
 首次注册信任近期 AD 密码验证。已有凭据后的新增注册同时要求密码与 WebAuthn 因素；
 本轮 UI 只提供首次注册与验证，不提供新增管理、删除或自助恢复入口。按维护者确认的
@@ -26,6 +26,19 @@ challenge 不放 session，存于 `webauthn_challenge` 表，session 只持有�
 与基本 JDK 类型）。
 没有应用自建登录状态机或认证 Filter。上游 options Filter 位于授权 Filter 前，因而
 这些检查在 RelyingPartyOperations 扩展点执行，不能仅靠 URL 授权规则。
+
+## 账户页
+
+`/account`（`AccountController`）显示 AD 中的账户信息（只读）、本人的 Passkey 与已授权的应用，所有路由与修改都要求
+两种因素在 10 分钟内有效，即修改前的重新验证；过期后页面提示重新验证，经 `/signin` 完成后由 `/signin/complete`
+回到本页。浏览器链不开请求缓存：表单登录成功时会清除会话中保存的请求，那会丢掉授权服务器链保存的授权请求。
+
+- Passkey：添加走框架的注册端点（已有 Passkey 时同样要求完整验证）；改名 `PUT /account/passkeys/{id}/label`
+  （1–64 字符）；删除 `DELETE /account/passkeys/{id}`。语句均按所有者限定，他人的 id 一律 404。
+  **至少保留一种两步验证方式**：删除最后一个返回 409 `last`，在注册锁（`CredentialRegistration`）内判断，
+  并发删除不能同时通过。框架自带的 `DELETE /webauthn/register/{id}` 没有这条规则，仍关闭。
+- 已授权的应用：记住的同意（`oauth2_authorization_consent`）与仍在库中的授权记录（无同意页的客户端只有后者）。
+  `DELETE /account/apps/{clientId}` 删除两者，refresh token 立即失效；已签发的 access token 到期前仍有效。
 
 ## 本地数据库
 
