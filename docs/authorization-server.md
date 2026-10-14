@@ -55,7 +55,9 @@ provider 再抛错。
 - `profile`、`email`、`groups` 按授予的 scope 释放（ID token 与 UserInfo）；`groups` 同时进入 access token。
 - `offline_access`：客户端须登记 `refresh_token` 授权类型。框架默认**复用** refresh token，客户端须设置
   `reuseRefreshTokens(false)` 以轮换。
-- refresh 前重新检查账号仍有 subject；删除该行即撤销身份，拒绝续期。
+- refresh 前重新检查账号仍有 subject，且仍在 AD 中、未被禁用（以服务账号按 `objectGUID` 查询）；删除 subject
+  行、在 AD 中禁用或删除账号，都立即拒绝续期（`invalid_grant`）。AD 不可达时返回 `server_error`，grant 保留。
+  token 中的组仍是登录时的快照，refresh 不更新。
 - device 授权（RFC 8628，客户端登记 `deviceAuthorization`）：`verification_uri` 是 `/signin/device`。未完成两步验证的访问者
   先去登录，登录后带着代码回到该页；代码交给框架的 `/oauth2/device_verification`，授权确认页与授权码流程共用
   （表单改为提交到 device 端点）。结果回到 `/signin/device?result=done|invalid|denied`。

@@ -6,8 +6,8 @@ import org.springframework.LdapDataEntry;
 import org.springframework.ldap.odm.core.impl.DefaultObjectDirectoryMapper;
 import top.ddupan.iam.login.authentication.domain.UserRepository;
 
-/** Keep Spring's ODM mapping while refusing silently truncated AD group attributes. */
-final class AdEntryMapper extends DefaultObjectDirectoryMapper {
+/** Keep Spring's ODM mapping while refusing silently truncated AD group attributes. Boot's LdapTemplate uses it too. */
+public final class AdEntryMapper extends DefaultObjectDirectoryMapper {
     @Override
     public <T> T mapFromLdapDataEntry(LdapDataEntry entry, Class<T> type) {
         var ids = entry.getAttributes().getIDs();
