@@ -98,7 +98,7 @@ import top.ddupan.iam.login.clients.infrastructure.RegisteredClients;
  */
 @Configuration(proxyBeanMethods = false)
 @ConditionalOnProperty(prefix = "iam.authorization-server", name = "enabled", havingValue = "true")
-@EnableConfigurationProperties(AuthorizationServerConfiguration.Properties.class)
+@EnableConfigurationProperties({AuthorizationServerConfiguration.Properties.class, SpiffeClients.Properties.class})
 @ImportRuntimeHints(SecurityJacksonHints.class)
 @EnableScheduling
 class AuthorizationServerConfiguration {
@@ -108,7 +108,7 @@ class AuthorizationServerConfiguration {
     @Bean @Order(2)
     SecurityFilterChain authorizationServer(HttpSecurity http, MfaPolicy mfa,
             Subjects subjects, OAuth2AuthorizationService authorizations, RegisteredClientRepository clients,
-            AuthorizationServerSettings settings, ObjectProvider<UserRepository> users) throws Exception {
+            AuthorizationServerSettings settings, ObjectProvider<UserRepository> users, SpiffeClients.Properties spiffe) throws Exception {
         var requiredFactors = mfa.complete;
         // Registered at the authorization endpoint's position before the endpoint itself (added later, while
         // building); filters of equal order keep insertion order, so this runs first.
@@ -120,12 +120,28 @@ class AuthorizationServerConfiguration {
             // go ahead of the framework's, whose public-client provider would reject these requests (no code_verifier).
             as.clientAuthentication(authentication -> authentication
                 .authenticationConverter(new PublicClients.Converter(settings.getDeviceAuthorizationEndpoint()))
-                .authenticationProvider(new PublicClients.Provider(clients)));
+                .authenticationProvider(new PublicClients.Provider(clients))
+                // Machines with a JWT-SVID (SpiffeClients); without configured trust domains every assertion fails.
+                .authenticationConverter(new SpiffeClients.Converter())
+                .authenticationProvider(new SpiffeClients.Provider(clients, settings.getIssuer(),
+                    new SpiffeClients.Bundles(spiffe, Clock.systemUTC()), Clock.systemUTC())));
+            // draft-ietf-oauth-spiffe-client-auth 4: advertised wherever client authentication applies.
+            if (spiffe.enabled()) {
+                as.authorizationServerMetadataEndpoint(metadata -> metadata.authorizationServerMetadataCustomizer(builder -> builder
+                    .tokenEndpointAuthenticationMethods(methods -> methods.add(SpiffeClients.SPIFFE_JWT.getValue()))
+                    .tokenRevocationEndpointAuthenticationMethods(methods -> methods.add(SpiffeClients.SPIFFE_JWT.getValue()))
+                    .tokenIntrospectionEndpointAuthenticationMethods(methods -> methods.add(SpiffeClients.SPIFFE_JWT.getValue()))));
+            }
             as.oidc(oidc -> oidc.providerConfigurationEndpoint(discovery -> discovery.providerConfigurationCustomizer(metadata -> {
                     // Advertise what consent actually releases; clients and conformance tests rely on it.
                     metadata.scopes(scopes -> { scopes.removeAll(SCOPES); scopes.addAll(SCOPES); });
                     metadata.claim("claims_supported", CLAIMS);
                     metadata.tokenEndpointAuthenticationMethods(methods -> methods.add(ClientAuthenticationMethod.NONE.getValue()));
+                    if (spiffe.enabled()) {
+                        metadata.tokenEndpointAuthenticationMethods(methods -> methods.add(SpiffeClients.SPIFFE_JWT.getValue()));
+                        metadata.tokenRevocationEndpointAuthenticationMethods(methods -> methods.add(SpiffeClients.SPIFFE_JWT.getValue()));
+                        metadata.tokenIntrospectionEndpointAuthenticationMethods(methods -> methods.add(SpiffeClients.SPIFFE_JWT.getValue()));
+                    }
                     // Request objects are rejected (requestPolicy); request_uri defaults to true if absent.
                     metadata.claim("request_parameter_supported", false);
                     metadata.claim("request_uri_parameter_supported", false);
@@ -389,13 +405,8 @@ class AuthorizationServerConfiguration {
 
     @Bean OAuth2TokenCustomizer<JwtEncodingContext> claims(Subjects subjects) {
         return context -> {
-            if (!(context.getPrincipal().getPrincipal() instanceof DirectoryPrincipal principal)) return;
-            var user = principal.user();
             var scopes = context.getAuthorizedScopes();
-            context.getClaims().subject(subjects.issue(user.id()));
-            if (scopes.contains("groups")) {
-                context.getClaims().claim("groups", user.memberships().stream().map(User.GroupMembership::name).toList());
-            }
+            // Every access token, a machine's (client_credentials) as much as a person's.
             if (OAuth2TokenType.ACCESS_TOKEN.equals(context.getTokenType()) && !scopes.isEmpty()) {
                 // RFC 9068 2.2.3: a space-delimited string. The framework writes an array, which strict
                 // resource servers (Incus, via zitadel/oidc) fail to parse and treat as unauthenticated.
@@ -407,6 +418,12 @@ class AuthorizationServerConfiguration {
                 var audience = new ArrayList<>(List.of(context.getRegisteredClient().getClientId()));
                 for (var value : extra.split(",")) if (!value.isBlank() && !audience.contains(value.trim())) audience.add(value.trim());
                 context.getClaims().audience(audience);
+            }
+            if (!(context.getPrincipal().getPrincipal() instanceof DirectoryPrincipal principal)) return;
+            var user = principal.user();
+            context.getClaims().subject(subjects.issue(user.id()));
+            if (scopes.contains("groups")) {
+                context.getClaims().claim("groups", user.memberships().stream().map(User.GroupMembership::name).toList());
             }
             if (OidcParameterNames.ID_TOKEN.equals(context.getTokenType().getValue())) {
                 if (scopes.contains("profile")) {
