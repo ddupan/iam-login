@@ -16,7 +16,9 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.TreeSet;
 import java.util.UUID;
 import org.assertj.core.api.InstanceOfAssertFactories;
 import org.hamcrest.Matchers;
@@ -48,9 +50,11 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
+import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping;
 import org.springframework.web.util.UriComponentsBuilder;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
+import org.yaml.snakeyaml.Yaml;
 import tools.jackson.databind.json.JsonMapper;
 import top.ddupan.iam.login.authentication.domain.User;
 import top.ddupan.iam.login.authorization.infrastructure.persistence.Subjects;
@@ -378,6 +382,21 @@ class AuthorizationServerIntegrationTests {
         assertThat(db.fetchCount(SPRING_SESSION, SPRING_SESSION.PRINCIPAL_NAME.eq(owner))).isZero();
         mvc.perform(get("/api/iam/users/bob").with(https()).with(admin)).andExpect(jsonPath("$.authenticator").isEmpty());
         mvc.perform(delete("/api/iam/users/nobody/second-factors").with(https()).with(admin)).andExpect(status().isNotFound());
+    }
+
+    /** docs/openapi.yaml is hand-written: it must list exactly the management routes the code maps. */
+    @Test void apiDefinitionListsExactlyTheMappedManagementRoutes(
+            @Autowired @Qualifier("requestMappingHandlerMapping") RequestMappingHandlerMapping mappings) throws Exception {
+        var mapped = new TreeSet<String>();
+        mappings.getHandlerMethods().keySet().forEach(info -> info.getPatternValues().stream()
+            .filter(path -> path.startsWith("/api/iam/"))
+            .forEach(path -> info.getMethodsCondition().getMethods().forEach(method -> mapped.add(method + " " + path))));
+        var defined = new TreeSet<String>();
+        Map<String, Map<String, Object>> paths = new Yaml().<Map<String, Map<String, Map<String, Object>>>>load(
+            Files.readString(Path.of("docs/openapi.yaml"))).get("paths");
+        paths.forEach((path, operations) -> operations.keySet().stream().filter(key -> !key.equals("parameters"))
+            .forEach(method -> defined.add(method.toUpperCase(Locale.ROOT) + " " + path)));
+        assertThat(defined).isNotEmpty().isEqualTo(mapped);
     }
 
     @Test void consoleIsAPublicClientWhoseTokensCarryTheApiAudience() throws Exception {
