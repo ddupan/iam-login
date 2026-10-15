@@ -23,7 +23,7 @@ cleanup() {
   local status=$?
   # The logs live in $work, removed below: on failure they are the only explanation, so print them first.
   if ((status != 0)); then
-    for log in native support; do
+    for log in native support support-err; do
       [[ -f $work/$log.log ]] || continue
       echo "--- $log.log (last 60 lines)" >&2
       tail -n 60 "$work/$log.log" | sed 's/SPIFFE_SVID=.*/SPIFFE_SVID=<redacted>/' >&2
@@ -56,7 +56,9 @@ wait_for 60 PostgreSQL "${docker_cmd[@]}" exec iam-smoke-pg psql -U iam -d iam -
 # Simulated AD plus the fixture client, registered once the binary's Flyway has created the tables.
 IAM_DOCKER_NAME=iam-smoke-support "$repo_root/scripts/gradle-in-docker" nativeSmokeSupport \
   -x processTestAot -x compileAotTestJava -x processAotTestResources \
-  "-PsmokeArgs=jdbc:postgresql://127.0.0.1:25432/iam iam smoke-only" > "$work/support.log" 2>&1 &
+  "-PsmokeArgs=jdbc:postgresql://127.0.0.1:25432/iam iam smoke-only" > "$work/support.log" 2> "$work/support-err.log" &
+# stderr apart: the JVM's "Picked up JAVA_TOOL_OPTIONS" notice can land mid-line in the values grepped below
+# (ldaps://localhost:35983Picked up ..., run 2029).
 # SPIFFE_SVID is the last line the support prints (after generating a key); waiting only for LDAP_URL
 # raced the greps below, and with pipefail + set -e a miss ended the script without a word.
 wait_for 600 "simulated AD and SPIRE stand-in" grep -q SPIFFE_SVID= "$work/support.log"
