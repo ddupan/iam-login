@@ -82,7 +82,8 @@ class SignInIntegrationTests {
         assertThat(authentication.isAuthenticated()).isTrue();
         assertThat(authentication.getCredentials()).isNull();
         assertThat(authentication.getAuthorities()).extracting("authority").containsExactly("FACTOR_PASSWORD");
-        mvc.perform(get("/").with(https()).session(session).accept(MediaType.APPLICATION_JSON))
+        // Any other route stays closed to a session with only the password.
+        mvc.perform(get("/unmapped").with(https()).session(session).accept(MediaType.APPLICATION_JSON))
             .andExpect(status().isForbidden());
 
     }

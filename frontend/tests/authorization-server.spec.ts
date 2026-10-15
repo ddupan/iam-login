@@ -98,35 +98,54 @@ test("AD + passkey -> in-process authorization server: consent, tokens, userinfo
   await page.getByLabel("密码", { exact: true }).fill("fixture-password");
   await page.getByRole("button", { name: "继续", exact: true }).click();
   await page.getByRole("button", { name: "用 Passkey 验证", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "OIDC 客户端" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "OIDC 客户端", level: 1 })).toBeVisible();
   expect(new URL(page.url()).pathname).toBe("/console");
   await expect(page.getByRole("row", { name: /fixture-rp/ })).toBeVisible();
   // The console's own (public) client is not a managed client.
   await expect(page.getByRole("cell", { name: "iam-console", exact: true })).toHaveCount(0);
-  await page.getByRole("button", { name: "新建客户端", exact: true }).click();
+  await page.getByRole("link", { name: "新建（应急）", exact: true }).click();
   await page.getByLabel("Client ID").fill("e2e-app");
   await page.getByLabel("名称").fill("E2E");
   await page.getByLabel("回调地址（每行一个）").fill("https://app.example.test/callback");
   await page.getByRole("button", { name: "创建", exact: true }).click();
-  const secret = page.locator(".secret output");
-  await expect(secret).not.toBeEmpty();
+  // The secret is shown once, on its own page, until it is confirmed saved.
+  await expect(page.getByRole("heading", { name: "客户端已创建" })).toBeVisible();
+  const secret = page.locator("#secret-value");
   const created = (await secret.textContent())!;
-  page.once("dialog", dialog => dialog.accept());
-  await page.getByRole("row", { name: /e2e-app/ }).getByRole("button", { name: "轮换 secret" }).click();
-  await expect(secret).not.toHaveText(created);
+  expect(created).not.toBe("");
+  const done = page.getByRole("button", { name: "完成", exact: true });
+  await expect(done).toBeDisabled();
+  await page.getByLabel("我已保存 secret").check();
+  await done.click();
+  await expect(page.getByRole("heading", { name: "E2E", level: 1 })).toBeVisible();
+  expect(new URL(page.url()).pathname).toBe("/console/clients/e2e-app");
+  await page.getByRole("button", { name: "轮换 secret", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "轮换 secret", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "secret 已轮换" })).toBeVisible();
   const rotated = (await secret.textContent())!;
+  expect(rotated).not.toBe(created);
   const tokenError = (value: string) => context.request.post(discovery.token_endpoint, {
     headers: { Authorization: "Basic " + Buffer.from(`e2e-app:${value}`).toString("base64") },
     form: { grant_type: "authorization_code", code: "invalid-code", redirect_uri: "https://app.example.test/callback" },
   }).then(response => response.json()).then(body => body.error);
   expect(await tokenError(created)).toBe("invalid_client");
   expect(await tokenError(rotated)).not.toBe("invalid_client");
-  page.once("dialog", dialog => dialog.accept());
-  await page.getByRole("row", { name: /e2e-app/ }).getByRole("button", { name: "删除" }).click();
+  await page.getByLabel("我已保存 secret").check();
+  await done.click();
+  await page.getByRole("button", { name: "禁用登录", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "禁用登录", exact: true }).click();
+  await expect(page.getByRole("button", { name: "启用登录", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "删除客户端", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "删除客户端", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "OIDC 客户端", level: 1 })).toBeVisible();
   await expect(page.getByRole("cell", { name: "e2e-app", exact: true })).toHaveCount(0);
 
   // Users: look the account up and reset its two-step verification; the console's own token is unaffected.
-  await page.getByRole("button", { name: "用户", exact: true }).click();
+  await page.getByRole("link", { name: "用户", exact: true }).click();
+  // A reload signs in again (tokens live in memory) and comes back to the same page.
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "用户", level: 1 })).toBeVisible();
+  expect(new URL(page.url()).pathname).toBe("/console/users");
   await page.getByLabel("用户名", { exact: true }).fill("alice");
   await page.getByRole("button", { name: "查找", exact: true }).click();
   await expect(page.getByRole("heading", { name: "alice", exact: true })).toBeVisible();
@@ -134,4 +153,6 @@ test("AD + passkey -> in-process authorization server: consent, tokens, userinfo
   await page.getByRole("button", { name: "重置", exact: true }).click();
   await page.getByRole("dialog").getByRole("button", { name: "重置", exact: true }).click();
   await expect(page.getByText("尚未设置两步验证。")).toBeVisible();
+  await page.getByRole("button", { name: "退出", exact: true }).click();
+  await expect.poll(() => new URL(page.url()).pathname).toBe("/signin");
 });

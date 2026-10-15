@@ -94,10 +94,17 @@ iam:
 
 ## `/console` 管理界面
 
-`/console` 是本服务的普通 **public** OIDC 客户端（授权码 + PKCE，无 secret，scope `openid groups`，
+`/console` 是本服务的普通 **public** OIDC 客户端（授权码 + PKCE，无 secret，scope `openid profile groups`，
 audience `iam-login`），与授权端点同源，不需要 CORS。客户端在每次启动时按配置自动登记或更新
-（回调为 `<issuer>/console/callback`），无需带外引导。不显示授权确认页（第一方），但仍要求完整 MFA。
-access token 只保存在内存中，刷新页面即重新登录；过期后提示重新登录。
+（回调 `<issuer>/console/callback`，注销后回跳 `<issuer>/signin`），无需带外引导。不显示授权确认页（第一方），
+但仍要求完整 MFA。access token 只保存在内存中，刷新页面即重新授权；授权前的路径随 `state` 带回，
+所以刷新或打开链接仍停在原页面（`/console/**` 都返回同一页面壳）。“退出”走 RP-initiated logout。
+
+页面：客户端列表 → 详情（配置只读，应急操作：禁用/启用登录、轮换 secret、删除）→ 编辑；“新建（应急）”。
+新建或轮换后的 secret 单独一页只显示一次，勾选“已保存”后才能离开。编辑以服务端的完整客户端为底，
+表单未展示的字段原样保留。
+
+`/` 重定向到 `/account`（未登录则先登录）。
 
 ## 用户：两步验证重置
 

@@ -24,7 +24,8 @@ public class ConsolePageController {
         this.context = Map.of("step", "admin", "authority", issuer, "clientId", clientId);
     }
 
-    @GetMapping({"/console", "/console/callback"}) ResponseEntity<String> page() {
+    // Every console route is the same shell; the page picks the view from the path.
+    @GetMapping({"/console", "/console/**"}) ResponseEntity<String> page() {
         return renderer.render(context);
     }
 }
