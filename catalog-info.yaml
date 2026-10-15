@@ -1,0 +1,15 @@
+# Discovered by Backstage (root catalog-info.yaml of each repository). The iam-login Component itself is declared
+# with its deployment in homelab-infra, which lists this API under providesApis.
+apiVersion: backstage.io/v1alpha1
+kind: API
+metadata:
+  name: iam-management
+  title: iam-login management API
+  description: OIDC clients and two-step verification resets (/api/iam)
+spec:
+  type: openapi
+  lifecycle: production
+  owner: user:default/panxiao81
+  system: identity
+  definition:
+    $text: ./docs/openapi.yaml
