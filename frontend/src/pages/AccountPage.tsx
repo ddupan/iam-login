@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { Alert, Brand } from "../components/Chrome";
+import { Alert, Brand, Dialog } from "../components/Chrome";
 import { problem, registerPasskey, type Problem } from "../components/Passkey";
 import { SubmitForm } from "../components/SubmitForm";
 import type { AccountContext } from "../page-context";
@@ -14,16 +14,6 @@ type Pending = { kind: "rename"; passkey: Passkey } | { kind: "remove"; passkey:
 
 const ACCOUNT_ERRORS: readonly Failure[] = ["expired", "invalid", "missing", "last", "failed"];
 const SCOPES = ["openid", "profile", "email", "groups", "offline_access"] as const;
-
-/** A modal confirmation; the native dialog gives focus trapping and Escape. */
-function Dialog({ title, children, onClose }: { title: string; children: ReactNode; onClose: () => void }) {
-  const ref = useRef<HTMLDialogElement>(null);
-  useEffect(() => { ref.current?.showModal(); }, []);
-  return <dialog ref={ref} className="dialog" aria-labelledby="dialog-title" onClose={onClose}>
-    <h2 id="dialog-title">{title}</h2>
-    {children}
-  </dialog>;
-}
 
 /** Profile, second factors and granted applications of the signed-in account. Each change reloads the page. */
 export function AccountPage({ context }: { context: AccountContext }) {

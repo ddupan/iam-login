@@ -6,6 +6,7 @@ import java.util.UUID;
 import org.springframework.ldap.NamingException;
 import org.springframework.ldap.core.LdapOperations;
 import org.springframework.ldap.filter.HardcodedFilter;
+import org.springframework.ldap.query.LdapQuery;
 import top.ddupan.iam.login.authentication.domain.User;
 import top.ddupan.iam.login.authentication.domain.UserRepository;
 import static org.springframework.ldap.query.LdapQueryBuilder.query;
@@ -31,10 +32,19 @@ public final class AdUsers implements UserRepository {
         try { guid = UUID.fromString(id.value()); } catch (IllegalArgumentException ex) { return Optional.empty(); }
         // Every byte escaped: an octet-string value has no other safe filter encoding.
         var value = HexFormat.ofDelimiter("\\").withPrefix("").formatHex(AdUserDetailsMapper.guidBytes(guid));
+        return find(query().filter(new HardcodedFilter("(&(!(objectClass=computer))(objectGUID=\\" + value + "))")));
+    }
+
+    @Override
+    public Optional<User> findActive(String username) {
+        // The builder escapes the value.
+        return find(query().where("sAMAccountName").is(username).and("objectClass").not().is("computer"));
+    }
+
+    private Optional<User> find(LdapQuery query) {
         try {
             // ODM adds objectClass=user; computer accounts are users too.
-            var found = ldap.find(query().filter(new HardcodedFilter("(&(!(objectClass=computer))(objectGUID=\\" + value + "))")),
-                AdUserEntry.class);
+            var found = ldap.find(query, AdUserEntry.class);
             if (found.size() > 1) throw new AccessFailure();
             if (found.isEmpty() || disabled(found.getFirst())) return Optional.empty();
             return Optional.of(AdUserDetailsMapper.toUser(found.getFirst(), authority));

@@ -124,4 +124,14 @@ test("AD + passkey -> in-process authorization server: consent, tokens, userinfo
   page.once("dialog", dialog => dialog.accept());
   await page.getByRole("row", { name: /e2e-app/ }).getByRole("button", { name: "删除" }).click();
   await expect(page.getByRole("cell", { name: "e2e-app", exact: true })).toHaveCount(0);
+
+  // Users: look the account up and reset its two-step verification; the console's own token is unaffected.
+  await page.getByRole("button", { name: "用户", exact: true }).click();
+  await page.getByLabel("用户名", { exact: true }).fill("alice");
+  await page.getByRole("button", { name: "查找", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "alice", exact: true })).toBeVisible();
+  await expect(page.getByText(/^Passkey「/)).toBeVisible();
+  await page.getByRole("button", { name: "重置", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "重置", exact: true }).click();
+  await expect(page.getByText("尚未设置两步验证。")).toBeVisible();
 });

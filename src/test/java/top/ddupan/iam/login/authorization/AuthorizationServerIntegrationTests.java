@@ -65,7 +65,9 @@ import static org.springframework.security.test.web.servlet.request.SecurityMock
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+import static top.ddupan.iam.login.persistence.schema.Tables.SPRING_SESSION;
 import static top.ddupan.iam.login.persistence.schema.Tables.SUBJECTS;
+import static top.ddupan.iam.login.persistence.schema.Tables.TOTP_CREDENTIALS;
 
 /** Spike: the in-process authorization server against simulated AD and a disposable database. */
 // Container sessions: MockMvc hands sessions over as MockHttpSession, which Spring Session's cookie-based
@@ -349,6 +351,33 @@ class AuthorizationServerIntegrationTests {
         mvc.perform(get("/api/iam/clients").with(https()).with(token(List.of("spike-rp"), List.of("gitea-admins")))).andExpect(status().isForbidden());
         mvc.perform(get("/api/iam/clients").with(https()).with(token(List.of("iam-login"), List.of("MixedCase")))).andExpect(status().isForbidden());
         mvc.perform(get("/api/iam/clients").with(https()).with(token(List.of("iam-login"), List.of("gitea-admins")))).andExpect(status().isOk());
+    }
+
+    @Test void administratorsResetAnAccountsSecondFactorsAndEndItsSessions() throws Exception {
+        var owner = "example.test:00000000-0000-0000-0000-000000000000";   // bob
+        db.insertInto(TOTP_CREDENTIALS).set(TOTP_CREDENTIALS.OWNER, owner).set(TOTP_CREDENTIALS.SECRET, new byte[]{1})
+            .set(TOTP_CREDENTIALS.LAST_STEP, 0L).onConflictDoNothing().execute();
+        db.insertInto(SPRING_SESSION).set(SPRING_SESSION.PRIMARY_ID, UUID.randomUUID().toString())
+            .set(SPRING_SESSION.SESSION_ID, UUID.randomUUID().toString()).set(SPRING_SESSION.CREATION_TIME, 0L)
+            .set(SPRING_SESSION.LAST_ACCESS_TIME, 0L).set(SPRING_SESSION.MAX_INACTIVE_INTERVAL, 1800)
+            .set(SPRING_SESSION.EXPIRY_TIME, Long.MAX_VALUE).set(SPRING_SESSION.PRINCIPAL_NAME, owner).execute();
+        var admin = token(List.of("iam-login"), List.of("gitea-admins"));
+
+        mvc.perform(get("/api/iam/users/bob").with(https()).with(token(List.of("iam-login"), List.of("staff"))))
+            .andExpect(status().isForbidden());
+        mvc.perform(get("/api/iam/users/bob").with(https()).with(admin)).andExpect(status().isOk())
+            .andExpect(jsonPath("$.username").value("bob")).andExpect(jsonPath("$.passkeys").isEmpty())
+            .andExpect(jsonPath("$.authenticator.created").isNotEmpty());
+        // Disabled, unknown, and a filter rather than a name.
+        for (var name : List.of("carol", "nobody", "*")) {
+            mvc.perform(get("/api/iam/users/{name}", name).with(https()).with(admin)).andExpect(status().isNotFound());
+        }
+
+        mvc.perform(delete("/api/iam/users/bob/second-factors").with(https()).with(admin)).andExpect(status().isNoContent());
+        assertThat(db.fetchCount(TOTP_CREDENTIALS, TOTP_CREDENTIALS.OWNER.eq(owner))).isZero();
+        assertThat(db.fetchCount(SPRING_SESSION, SPRING_SESSION.PRINCIPAL_NAME.eq(owner))).isZero();
+        mvc.perform(get("/api/iam/users/bob").with(https()).with(admin)).andExpect(jsonPath("$.authenticator").isEmpty());
+        mvc.perform(delete("/api/iam/users/nobody/second-factors").with(https()).with(admin)).andExpect(status().isNotFound());
     }
 
     @Test void consoleIsAPublicClientWhoseTokensCarryTheApiAudience() throws Exception {

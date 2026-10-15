@@ -96,9 +96,23 @@ audience `iam-login`），与授权端点同源，不需要 CORS。客户端在�
 （回调为 `<issuer>/console/callback`），无需带外引导。不显示授权确认页（第一方），但仍要求完整 MFA。
 access token 只保存在内存中，刷新页面即重新登录；过期后提示重新登录。
 
+## 用户：两步验证重置
+
+账号本身在 AD 中管理，控制台只处理两步验证。同一鉴权（`/api/iam/**`），另需 `iam.ad.enabled` 与
+`iam.webauthn.enabled`：
+
+| 方法与路径 | 说明 |
+|---|---|
+| GET `/api/iam/users/{username}` | 按 sAMAccountName 经只读服务账号查 AD，返回显示名与 Passkey、验证器 App；停用或不存在 404 |
+| DELETE `/api/iam/users/{username}/second-factors` | 删除该账号全部 Passkey 与验证器，并删除其全部登录会话，204 |
+
+重置后用户下次输入密码即进入两步验证设置。已签发给应用的 token 不受影响（refresh 时仍按 AD 状态复核）。
+目录不可达 502。重置记录到 `iam.audit.users`（用户名、删除数量、操作者 subject）。
+
 ## 验证
 
 `AuthorizationServerIntegrationTests` 覆盖 API 鉴权（无凭据、session、错误 audience、非管理员）、
 `/console` 的真实授权码流程及其 token 的 audience、增删改查、轮换后新旧密钥、禁用后拒绝授权、
 删除级联授权记录；`OidcClientTests` 覆盖输入校验；`authorization-server.spec.ts` 在浏览器中走完
-`/console` 的登录与客户端增删、轮换。
+`/console` 的登录与客户端增删、轮换，以及用户查找与两步验证重置。重置的鉴权、停用账号、过滤字符转义和会话
+删除由 `AuthorizationServerIntegrationTests`、`AdUsersTests` 覆盖。
