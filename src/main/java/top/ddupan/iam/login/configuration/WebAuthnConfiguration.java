@@ -9,6 +9,8 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.jdbc.core.JdbcOperations;
+import org.springframework.security.crypto.encrypt.AesBytesEncryptor;
+import org.springframework.security.crypto.keygen.KeyGenerators;
 import org.springframework.security.web.webauthn.api.AuthenticatorSelectionCriteria;
 import org.springframework.security.web.webauthn.api.PublicKeyCredentialRpEntity;
 import org.springframework.security.web.webauthn.api.ResidentKeyRequirement;
@@ -17,13 +19,17 @@ import org.springframework.security.web.webauthn.management.*;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import top.ddupan.iam.login.account.infrastructure.persistence.Grants;
-import top.ddupan.iam.login.account.infrastructure.persistence.Passkeys;
+import top.ddupan.iam.login.account.infrastructure.persistence.SecondFactors;
 import top.ddupan.iam.login.authentication.infrastructure.persistence.CredentialRegistration;
+import top.ddupan.iam.login.authentication.infrastructure.security.SignInThrottle;
+import top.ddupan.iam.login.authentication.infrastructure.totp.TotpAuthenticationProvider;
+import top.ddupan.iam.login.authentication.infrastructure.totp.TotpCredentials;
+import top.ddupan.iam.login.authentication.infrastructure.totp.TotpProperties;
 import top.ddupan.iam.login.authentication.infrastructure.webauthn.*;
 
 @Configuration(proxyBeanMethods = false)
 @ConditionalOnProperty(prefix = "iam.webauthn", name = "enabled", havingValue = "true")
-@EnableConfigurationProperties(WebAuthnProperties.class)
+@EnableConfigurationProperties({WebAuthnProperties.class, TotpProperties.class})
 class WebAuthnConfiguration {
     @Bean
     PublicKeyCredentialUserEntityRepository credentialUsers(JdbcOperations jdbc) {
@@ -36,8 +42,15 @@ class WebAuthnConfiguration {
     }
 
     @Bean
-    MfaPolicy mfaPolicy(PublicKeyCredentialUserEntityRepository users, UserCredentialRepository credentials) {
-        return new MfaPolicy(users, credentials);
+    MfaPolicy mfaPolicy(PublicKeyCredentialUserEntityRepository users, UserCredentialRepository credentials,
+            TotpCredentials totp) {
+        return new MfaPolicy(users, credentials, totp);
+    }
+
+    @Bean
+    TotpCredentials totpCredentials(DSLContext db, TotpProperties properties) {
+        return new TotpCredentials(db, new AesBytesEncryptor(properties.secretKey(), KeyGenerators.secureRandom(12),
+            AesBytesEncryptor.CipherAlgorithm.GCM));
     }
 
     @Bean
@@ -67,10 +80,10 @@ class WebAuthnConfiguration {
         return new CredentialRegistration(db, new TransactionTemplate(transactions));
     }
 
-    // The account page's own passkeys and granted applications (AccountController).
+    // The account page's own second factors and granted applications (AccountController).
     @Bean
-    Passkeys passkeys(DSLContext db, CredentialRegistration registrations) {
-        return new Passkeys(db, registrations);
+    SecondFactors secondFactors(DSLContext db, CredentialRegistration registrations) {
+        return new SecondFactors(db, registrations);
     }
 
     @Bean
@@ -80,7 +93,11 @@ class WebAuthnConfiguration {
 
     @Bean
     WebAuthnBrowserConfigurer webAuthnBrowser(WebAuthnProperties properties, MfaPolicy policy,
-            SessionChallenges challenges) {
-        return new WebAuthnBrowserConfigurer(properties, policy, challenges);
+            SessionChallenges challenges, TotpCredentials totp, CredentialRegistration registrations,
+            SignInThrottle.Properties throttle) {
+        // Not a bean: a lone AuthenticationProvider bean would replace Boot's global authentication manager
+        // (the actuator's Basic authentication).
+        return new WebAuthnBrowserConfigurer(properties, policy, challenges, new TotpAuthenticationProvider(policy, totp,
+            registrations, new SignInThrottle(throttle, Clock.systemUTC()), Clock.systemUTC()));
     }
 }

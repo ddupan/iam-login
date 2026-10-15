@@ -30,8 +30,8 @@
     }
   },
   "passkey": {
-    "createHeading": "创建 Passkey",
-    "createLead": "这个账号还没有两步验证方式。Passkey 存在本机、手机或安全密钥上，使用时要求 PIN 或生物识别，以后每次登录都需要它。",
+    "createHeading": "设置两步验证",
+    "createLead": "输入密码之后，每次登录还要再验证一次。选一种方式；以后可以在“我的账户”里再添加另一种。",
     "justVerified": "刚刚通过密码验证",
     "create": "创建 Passkey",
     "created": "Passkey 已创建",
@@ -48,6 +48,29 @@
       "cancelled": "已取消。",
       "timeout": "Passkey 验证已取消或超时。",
       "failed": "验证未完成，请重试。"
+    },
+    "createHint": "Passkey 存在本机、手机或安全密钥上，使用时要求 PIN 或生物识别。推荐。",
+    "useTotp": "改用验证器 App 的验证码"
+  },
+  "totp": {
+    "choose": "使用验证器 App",
+    "chooseHint": "手机上的验证器 App 每 30 秒生成一个 6 位验证码。",
+    "setupHeading": "设置验证器 App",
+    "setupLead": "用手机上的验证器 App 扫描二维码，然后输入它显示的 6 位验证码。",
+    "qr": "验证器 App 的二维码",
+    "manual": "无法扫码？手动输入密钥：",
+    "account": "账号：{{account}} · 发行方：{{issuer}}",
+    "enable": "确认并启用",
+    "back": "返回",
+    "help": "需要帮助请联系管理员",
+    "verifyHeading": "输入验证码",
+    "verifyLead": "打开验证器 App，输入当前显示的 6 位数字。",
+    "verify": "验证",
+    "usePasskey": "改用 Passkey",
+    "code": "验证码",
+    "codePlaceholder": "6 位数字",
+    "error": {
+      "invalid": "验证码不对或已用过。请输入 App 当前显示的验证码。"
     }
   },
   "consent": {
@@ -143,18 +166,27 @@
     },
     "passkeys": {
       "heading": "Passkey",
-      "lead": "两步验证方式。进入此页需要最近 10 分钟内完成过密码和两步验证。",
+      "lead": "两步验证的一种。进入此页需要最近 10 分钟内完成过密码和两步验证。",
       "add": "添加 Passkey",
       "defaultLabel": "Passkey",
       "created": "创建于 {{time}}",
       "lastUsed": "上次使用 {{time}}",
       "rename": "改名",
       "remove": "删除",
-      "onlyFactor": "这是唯一的两步验证方式，不能删除。请先添加另一个 Passkey。",
       "renameTitle": "Passkey 改名",
       "label": "名称",
       "removeTitle": "删除「{{label}}」？",
       "removeLead": "删除后它不能再用于登录这个账号。设备上保存的 Passkey 需要在设备上另行移除。"
+    },
+    "authenticator": {
+      "heading": "验证器 App",
+      "lead": "两步验证的另一种：输入 App 里的 6 位验证码。Passkey 和验证器至少保留一种。",
+      "add": "设置验证器 App",
+      "set": "已设置",
+      "created": "设置于 {{time}}",
+      "replace": "换一台手机",
+      "removeTitle": "删除验证器 App？",
+      "removeLead": "删除后 App 里的验证码不能再用于登录这个账号。App 里的条目需要在手机上另行删除。"
     },
     "apps": {
       "heading": "已授权的应用",
@@ -182,6 +214,7 @@
       "missing": "该项已不存在，请刷新页面。",
       "last": "不能删除唯一的两步验证方式。",
       "failed": "操作失败，请稍后重试。"
-    }
+    },
+    "onlyFactor": "这是唯一的两步验证方式，不能删除。请先添加另一种：Passkey 或验证器 App。"
   }
 }

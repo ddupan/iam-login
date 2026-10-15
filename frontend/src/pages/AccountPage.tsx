@@ -9,7 +9,8 @@ type Passkey = AccountContext["passkeys"][number];
 type App = AccountContext["apps"][number];
 /** Server codes plus "expired": the session needs both factors again (the server redirected or refused). */
 type Failure = "expired" | "invalid" | "missing" | "last" | "failed";
-type Pending = { kind: "rename"; passkey: Passkey } | { kind: "remove"; passkey: Passkey } | { kind: "revoke"; app: App };
+type Pending = { kind: "rename"; passkey: Passkey } | { kind: "remove"; passkey: Passkey } | { kind: "removeAuthenticator" }
+  | { kind: "revoke"; app: App };
 
 const ACCOUNT_ERRORS: readonly Failure[] = ["expired", "invalid", "missing", "last", "failed"];
 const SCOPES = ["openid", "profile", "email", "groups", "offline_access"] as const;
@@ -24,7 +25,7 @@ function Dialog({ title, children, onClose }: { title: string; children: ReactNo
   </dialog>;
 }
 
-/** Profile, passkeys and granted applications of the signed-in account. Each change reloads the page. */
+/** Profile, second factors and granted applications of the signed-in account. Each change reloads the page. */
 export function AccountPage({ context }: { context: AccountContext }) {
   const { t, i18n } = useTranslation();
   const [busy, setBusy] = useState(false);
@@ -75,7 +76,11 @@ export function AccountPage({ context }: { context: AccountContext }) {
     send("PUT", `/account/passkeys/${encodeURIComponent(passkey.id)}/label`, { label });
   }
 
-  const only = context.passkeys.length <= 1;
+  const { authenticator } = context;
+  const hasAuthenticator = Boolean(authenticator.created);
+  // At least one second factor must remain, of either kind; the server enforces it too.
+  const only = context.passkeys.length + (hasAuthenticator ? 1 : 0) <= 1;
+  const onlyHint = <p id="only-factor" className="hint">{t("account.onlyFactor")}</p>;
   // Passkey ceremony problems reuse the sign-in catalogue; "expired" there means the same thing.
   const message = failure && (ACCOUNT_ERRORS.includes(failure as Failure)
     ? t(`account.error.${failure as Failure}`) : t(`passkey.error.${failure as Problem}`));
@@ -142,7 +147,35 @@ export function AccountPage({ context }: { context: AccountContext }) {
             </div>
           </li>)}
         </ul>
-        {only && <p id="only-factor" className="hint">{t("account.passkeys.onlyFactor")}</p>}
+        {only && !hasAuthenticator && onlyHint}
+      </section>
+
+      <section className="panel" aria-labelledby="authenticator">
+        <div className="panel-head">
+          <div className="lead-block">
+            <h2 id="authenticator">{t("account.authenticator.heading")}</h2>
+            <span className="hint">{t("account.authenticator.lead")}</span>
+          </div>
+          {!hasAuthenticator && <a className="primary" href="/signin/totp/setup">{t("account.authenticator.add")}</a>}
+        </div>
+        {hasAuthenticator && <ul className="rows">
+          <li>
+            <div className="row-main">
+              <span className="row-title">{t("account.authenticator.set")}</span>
+              <span className="hint">{[
+                t("account.authenticator.created", { time: time(authenticator.created ?? "") }),
+                authenticator.lastUsed && t("account.passkeys.lastUsed", { time: time(authenticator.lastUsed) }),
+              ].filter(Boolean).join(" · ")}</span>
+            </div>
+            <div className="row-actions">
+              <a className="secondary small" href="/signin/totp/setup">{t("account.authenticator.replace")}</a>
+              <button type="button" className="secondary small danger" disabled={busy || only}
+                aria-describedby={only ? "only-factor" : undefined}
+                onClick={() => setPending({ kind: "removeAuthenticator" })}>{t("account.passkeys.remove")}</button>
+            </div>
+          </li>
+        </ul>}
+        {only && hasAuthenticator && onlyHint}
       </section>
 
       <section className="panel" aria-labelledby="apps">
@@ -186,6 +219,14 @@ export function AccountPage({ context }: { context: AccountContext }) {
         <button type="button" className="secondary" onClick={() => setPending(null)}>{t("account.cancel")}</button>
         <button type="button" className="primary danger" disabled={busy}
           onClick={() => send("DELETE", `/account/passkeys/${encodeURIComponent(pending.passkey.id)}`)}>{t("account.passkeys.remove")}</button>
+      </div>
+    </Dialog>}
+    {pending?.kind === "removeAuthenticator" && <Dialog title={t("account.authenticator.removeTitle")} onClose={() => setPending(null)}>
+      <p className="lead">{t("account.authenticator.removeLead")}</p>
+      <div className="dialog-actions">
+        <button type="button" className="secondary" onClick={() => setPending(null)}>{t("account.cancel")}</button>
+        <button type="button" className="primary danger" disabled={busy}
+          onClick={() => send("DELETE", "/account/authenticator")}>{t("account.passkeys.remove")}</button>
       </div>
     </Dialog>}
     {pending?.kind === "revoke" && <Dialog title={t("account.apps.revokeTitle", { app: pending.app.name })} onClose={() => setPending(null)}>

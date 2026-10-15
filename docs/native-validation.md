@@ -1,7 +1,7 @@
 # 首轮 Native 验证范围
 
 本页定义验收要求，不表示下列功能已实现或测试通过。MFA 首先验证 Spring 官方
-WebAuthn 集成；TOTP、恢复方式与已有 Authelia MFA 的迁移方式需在实现中明确。
+WebAuthn 集成；TOTP 已实现（见 [第二因素](webauthn.md)），不提供恢复码，遗失全部第二因素由管理员重置。
 
 ## 认证与身份
 

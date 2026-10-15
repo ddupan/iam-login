@@ -189,3 +189,12 @@ main.account h1 { font-size: 24px; }
 .dialog[open] { display: flex; }
 .dialog::backdrop { background: rgba(20, 24, 31, 0.45); }
 .dialog-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; }
+
+/* Two-step verification: switching method, authenticator app set-up */
+.switch { align-self: center; font-size: 14px; }
+input.code { font-family: var(--font-mono); font-size: 18px; letter-spacing: 4px; }
+.totp-key { display: flex; flex-wrap: wrap; align-items: center; gap: 20px; }
+.totp-key .lead-block { flex: 1 1 180px; min-width: 0; }
+/* Scanners need dark modules on a light ground, in dark mode too. */
+.qr { flex: none; padding: 8px; border: 1px solid var(--border); border-radius: 8px; background: #ffffff; }
+.secret { font-size: 14px; letter-spacing: 1px; overflow-wrap: anywhere; }

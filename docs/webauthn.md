@@ -1,4 +1,4 @@
-# WebAuthn 第二因素
+# 第二因素：Passkey 与验证器 App
 
 WebAuthn 使用 Spring Security 官方过滤器、WebAuthn4J 校验和 JDBC 仓储。
 PostgreSQL 保存 user handle、凭据公钥与签名计数等记录，不保存用户密码或认证器私钥。
@@ -7,13 +7,15 @@ AD 仍为用户与组权威；凭据按目录 authority + objectGUID 关联，�
 ## 登录与注册
 
 1. `/signin` 使用原生表单 POST 验证 AD 密码，建立 `FACTOR_PASSWORD`。
-2. `/signin/mfa`：没有凭据时注册 passkey；已有凭据时验证 passkey。
-3. 注册只保存凭据，必须再次实际验证，才取得 `FACTOR_WEBAUTHN`。
-4. `/signin/complete` 要求两种因素均在 10 分钟内有效；存在被打断的授权请求时恢复该请求（见[内置授权服务器](authorization-server.md)），否则进入账户页 `/account`。
+2. `/signin/mfa`：还没有第二因素时任选一种设置（Passkey 或验证器 App）；已有时验证。两种都有时先用
+   Passkey，`?method=totp` 切换到验证码。
+3. Passkey 注册只保存凭据，必须再次实际验证，才取得 `FACTOR_WEBAUTHN`；验证器 App 设置时输入的验证码即
+   是实际验证，确认后直接取得 `FACTOR_TOTP`。
+4. `/signin/complete` 要求密码因素和任一第二因素（`FACTOR_WEBAUTHN` 或 `FACTOR_TOTP`）均在 10 分钟内有效；存在被打断的授权请求时恢复该请求（见[内置授权服务器](authorization-server.md)），否则进入账户页 `/account`。
 
 首次注册信任近期 AD 密码验证。已有凭据后的新增注册同时要求密码与 WebAuthn 因素；
-本轮 UI 只提供首次注册与验证，不提供新增管理、删除或自助恢复入口。按维护者确认的
-自用范围，遗失全部 passkey 由管理员人工操作数据库恢复，不以开发恢复 UI 作为上线条件。
+新增和删除在账户页自助完成，不提供恢复码。按维护者确认的
+自用范围，遗失全部第二因素由管理员重置（管理控制台实现之前人工操作数据库），不以开发恢复 UI 作为上线条件。
 人工恢复只处理核实后的目标主体凭据，并按首次注册规则重新绑定；不能清空整个凭据库。
 AD 用户、密码和组继续通过 RSAT 或目录命令行管理，不在本应用增加目录管理页面。
 注册和验证均要求认证器 user verification（例如 PIN 或生物识别）。
@@ -27,16 +29,32 @@ challenge 不放 session，存于 `webauthn_challenge` 表，session 只持有�
 没有应用自建登录状态机或认证 Filter。上游 options Filter 位于授权 Filter 前，因而
 这些检查在 RelyingPartyOperations 扩展点执行，不能仅靠 URL 授权规则。
 
+## 验证器 App（TOTP）
+
+RFC 6238，取所有验证器 App 都支持的参数：HMAC-SHA1、6 位、30 秒，前后各容许一个时间步的时钟偏差。
+Spring Security 没有 TOTP 支持；验证码由框架通用的 `AuthenticationFilter`（开启 MFA 合并）交给
+`TotpAuthenticationProvider`，因素合并与会话轮换仍由框架完成，应用只做算法与存储。
+
+- 设置：`GET /signin/totp/setup` 生成 160 位密钥，暂存 session（`iam.totp.pending`），页面给出二维码与手输密钥；
+  `POST /signin/totp/setup` 的验证码匹配后才保存。前提与新增 Passkey 相同：近期密码，已有第二因素时还要完整验证。
+  再次设置（换手机）替换原密钥，每个账户最多一个。
+- 验证：`POST /signin/totp`。每个账户记录已接受的最新时间步（`last_step`），同一时间步或更早的验证码一律拒绝，
+  验证码不能重放；条件更新保证并发提交只有一个成功。失败与密码共用 `iam.signin.throttle` 的上限（计数独立）。
+- 存储：`totp_credentials`，密钥以 AES-GCM 加密，密钥材料为 `iam.totp.key`（32 字节随机数，base64）。
+  只拿到数据库不能生成验证码；更换或丢失 `iam.totp.key` 会让所有已设置的验证器 App 失效。
+  `iam.totp.issuer` 是验证器 App 中显示的发行方名称（默认 `IAM Login`）。
+
 ## 账户页
 
-`/account`（`AccountController`）显示 AD 中的账户信息（只读）、本人的 Passkey 与已授权的应用，所有路由与修改都要求
+`/account`（`AccountController`）显示 AD 中的账户信息（只读）、本人的 Passkey、验证器 App 与已授权的应用，所有路由与修改都要求
 两种因素在 10 分钟内有效，即修改前的重新验证；过期后页面提示重新验证，经 `/signin` 完成后由 `/signin/complete`
 回到本页。浏览器链不开请求缓存：表单登录成功时会清除会话中保存的请求，那会丢掉授权服务器链保存的授权请求。
 
 - Passkey：添加走框架的注册端点（已有 Passkey 时同样要求完整验证）；改名 `PUT /account/passkeys/{id}/label`
   （1–64 字符）；删除 `DELETE /account/passkeys/{id}`。语句均按所有者限定，他人的 id 一律 404。
-  **至少保留一种两步验证方式**：删除最后一个返回 409 `last`，在注册锁（`CredentialRegistration`）内判断，
-  并发删除不能同时通过。框架自带的 `DELETE /webauthn/register/{id}` 没有这条规则，仍关闭。
+  **至少保留一种两步验证方式**（Passkey 与验证器 App 合计）：删除最后一个返回 409 `last`，在注册锁
+  （`CredentialRegistration`）内判断，并发删除不能同时通过。框架自带的 `DELETE /webauthn/register/{id}` 没有这条规则，仍关闭。
+- 验证器 App：设置或「换一台手机」走 `/signin/totp/setup`；删除 `DELETE /account/authenticator`，同样受上面的规则约束。
 - 已授权的应用：记住的同意（`oauth2_authorization_consent`）与仍在库中的授权记录（无同意页的客户端只有后者）。
   `DELETE /account/apps/{clientId}` 删除两者，refresh token 立即失效；已签发的 access token 到期前仍有效。
 
@@ -59,6 +77,8 @@ iam:
     enabled: true
     rp-id: laptop.tail7e769.ts.net
     origin: https://laptop.tail7e769.ts.net:18082
+  totp:
+    key: ${IAM_TOTP_KEY}   # openssl rand -base64 32；不要写入版本库
 spring:
   datasource:
     url: jdbc:postgresql://127.0.0.1:15432/iam_login
@@ -79,7 +99,8 @@ JVM 回归使用 Testcontainers PostgreSQL 与模拟 AD；不会向真实 AD 提
 
 ```sh
 scripts/gradle-in-docker test
-scripts/gradle-in-docker webauthnBrowserFixture
+# 跳过测试 AOT：processTestAot 会因 LDAP 夹具的非守护线程挂住，夹具永远起不来。
+scripts/gradle-in-docker webauthnBrowserFixture -x processTestAot -x compileAotTestJava -x processAotTestResources
 # 另一终端；测试夹具固定监听 localhost:18083，使用测试证书。
 IAM_WEBAUTHN_FIXTURE=1 npm --prefix frontend run test:browser -- webauthn.spec.ts
 ```
@@ -95,6 +116,7 @@ PostgreSQL 是应用运行依赖，通过 `spring.datasource.*` 配置，连接�
 WebAuthn 配置仅装配官方凭据仓储及认证策略；不在应用配置中排除 DataSource 自动配置。
 仅不涉及持久化的独立测试显式排除它。
 
-首次注册的数据库锁由 `authentication/infrastructure/persistence/CredentialRegistration`
-封装；获得用户行锁后，在同一事务中重新检查注册策略并调用官方凭据保存逻辑。
+第二因素变更的数据库锁由 `authentication/infrastructure/persistence/CredentialRegistration`
+封装：按主体名称取事务级 advisory lock（只有验证器 App 的账户没有 WebAuthn 用户行可锁），在同一事务中
+重新检查注册策略并调用官方凭据保存逻辑或删除。
 WebAuthn 策略集成不直接引用 SQL 或表结构。失败回滚与跨连接串行化由 PostgreSQL 集成测试覆盖。

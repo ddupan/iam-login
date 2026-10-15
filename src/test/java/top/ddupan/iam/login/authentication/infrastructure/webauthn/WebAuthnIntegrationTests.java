@@ -7,6 +7,7 @@ import java.io.ObjectInputStream;
 import java.io.ObjectStreamClass;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
@@ -57,6 +58,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
 import top.ddupan.iam.login.authentication.infrastructure.persistence.CredentialRegistration;
+import top.ddupan.iam.login.authentication.infrastructure.totp.Totp;
+import top.ddupan.iam.login.authentication.infrastructure.totp.TotpCode;
 import top.ddupan.iam.login.support.AdDirectoryFixture;
 import top.ddupan.iam.login.support.SessionRoundTrip;
 import static org.assertj.core.api.Assertions.*;
@@ -66,13 +69,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static top.ddupan.iam.login.persistence.schema.Tables.OAUTH2_AUTHORIZATION;
 import static top.ddupan.iam.login.persistence.schema.Tables.OAUTH2_AUTHORIZATION_CONSENT;
 import static top.ddupan.iam.login.persistence.schema.Tables.OAUTH2_REGISTERED_CLIENT;
+import static top.ddupan.iam.login.persistence.schema.Tables.TOTP_CREDENTIALS;
 import static top.ddupan.iam.login.persistence.schema.Tables.USER_CREDENTIALS;
 import static top.ddupan.iam.login.persistence.schema.Tables.USER_ENTITIES;
 import static top.ddupan.iam.login.persistence.schema.Tables.WEBAUTHN_CHALLENGE;
 
 // Container sessions, see AuthorizationServerIntegrationTests.
 @SpringBootTest(properties = {"spring.autoconfigure.exclude=org.springframework.boot.session.jdbc.autoconfigure.JdbcSessionAutoConfiguration", "iam.ad.enabled=true", "iam.ad.domain=example.test", "spring.ldap.base=dc=example,dc=test",
-    "spring.datasource.hikari.maximum-pool-size=3",     "iam.webauthn.enabled=true", "iam.webauthn.rp-id=localhost", "iam.webauthn.origin=https://localhost",
+    "spring.datasource.hikari.maximum-pool-size=3",     "iam.webauthn.enabled=true", "iam.webauthn.rp-id=localhost", "iam.webauthn.origin=https://localhost", "iam.totp.key=Zml4dHVyZS1vbmx5LXRvdHAta2V5LTMyLWJ5dGVzISE=",
     "management.otlp.metrics.export.enabled=false", "spring.security.user.password=fixture-monitor-password"})
 @AutoConfigureMockMvc
 class WebAuthnIntegrationTests {
@@ -267,6 +271,60 @@ class WebAuthnIntegrationTests {
         } finally {
             db.deleteFrom(USER_CREDENTIALS).execute();
             db.deleteFrom(USER_ENTITIES).where(USER_ENTITIES.ID.eq(stranger.toBase64UrlString())).execute();
+        }
+    }
+
+    @Test
+    void authenticatorAppIsConfirmedBySetUpThenSignsInOnceRejectingReplays(@Autowired PublicKeyCredentialUserEntityRepository users,
+            @Autowired UserCredentialRepository credentials) throws Exception {
+        var session = login();
+        mvc.perform(post("/signin/totp/setup").session(session).with(https()).with(csrf()).param("code", "000000"))
+            .andExpect(redirectedUrl("/signin/totp/setup?error=invalid"));
+        mvc.perform(get("/signin/totp/setup").session(session).with(https())).andExpect(status().isOk())
+            .andExpect(content().string(Matchers.containsString("otpauth://totp/IAM%20Login:alice?secret=")));
+        var key = Base64.getDecoder().decode((String) session.getAttribute(TotpCode.PENDING));
+        var step = Instant.now().getEpochSecond() / 30;
+        var wrong = Totp.code(key, step - 3);
+        mvc.perform(post("/signin/totp/setup").session(session).with(https()).with(csrf()).param("code", wrong))
+            .andExpect(redirectedUrl("/signin/totp/setup?error=invalid"));
+        // A failed code shows the same key again, so the app already holding it keeps working.
+        mvc.perform(get("/signin/totp/setup").session(session).param("error", "invalid").with(https())).andExpect(status().isOk());
+        assertThat(Base64.getDecoder().decode((String) session.getAttribute(TotpCode.PENDING))).isEqualTo(key);
+        try {
+            mvc.perform(post("/signin/totp/setup").session(session).with(https()).with(csrf()).param("code", Totp.code(key, step)))
+                .andExpect(redirectedUrl("/signin/complete"));
+            assertThat(session.getAttribute(TotpCode.PENDING)).isNull();
+            mvc.perform(get("/account").session(session).with(https())).andExpect(status().isOk())
+                .andExpect(content().string(Matchers.containsString("\"authenticator\":{\"")));
+            // Encrypted at rest.
+            assertThat(db.select(TOTP_CREDENTIALS.SECRET).from(TOTP_CREDENTIALS).fetchSingle(TOTP_CREDENTIALS.SECRET)).isNotEqualTo(key);
+
+            var next = login();
+            mvc.perform(get("/signin/mfa").session(next).with(https()))
+                .andExpect(content().string(Matchers.containsString("\"factor\":\"totp\"")));
+            mvc.perform(post("/signin/totp").session(next).with(https())).andExpect(status().isForbidden());
+            mvc.perform(post("/signin/totp").session(next).with(https()).with(csrf()).param("code", Totp.code(key, step)))
+                .andExpect(redirectedUrl("/signin/mfa?method=totp&error=invalid"));
+            // Setting up again (another phone) needs the second factor, not just the password.
+            mvc.perform(get("/signin/totp/setup").session(next).with(https())).andExpect(redirectedUrlPattern("/signin/mfa?*"));
+            mvc.perform(post("/signin/totp").session(next).with(https()).with(csrf()).param("code", Totp.code(key, step + 1)))
+                .andExpect(redirectedUrl("/signin/complete"));
+            mvc.perform(get("/account").session(next).with(https())).andExpect(status().isOk());
+
+            mvc.perform(delete("/account/authenticator").session(next).with(https()).with(csrf()))
+                .andExpect(status().isConflict()).andExpect(jsonPath("error").value("last"));
+            mvc.perform(post("/webauthn/register/options").session(next).with(https()).with(csrf())).andExpect(status().isOk());
+            var name = ((SecurityContext) next.getAttribute("SPRING_SECURITY_CONTEXT")).getAuthentication().getName();
+            var passkey = credential(credentials, users.findByUsername(name).getId(), "laptop");
+            mvc.perform(get("/signin/mfa").session(login()).with(https()))
+                .andExpect(content().string(Matchers.containsString("\"factor\":\"passkey\"")))
+                .andExpect(content().string(Matchers.containsString("\"other\":true")));
+            mvc.perform(delete("/account/authenticator").session(next).with(https()).with(csrf())).andExpect(status().isNoContent());
+            mvc.perform(delete("/account/passkeys/" + passkey).session(next).with(https()).with(csrf()))
+                .andExpect(status().isConflict()).andExpect(jsonPath("error").value("last"));
+        } finally {
+            db.deleteFrom(TOTP_CREDENTIALS).execute();
+            db.deleteFrom(USER_CREDENTIALS).execute();
         }
     }
 
