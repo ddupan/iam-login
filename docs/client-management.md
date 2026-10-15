@@ -5,6 +5,9 @@ confidential authorization-code 客户端。领域层定义 `ClientRepository`�
 基于框架的 `RegisteredClientRepository`（JDBC）实现。API 是主要交付物（为 IaC 等自动化准备）；
 `/console` 管理界面只是调用同一 API 的前端应用。只在 `iam.authorization-server.enabled` 时提供。
 
+接口定义见 [openapi.yaml](openapi.yaml)（手写；`AuthorizationServerIntegrationTests` 校验它与代码映射的路由完全一致，
+增删接口须同时改它）。
+
 ## 鉴权：audience + groups
 
 `/api/iam/**` 是普通 resource server，只接受本服务签发的 access token（以自身签名密钥验证）：

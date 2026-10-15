@@ -1,0 +1,199 @@
+# The management API (/api/iam). Hand-maintained contract; AuthorizationServerIntegrationTests fails when a route is added to or
+# removed from the code without this file following. Behaviour and authorization: client-management.md.
+openapi: 3.1.0
+info:
+  title: iam-login management API
+  version: "1"
+  description: |
+    Bearer token required: an access token from this server with audience `iam-login` whose `groups` claim
+    contains an administrator group (`iam.clients.admin-groups`), or a SPIFFE JWT-SVID on the allowlist
+    (`iam.clients.spiffe.admin-ids`). Errors carry a code in `error`, never a message.
+security:
+  - bearer: []
+paths:
+  /api/iam/clients:
+    get:
+      summary: Managed clients, one page (a page may come back short)
+      parameters:
+        - { name: page, in: query, schema: { type: integer, minimum: 0, default: 0 } }
+        - { name: size, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+      responses:
+        "200":
+          description: Clients ordered by ID
+          content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/Client" } } } }
+        "400": { $ref: "#/components/responses/Invalid" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "502": { $ref: "#/components/responses/Unavailable" }
+    post:
+      summary: Create a client; the secret is returned only here
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/Client" } } }
+      responses:
+        "201":
+          description: Created (Cache-Control no-store)
+          content: { application/json: { schema: { $ref: "#/components/schemas/Created" } } }
+        "400": { $ref: "#/components/responses/Invalid" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "502": { $ref: "#/components/responses/Unavailable" }
+  /api/iam/clients/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { $ref: "#/components/schemas/ClientId" } }
+    get:
+      summary: One managed client, without its secret
+      responses:
+        "200":
+          description: The client
+          content: { application/json: { schema: { $ref: "#/components/schemas/Client" } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502": { $ref: "#/components/responses/Unavailable" }
+    put:
+      summary: Replace the managed fields; the secret is kept, publicClient cannot change
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/Client" } } }
+      responses:
+        "200":
+          description: The client as stored
+          content: { application/json: { schema: { $ref: "#/components/schemas/Client" } } }
+        "400": { $ref: "#/components/responses/Invalid" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "502": { $ref: "#/components/responses/Unavailable" }
+    delete:
+      summary: Delete a client with its authorizations and consents
+      responses:
+        "204": { description: Deleted }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "502": { $ref: "#/components/responses/Unavailable" }
+  /api/iam/clients/{id}/secret:
+    parameters:
+      - { name: id, in: path, required: true, schema: { $ref: "#/components/schemas/ClientId" } }
+    post:
+      summary: Replace the secret; the old one stops working immediately
+      responses:
+        "200":
+          description: The new secret (Cache-Control no-store)
+          content:
+            application/json:
+              schema: { type: object, required: [secret], properties: { secret: { type: string } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "502": { $ref: "#/components/responses/Unavailable" }
+  /api/iam/users/{username}:
+    parameters:
+      - { name: username, in: path, required: true, description: sAMAccountName, schema: { type: string } }
+    get:
+      summary: An active directory account and its second factors
+      responses:
+        "200":
+          description: The account
+          content: { application/json: { schema: { $ref: "#/components/schemas/User" } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/Missing" }
+        "502": { $ref: "#/components/responses/Unavailable" }
+  /api/iam/users/{username}/second-factors:
+    parameters:
+      - { name: username, in: path, required: true, description: sAMAccountName, schema: { type: string } }
+    delete:
+      summary: Remove every passkey and authenticator app of the account and end all its sessions
+      responses:
+        "204": { description: Reset; the next sign-in sets a factor up after the password }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/Missing" }
+        "502": { $ref: "#/components/responses/Unavailable" }
+components:
+  securitySchemes:
+    bearer: { type: http, scheme: bearer, bearerFormat: JWT }
+  schemas:
+    ClientId: { type: string, pattern: "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$" }
+    Uri: { type: string, maxLength: 2048, description: "HTTPS, or HTTP on a loopback host; no wildcard, user info or fragment" }
+    Client:
+      type: object
+      required: [id, name, redirectUris, scopes, loginEnabled, pkceRequired]
+      properties:
+        id: { $ref: "#/components/schemas/ClientId" }
+        name: { type: string, minLength: 1, maxLength: 200 }
+        redirectUris: { type: array, minItems: 1, maxItems: 20, items: { $ref: "#/components/schemas/Uri" } }
+        scopes:
+          type: array
+          maxItems: 50
+          uniqueItems: true
+          contains: { const: openid }
+          items: { type: string, pattern: "^[\\x21\\x23-\\x5B\\x5D-\\x7E]{1,128}$" }
+        postLogoutRedirectUris: { type: array, maxItems: 20, items: { $ref: "#/components/schemas/Uri" }, default: [] }
+        loginEnabled: { type: boolean }
+        pkceRequired: { type: boolean, description: "Must be true for a public client" }
+        publicClient: { type: boolean, default: false, description: "No secret; fixed at creation" }
+        deviceAuthorization: { type: boolean, default: false, description: "Also the device grant (RFC 8628)" }
+        audiences:
+          type: array
+          maxItems: 10
+          default: []
+          description: Extra access-token audiences
+          items: { type: string, minLength: 1, maxLength: 2048, pattern: "^[^,]*$" }
+    Created:
+      type: object
+      required: [client, secret]
+      properties:
+        client: { $ref: "#/components/schemas/Client" }
+        secret: { type: [string, "null"], description: "null for a public client" }
+    Factor:
+      type: object
+      properties:
+        created: { type: string, format: date-time }
+        lastUsed: { type: string, description: "date-time, or empty when never used" }
+    User:
+      type: object
+      required: [username, displayName, directory, passkeys, authenticator]
+      properties:
+        username: { type: string }
+        displayName: { type: string }
+        directory: { type: string, description: Directory authority (AD domain) }
+        passkeys:
+          type: array
+          items:
+            allOf:
+              - $ref: "#/components/schemas/Factor"
+              - type: object
+                required: [label, created, lastUsed]
+                properties: { label: { type: string } }
+        authenticator:
+          description: Empty object when no authenticator app is set up
+          $ref: "#/components/schemas/Factor"
+    Error:
+      type: object
+      required: [error]
+      properties: { error: { type: string } }
+  responses:
+    Invalid:
+      description: Invalid input
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" }, example: { error: invalid_client_request } } }
+    Unauthenticated: { description: No valid bearer token }
+    Forbidden: { description: Token not for this API, or its subject is not an administrator }
+    NotFound:
+      description: No such managed client
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" }, example: { error: not_found } } }
+    Conflict:
+      description: ID taken, or a client this API does not manage (such as the console's own)
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" }, example: { error: conflict } } }
+    Missing:
+      description: No such account, or it is disabled
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" }, example: { error: missing } } }
+    Unavailable:
+      description: The directory or the client store cannot be reached
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" }, example: { error: unavailable } } }
