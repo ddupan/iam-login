@@ -14,13 +14,14 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 import top.ddupan.iam.login.account.infrastructure.persistence.Grants;
-import top.ddupan.iam.login.account.infrastructure.persistence.Passkeys;
+import top.ddupan.iam.login.account.infrastructure.persistence.SecondFactors;
 import top.ddupan.iam.login.authentication.domain.User.GroupMembership;
 import top.ddupan.iam.login.authentication.infrastructure.security.DirectoryPrincipal;
 import top.ddupan.iam.login.authentication.interfaces.web.PageRenderer;
 
 /**
- * The signed-in account's own page: profile (read-only, from the directory), passkeys and granted applications.
+ * The signed-in account's own page: profile (read-only, from the directory), second factors (passkeys and the
+ * authenticator app) and granted applications.
  * Every route needs both factors fresh (browser chain), which is the re-verification before a change.
  * Errors are codes; the page translates them.
  */
@@ -29,12 +30,12 @@ import top.ddupan.iam.login.authentication.interfaces.web.PageRenderer;
 class AccountController {
     private static final int MAX_LABEL = 64;
     private final PageRenderer renderer;
-    private final Passkeys passkeys;
+    private final SecondFactors factors;
     private final Grants grants;
 
-    AccountController(PageRenderer renderer, Passkeys passkeys, Grants grants) {
+    AccountController(PageRenderer renderer, SecondFactors factors, Grants grants) {
         this.renderer = renderer;
-        this.passkeys = passkeys;
+        this.factors = factors;
         this.grants = grants;
     }
 
@@ -48,9 +49,12 @@ class AccountController {
             "profile", Map.of("username", user.username(), "displayName", user.displayName(), "email", user.email(),
                 "directory", user.id().authority(), "groups", user.memberships().stream().map(GroupMembership::name).toList()),
             // Spring Security writes these columns from Instants in the JVM's zone, which is UTC here.
-            "passkeys", passkeys.list(principal.getName()).stream().map(p -> Map.of("id", p.id(), "label", p.label(),
+            "passkeys", factors.passkeys(principal.getName()).stream().map(p -> Map.of("id", p.id(), "label", p.label(),
                 "created", p.created() == null ? "" : p.created().toInstant(ZoneOffset.UTC).toString(),
                 "lastUsed", p.lastUsed() == null ? "" : p.lastUsed().toInstant(ZoneOffset.UTC).toString())).toList(),
+            // Present only when one is set up.
+            "authenticator", factors.authenticator(principal.getName()).map(a -> Map.of("created", a.created().toInstant().toString(),
+                "lastUsed", a.lastUsed() == null ? "" : a.lastUsed().toInstant().toString())).orElse(Map.of()),
             "apps", grants.list(principal.getName()).stream().map(g -> Map.of("clientId", g.clientId(), "name", g.name(),
                 "scopes", g.scopes(), "lastIssued", g.lastIssued() == null ? "" : g.lastIssued().toInstant().toString())).toList()));
     }
@@ -62,12 +66,21 @@ class AccountController {
         if (label.isEmpty() || label.length() > MAX_LABEL || label.chars().anyMatch(Character::isISOControl)) {
             return error(400, "invalid");
         }
-        return passkeys.rename(principal.getName(), id, label) ? ResponseEntity.noContent().build() : error(404, "missing");
+        return factors.rename(principal.getName(), id, label) ? ResponseEntity.noContent().build() : error(404, "missing");
     }
 
     @DeleteMapping("/account/passkeys/{id}")
     ResponseEntity<Map<String, String>> remove(@AuthenticationPrincipal DirectoryPrincipal principal, @PathVariable String id) {
-        return switch (passkeys.remove(principal.getName(), id)) {
+        return removed(factors.removePasskey(principal.getName(), id));
+    }
+
+    @DeleteMapping("/account/authenticator")
+    ResponseEntity<Map<String, String>> removeAuthenticator(@AuthenticationPrincipal DirectoryPrincipal principal) {
+        return removed(factors.removeAuthenticator(principal.getName()));
+    }
+
+    private static ResponseEntity<Map<String, String>> removed(SecondFactors.Removal removal) {
+        return switch (removal) {
             case REMOVED -> ResponseEntity.noContent().build();
             case NOT_FOUND -> error(404, "missing");
             case LAST -> error(409, "last");

@@ -34,7 +34,7 @@ public final class WebAuthnBrowserFixture {
             Map.entry("spring.ldap.base", "dc=example,dc=test"), Map.entry("spring.ldap.urls", directory.url()),
             Map.entry("spring.ldap.username", AdDirectoryFixture.SERVICE_USER), Map.entry("spring.ldap.password", AdDirectoryFixture.SERVICE_PASSWORD),
             Map.entry("iam.webauthn.enabled", "true"), Map.entry("iam.webauthn.rp-id", "localhost"),
-            Map.entry("iam.webauthn.origin", "https://localhost:18083"),
+            Map.entry("iam.webauthn.origin", "https://localhost:18083"), Map.entry("iam.totp.key", "Zml4dHVyZS1vbmx5LXRvdHAta2V5LTMyLWJ5dGVzISE="),
             Map.entry("spring.datasource.url", database.getJdbcUrl()),
             Map.entry("spring.datasource.username", database.getUsername()),
             Map.entry("spring.datasource.password", database.getPassword()),

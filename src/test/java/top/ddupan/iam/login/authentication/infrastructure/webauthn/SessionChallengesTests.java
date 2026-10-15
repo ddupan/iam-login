@@ -36,7 +36,7 @@ class SessionChallengesTests {
     static final PostgreSQLContainer DATABASE = new PostgreSQLContainer(DockerImageName.parse(
         "postgres:18.6").asCompatibleSubstituteFor("postgres"));
     static DSLContext db;
-    private final MfaPolicy policy = new MfaPolicy(new MapPublicKeyCredentialUserEntityRepository(), new MapUserCredentialRepository());
+    private final MfaPolicy policy = new MfaPolicy(new MapPublicKeyCredentialUserEntityRepository(), new MapUserCredentialRepository(), null);
 
     @BeforeAll static void database() {
         DATABASE.start();

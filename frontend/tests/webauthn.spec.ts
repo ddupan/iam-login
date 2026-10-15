@@ -1,3 +1,4 @@
+import { createHmac } from "node:crypto";
 import { test, expect } from "@playwright/test";
 
 test.use({ ignoreHTTPSErrors: true });
@@ -100,4 +101,44 @@ test("account page manages the account's own passkeys", async ({ page, context }
   await expect(passkeys).toHaveCount(1);
   await expect(page.getByText("旧电脑", { exact: true })).toHaveCount(0);
   await expect(passkeys.getByRole("button", { name: "删除", exact: true })).toBeDisabled();
+
+  // An authenticator app as the other second factor: then the last passkey may go, and sign-in asks for a code.
+  await page.getByRole("link", { name: "设置验证器 App", exact: true }).click();
+  await expect(page.getByRole("img", { name: "验证器 App 的二维码" })).toBeVisible();
+  const secret = (await page.locator("code.secret").textContent())!.replaceAll(" ", "");
+  const step = Math.floor(Date.now() / 30000);
+  await page.getByLabel("验证码", { exact: true }).fill(totp(secret, step));
+  await page.getByRole("button", { name: "确认并启用", exact: true }).click();
+  await expect(page).toHaveURL(/\/account$/);
+  const authenticator = page.getByRole("region", { name: "验证器 App" });
+  await expect(authenticator.getByText("已设置", { exact: true })).toBeVisible();
+  await passkeys.getByRole("button", { name: "删除", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "删除", exact: true }).click();
+  await expect(passkeys).toHaveCount(0);
+  await expect(authenticator.getByRole("button", { name: "删除", exact: true })).toBeDisabled();
+
+  await page.getByRole("button", { name: "退出", exact: true }).click();
+  await page.getByLabel("用户名", { exact: true }).fill("bob");
+  await page.getByLabel("密码", { exact: true }).fill("fixture-password");
+  await page.getByRole("button", { name: "继续", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "输入验证码", exact: true })).toBeVisible();
+  // The code that confirmed the set-up is spent; the next step's is still within the allowed drift.
+  await page.getByLabel("验证码", { exact: true }).fill(totp(secret, step));
+  await page.getByRole("button", { name: "验证", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("验证码不对或已用过");
+  await page.getByLabel("验证码", { exact: true }).fill(totp(secret, step + 1));
+  await page.getByRole("button", { name: "验证", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "我的账户", exact: true })).toBeVisible();
 });
+
+/** RFC 6238 (HMAC-SHA1, 6 digits) from the base32 key the set-up page shows. */
+function totp(base32: string, step: number) {
+  let bits = "";
+  for (const c of base32) bits += "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567".indexOf(c).toString(2).padStart(5, "0");
+  const key = Buffer.from(bits.match(/.{8}/g)!.map(b => parseInt(b, 2)));
+  const counter = Buffer.alloc(8);
+  counter.writeBigUInt64BE(BigInt(step));
+  const hash = createHmac("sha1", key).update(counter).digest();
+  const offset = hash[hash.length - 1] & 0xf;
+  return String((hash.readUInt32BE(offset) & 0x7fffffff) % 1_000_000).padStart(6, "0");
+}

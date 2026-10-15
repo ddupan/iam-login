@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { CsrfToken } from "../page-context";
 import { Alert } from "./Chrome";
@@ -44,8 +44,13 @@ export async function registerPasskey(csrf: CsrfToken, label: string) {
   await post(csrf, "/webauthn/register", { publicKey: { credential: credential.toJSON(), label } });
 }
 
-/** Registers (first time) or verifies a passkey; the server owns every factor decision. */
-export function Passkey({ csrf, initial, who }: { csrf: CsrfToken; initial: "register" | "authenticate"; who: string }) {
+/**
+ * Registers (first time) or verifies a passkey; the server owns every factor decision. {@code alternative} (the
+ * other method) is offered only in the initial step: once a passkey is created, it is the one to verify with.
+ */
+export function Passkey({ csrf, initial, who, alternative }: {
+  csrf: CsrfToken; initial: "register" | "authenticate"; who: string; alternative?: ReactNode;
+}) {
   const { t } = useTranslation();
   const [step, setStep] = useState(initial);
   const [busy, setBusy] = useState(false);
@@ -92,6 +97,8 @@ export function Passkey({ csrf, initial, who }: { csrf: CsrfToken; initial: "reg
         <div><span>{who}</span><span>{t("passkey.justVerified")}</span></div></div>
       {alert}
       <button className="primary" type="button" disabled={busy} onClick={perform}>{busy ? t("passkey.waitingShort") : t("passkey.create")}</button>
+      <p className="fine">{t("passkey.createHint")}</p>
+      {alternative}
     </>;
   }
   return <>
@@ -107,5 +114,6 @@ export function Passkey({ csrf, initial, who }: { csrf: CsrfToken; initial: "reg
     {alert}
     {busy && <p className="status" role="status">{t("passkey.waiting")}</p>}
     <button className="primary" type="button" disabled={busy} onClick={perform}>{error ? t("passkey.retry") : t("passkey.verify")}</button>
+    {step === initial && alternative}
   </>;
 }

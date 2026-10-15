@@ -76,6 +76,8 @@ class SecurityConfiguration {
                     auth.requestMatchers("/account", "/account/**").access(mfa.policy.complete);
                     auth.requestMatchers(HttpMethod.POST, "/webauthn/register")
                         .access(mfa.policy.password);
+                    // Like adding a passkey; the page itself asks for the second factor too once one exists.
+                    auth.requestMatchers(HttpMethod.GET, WebAuthnBrowserConfigurer.TOTP_SETUP).access(mfa.policy.password);
                 }
                 // /signin/device decides itself: it saves the request before sending a visitor to sign in.
                 auth.requestMatchers("/error", "/signin", "/signin/password", "/signin/device", "/assets/**").permitAll()

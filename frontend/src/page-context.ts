@@ -11,7 +11,10 @@ export type SignInContext = PageBase & { app: string } & (
   | { step: "password" }
   | {
       step: "mfa-pending";
-      passkey: "unavailable" | "register" | "authenticate";
+      /** "choose": nothing set up yet; otherwise the method to verify with. */
+      factor: "unavailable" | "choose" | "passkey" | "totp";
+      /** The other method is set up too, so the page offers to switch. */
+      other: boolean;
       identity: {
         username: string;
         subjectId: string;
@@ -48,6 +51,12 @@ export type DeviceContext = PageBase & {
   };
 };
 
+export type TotpSetupContext = PageBase & {
+  step: "totp-setup";
+  totp: { uri: string; secret: string; account: string; issuer: string };
+  back: string;
+};
+
 export type AdminContext = { step: "admin"; authority: string; clientId: string };
 
 export type AccountContext = PageBase & {
@@ -55,12 +64,14 @@ export type AccountContext = PageBase & {
   profile: { username: string; displayName: string; email: string; directory: string; groups: string[] };
   /** Times are ISO instants, "" when unknown. */
   passkeys: { id: string; label: string; created: string; lastUsed: string }[];
+  /** Empty when no authenticator app is set up. */
+  authenticator: { created?: string; lastUsed?: string };
   apps: { clientId: string; name: string; scopes: string[]; lastIssued: string }[];
 };
 
-export type PageContext = SignInContext | ConsentContext | DeviceContext | AdminContext | AccountContext;
+export type PageContext = SignInContext | TotpSetupContext | ConsentContext | DeviceContext | AdminContext | AccountContext;
 
-const STEPS = ["admin", "password", "mfa-pending", "consent", "device", "account"];
+const STEPS = ["admin", "password", "mfa-pending", "totp-setup", "consent", "device", "account"];
 
 export function readPageContext(): PageContext {
   const data = document.getElementById("login-context")?.textContent;

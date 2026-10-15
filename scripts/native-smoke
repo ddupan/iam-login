@@ -69,7 +69,7 @@ keystore=$repo_root/src/test/resources/ldap/fixture.p12
   --spring.profiles.active=prod --server.address=127.0.0.1 --server.port=18083 --server.ssl.enabled=true \
   --server.ssl.key-store="file:$keystore" --server.ssl.key-store-password=fixture-only \
   --iam.ad.domain=example.test --spring.ldap.base=dc=example,dc=test --spring.ldap.urls="$ldap" \
-  --iam.webauthn.rp-id=localhost --iam.webauthn.origin=https://localhost:18083 \
+  --iam.webauthn.rp-id=localhost --iam.webauthn.origin=https://localhost:18083 --iam.totp.key=Zml4dHVyZS1vbmx5LXRvdHAta2V5LTMyLWJ5dGVzISE= \
   --iam.authorization-server.issuer=https://localhost:18083 \
   --iam.clients.spiffe.issuer=https://spire-oidc.example.test --iam.clients.spiffe.jwk-set-uri="$jwks" \
   --iam.clients.spiffe.admin-ids[0]=spiffe://example.test/ci/terraform \

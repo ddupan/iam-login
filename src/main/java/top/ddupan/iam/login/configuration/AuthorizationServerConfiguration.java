@@ -190,6 +190,8 @@ class AuthorizationServerConfiguration {
                     new MediaTypeRequestMatcher(MediaType.TEXT_HTML))
                 .defaultDeniedHandlerForMissingAuthority(new LoginUrlAuthenticationEntryPoint("/signin/mfa"),
                     FactorGrantedAuthority.WEBAUTHN_AUTHORITY)
+                .defaultDeniedHandlerForMissingAuthority(new LoginUrlAuthenticationEntryPoint("/signin/mfa"),
+                    MfaPolicy.TOTP_AUTHORITY)
                 .defaultDeniedHandlerForMissingAuthority(new LoginUrlAuthenticationEntryPoint("/signin"),
                     FactorGrantedAuthority.PASSWORD_AUTHORITY));
         return http.build();

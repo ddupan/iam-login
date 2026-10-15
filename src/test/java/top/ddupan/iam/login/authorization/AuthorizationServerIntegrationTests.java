@@ -72,7 +72,7 @@ import static top.ddupan.iam.login.persistence.schema.Tables.SUBJECTS;
 // filter would ignore. What the database store must hold is checked by SessionRoundTrip.
 @SpringBootTest(properties = {"spring.autoconfigure.exclude=org.springframework.boot.session.jdbc.autoconfigure.JdbcSessionAutoConfiguration", "iam.ad.enabled=true", "iam.ad.domain=example.test", "spring.ldap.base=dc=example,dc=test",
     "spring.datasource.hikari.maximum-pool-size=3",
-    "iam.webauthn.enabled=true", "iam.webauthn.rp-id=localhost", "iam.webauthn.origin=https://localhost",
+    "iam.webauthn.enabled=true", "iam.webauthn.rp-id=localhost", "iam.webauthn.origin=https://localhost", "iam.totp.key=Zml4dHVyZS1vbmx5LXRvdHAta2V5LTMyLWJ5dGVzISE=",
     "iam.authorization-server.enabled=true", "iam.authorization-server.issuer=https://localhost",
     "management.otlp.metrics.export.enabled=false", "spring.security.user.password=fixture-monitor-password",
     "iam.clients.admin-groups[0]=gitea-admins",

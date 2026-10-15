@@ -2,6 +2,7 @@ import { Trans, useTranslation } from "react-i18next";
 import { Alert, Single, Steps } from "../components/Chrome";
 import { Passkey } from "../components/Passkey";
 import { SubmitForm } from "../components/SubmitForm";
+import { TotpCode } from "../components/TotpCode";
 import type { SignInContext } from "../page-context";
 
 /** Leave this sign-in (POST /signin/restart) and start over with another account. */
@@ -43,13 +44,25 @@ export function SignInPage({ context }: { context: SignInContext }) {
     );
   }
   const who = context.identity.username;
+  const { factor } = context;
   return (
     <Single below={<><Restart context={context} label={t("signin.switchAccount")} /><span>{t("signin.lostFactor")}</span></>}>
       <Steps current={2} />
-      {context.app && context.passkey === "authenticate" && <ContinueTo app={context.app} />}
-      {context.passkey === "unavailable"
-        ? <Alert>{t("signin.secondFactorUnavailable")}</Alert>
-        : <Passkey csrf={context.csrf} initial={context.passkey} who={who} />}
+      {context.app && (factor === "passkey" || factor === "totp") && <ContinueTo app={context.app} />}
+      {factor === "unavailable" ? <Alert>{t("signin.secondFactorUnavailable")}</Alert>
+        : factor === "totp" ? <>
+          <div className="lead-block">
+            <h1>{t("totp.verifyHeading")}</h1>
+            <p className="lead">{t("totp.verifyLead")}</p>
+          </div>
+          <TotpCode action="/signin/totp" csrf={context.csrf} error={context.error} label={t("totp.verify")} />
+          {context.other && <a className="switch" href="/signin/mfa?method=passkey">{t("totp.usePasskey")}</a>}
+        </>
+        : <Passkey csrf={context.csrf} initial={factor === "choose" ? "register" : "authenticate"} who={who}
+          alternative={factor === "choose" ? <>
+            <a className="secondary" href="/signin/totp/setup">{t("totp.choose")}</a>
+            <p className="fine">{t("totp.chooseHint")}</p>
+          </> : context.other && <a className="switch" href="/signin/mfa?method=totp">{t("passkey.useTotp")}</a>} />}
     </Single>
   );
 }

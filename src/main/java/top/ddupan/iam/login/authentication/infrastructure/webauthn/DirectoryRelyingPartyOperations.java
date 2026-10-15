@@ -38,7 +38,7 @@ public final class DirectoryRelyingPartyOperations implements WebAuthnRelyingPar
         var principal = policy.current();
         var owner = request.getCreationOptions().getUser();
         if (!principal.getName().equals(owner.getName())) throw new AccessDeniedException("Credential owner mismatch");
-        return registrations.register(owner.getId().toBase64UrlString(), () -> {
+        return registrations.register(owner.getName(), () -> {
             policy.requireEnrollment(SecurityContextHolder.getContext().getAuthentication());
             return delegate.registerCredential(request);
         });
