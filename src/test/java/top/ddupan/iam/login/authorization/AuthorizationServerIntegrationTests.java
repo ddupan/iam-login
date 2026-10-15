@@ -403,8 +403,14 @@ class AuthorizationServerIntegrationTests {
         var console = clients.findByClientId("iam-console");
         assertThat(console.getClientAuthenticationMethods()).containsExactly(ClientAuthenticationMethod.NONE);
         assertThat(console.getRedirectUris()).containsExactly("https://localhost/console/callback");
-        mvc.perform(get("/console").with(https())).andExpect(status().isOk())
-            .andExpect(content().string(Matchers.containsString("\"clientId\":\"iam-console\"")));
+        assertThat(console.getPostLogoutRedirectUris()).containsExactly("https://localhost/signin");
+        // Every console path is the page shell, so a reload or a shared link stays on its view.
+        for (var path : List.of("/console", "/console/users", "/console/clients/spike-rp/edit")) {
+            mvc.perform(get(path).with(https())).andExpect(status().isOk())
+                .andExpect(content().string(Matchers.containsString("\"clientId\":\"iam-console\"")));
+        }
+        // The bare host name leads to the account page (which asks to sign in first).
+        mvc.perform(get("/").with(https())).andExpect(status().isFound()).andExpect(redirectedUrl("/account"));
         // The real flow: password + passkey, PKCE, no secret, no consent page.
         var session = login(); secondFactor(session);
         var verifier = verifier();
@@ -412,7 +418,7 @@ class AuthorizationServerIntegrationTests {
             MessageDigest.getInstance("SHA-256").digest(verifier.getBytes(StandardCharsets.US_ASCII)));
         var authorize = UriComponentsBuilder.fromPath("/oauth2/authorize").queryParam("response_type", "code")
             .queryParam("client_id", "iam-console").queryParam("redirect_uri", "https://localhost/console/callback")
-            .queryParam("scope", "openid groups").queryParam("state", "console-state")
+            .queryParam("scope", "openid profile groups").queryParam("state", "console-state")
             .queryParam("code_challenge", challenge).queryParam("code_challenge_method", "S256").encode().build().toUriString();
         var callback = location(session, authorize);
         assertThat(callback).startsWith("https://localhost/console/callback");

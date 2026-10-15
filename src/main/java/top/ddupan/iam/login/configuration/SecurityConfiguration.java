@@ -62,7 +62,7 @@ class SecurityConfiguration {
             .build();
         var mfa = webAuthn.getIfAvailable();
         // /oauth2/** belongs to the authorization server's own chain.
-        http.securityMatcher("/signin", "/signin/**", "/assets/**", "/webauthn/**", "/login/webauthn", "/account", "/account/**")
+        http.securityMatcher("/", "/signin", "/signin/**", "/assets/**", "/webauthn/**", "/login/webauthn", "/account", "/account/**")
             .redirectToHttps(Customizer.withDefaults())
             .authenticationManager(new ProviderManager(
                 new DirectoryAuthenticationProvider(ActiveDirectory.provider(ad, ldap), ad.domain(),
@@ -80,7 +80,8 @@ class SecurityConfiguration {
                     auth.requestMatchers(HttpMethod.GET, WebAuthnBrowserConfigurer.TOTP_SETUP).access(mfa.policy.password);
                 }
                 // /signin/device decides itself: it saves the request before sending a visitor to sign in.
-                auth.requestMatchers("/error", "/signin", "/signin/password", "/signin/device", "/assets/**").permitAll()
+                // "/" only redirects to /account, which then asks for whatever sign-in is missing.
+                auth.requestMatchers("/", "/error", "/signin", "/signin/password", "/signin/device", "/assets/**").permitAll()
                 .requestMatchers("/signin/mfa").access(passwordFactor.authenticated())
                 // The framework's credential deletion (DELETE /webauthn/register/{id}, no last-factor rule) and all
                 // unimplemented routes remain closed; removal goes through /account.

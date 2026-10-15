@@ -1,5 +1,6 @@
 package top.ddupan.iam.login.account.interfaces.web;
 
+import java.net.URI;
 import java.time.ZoneOffset;
 import java.util.Map;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -40,6 +41,12 @@ class AccountController {
     }
 
     record Label(String label) { }
+
+    /** The bare host name: what a person typing it wants is their account (signing in first if needed). */
+    @GetMapping("/")
+    ResponseEntity<Void> root() {
+        return ResponseEntity.status(302).location(URI.create("/account")).build();
+    }
 
     @GetMapping(value = "/account", produces = MediaType.TEXT_HTML_VALUE)
     ResponseEntity<String> page(@AuthenticationPrincipal DirectoryPrincipal principal, CsrfToken csrf) {

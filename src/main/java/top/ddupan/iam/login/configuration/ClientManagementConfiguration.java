@@ -127,7 +127,7 @@ class ClientManagementConfiguration {
 
     // The page shell carries no data; everything it shows comes from the bearer API above.
     @Bean @Order(2) SecurityFilterChain consolePage(HttpSecurity http) throws Exception {
-        return http.securityMatcher("/console", "/console/callback").redirectToHttps(Customizer.withDefaults())
+        return http.securityMatcher("/console", "/console/**").redirectToHttps(Customizer.withDefaults())
             .authorizeHttpRequests(auth -> auth.anyRequest().permitAll())
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .requestCache(cache -> cache.disable()).logout(logout -> logout.disable()).build();
@@ -147,7 +147,10 @@ class ClientManagementConfiguration {
                 .clientAuthenticationMethods(methods -> { methods.clear(); methods.add(ClientAuthenticationMethod.NONE); })
                 .authorizationGrantTypes(grants -> { grants.clear(); grants.add(AuthorizationGrantType.AUTHORIZATION_CODE); })
                 .redirectUris(uris -> { uris.clear(); uris.add(URI.create(server.issuer() + "/").resolve("console/callback").toString()); })
-                .scopes(scopes -> { scopes.clear(); scopes.add("openid"); scopes.add("groups"); })
+                // After signing out at the issuer, the sign-in page.
+                .postLogoutRedirectUris(uris -> { uris.clear(); uris.add(URI.create(server.issuer() + "/").resolve("signin").toString()); })
+                // profile for the name in the top bar.
+                .scopes(scopes -> { scopes.clear(); scopes.add("openid"); scopes.add("profile"); scopes.add("groups"); })
                 .clientSettings(ClientSettings.builder().requireProofKey(true).requireAuthorizationConsent(false)
                     .setting(RegisteredClients.AUDIENCES, AUDIENCE).setting(RegisteredClients.LOGIN_ENABLED, true).build())
                 .build());
