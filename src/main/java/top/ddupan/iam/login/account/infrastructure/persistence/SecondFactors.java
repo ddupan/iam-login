@@ -6,14 +6,15 @@ import java.util.List;
 import java.util.Optional;
 import org.jooq.DSLContext;
 import top.ddupan.iam.login.authentication.infrastructure.persistence.CredentialRegistration;
+import static top.ddupan.iam.login.persistence.schema.Tables.SPRING_SESSION;
 import static top.ddupan.iam.login.persistence.schema.Tables.TOTP_CREDENTIALS;
 import static top.ddupan.iam.login.persistence.schema.Tables.USER_CREDENTIALS;
 import static top.ddupan.iam.login.persistence.schema.Tables.USER_ENTITIES;
 
 /**
- * The signed-in account's own second factors: passkeys, in Spring Security's WebAuthn tables, and the
+ * An account's second factors: passkeys, in Spring Security's WebAuthn tables, and the
  * authenticator app. Every statement is scoped to the owner, so another account's credential id simply matches
- * nothing. At least one factor must remain; removals run under the registration lock, so two cannot both pass.
+ * nothing. At least one factor must remain, short of an administrator's reset; removals run under the registration lock, so two cannot both pass.
  */
 public final class SecondFactors {
     public record Passkey(String id, String label, LocalDateTime created, LocalDateTime lastUsed) { }
@@ -64,6 +65,22 @@ public final class SecondFactors {
             if (count(owner) <= 1) return Removal.LAST;
             db.deleteFrom(TOTP_CREDENTIALS).where(TOTP_CREDENTIALS.OWNER.eq(owner)).execute();
             return Removal.REMOVED;
+        });
+    }
+
+    /**
+     * An administrator's reset: every factor of the account, and every session it has, so a sign-in already under
+     * way cannot finish with the lost device. Its next sign-in sets a factor up again after the password.
+     * Returns how many factors were removed.
+     */
+    public int reset(String owner) {
+        return registrations.register(owner, () -> {
+            var user = userId(owner);
+            int removed = (user == null ? 0 : db.deleteFrom(USER_CREDENTIALS).where(USER_CREDENTIALS.USER_ENTITY_USER_ID.eq(user)).execute())
+                + db.deleteFrom(TOTP_CREDENTIALS).where(TOTP_CREDENTIALS.OWNER.eq(owner)).execute();
+            // Spring Session indexes each session by the authentication's name, which is the owner.
+            db.deleteFrom(SPRING_SESSION).where(SPRING_SESSION.PRINCIPAL_NAME.eq(owner)).execute();
+            return removed;
         });
     }
 

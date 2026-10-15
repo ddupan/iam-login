@@ -13,7 +13,6 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import org.jooq.DSLContext;
 import org.springframework.beans.factory.ObjectProvider;
@@ -173,7 +172,7 @@ class AuthorizationServerConfiguration {
                 .tokenEndpoint(endpoint -> endpoint.authenticationProviders(providers ->
                     providers.addFirst(new RefreshPolicy(authorizations, subjects,
                         // Without AD nothing can vouch for a directory account any more.
-                        users.getIfAvailable(() -> id -> Optional.empty())))));
+                        users.getIfAvailable(() -> UserRepository.NONE)))));
         })
             // Only the user-facing endpoint needs a human with both factors; token, introspection and
             // revocation authenticate the client, and discovery/JWKS are public. The endpoint filter runs after

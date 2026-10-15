@@ -41,6 +41,14 @@ class AdUsersTests {
     }
 
     @Test
+    void findsTheAccountBySignInNameEscapingTheValue() {
+        assertThat(users.findActive("alice")).map(User::id).contains(new User.UserId("example.test", ALICE));
+        assertThat(users.findActive("carol")).as("disabled").isEmpty();
+        assertThat(users.findActive("nobody")).isEmpty();
+        assertThat(users.findActive("*")).as("a filter, not a name").isEmpty();
+    }
+
+    @Test
     void anUnreachableDirectoryIsAFailureNotAnAbsence() {
         assertThatThrownBy(() -> users("ldaps://localhost:1").findActive(new User.UserId("example.test", ALICE)))
             .isInstanceOf(UserRepository.AccessFailure.class);

@@ -99,7 +99,11 @@
     "deniedLead": "设备没有获得访问权限。"
   },
   "admin": {
-    "eyebrow": "OIDC 客户端管理",
+    "sections": "控制台",
+    "tab": {
+      "clients": "OIDC 客户端",
+      "users": "用户"
+    },
     "redirecting": "正在跳转统一登录…",
     "signInAgain": "重新登录",
     "error": {
@@ -142,6 +146,25 @@
       "409": "冲突：ID 已存在，或该客户端不是本服务可管理的类型。",
       "unavailable": "身份服务暂时不可用，请稍后重试。",
       "failed": "操作失败。"
+    }
+  },
+  "users": {
+    "heading": "用户",
+    "lead": "账号本身在 AD 中管理；这里只处理登录的两步验证。",
+    "username": "用户名",
+    "find": "查找",
+    "passkey": "Passkey「{{label}}」",
+    "noFactors": "尚未设置两步验证。",
+    "reset": "重置两步验证",
+    "resetLead": "删除这个用户的全部 Passkey 和验证器，并让其所有登录会话失效。用户下次输入密码后重新设置。仅在确认是本人丢失设备时使用。",
+    "resetAction": "重置",
+    "resetTitle": "重置 {{username}} 的两步验证？",
+    "resetDone": "已重置。用户下次登录时重新设置两步验证。",
+    "error": {
+      "missing": "找不到这个用户，或账号已停用。",
+      "forbidden": "当前登录没有用户管理权限。",
+      "unavailable": "暂时无法连接目录，请稍后重试。",
+      "failed": "操作失败，请稍后重试。"
     }
   },
   "account": {

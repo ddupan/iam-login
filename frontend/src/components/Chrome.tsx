@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
 export function Brand({ host = true }: { host?: boolean }) {
@@ -48,4 +48,14 @@ export function Steps({ current }: { current: 1 | 2 }) {
       <li className={current === 2 ? "current" : ""} aria-current={current === 2 ? "step" : undefined}><span className="dot">2</span>{t("steps.secondFactor")}</li>
     </ol>
   );
+}
+
+/** A modal confirmation; the native dialog gives focus trapping and Escape. */
+export function Dialog({ title, children, onClose }: { title: string; children: ReactNode; onClose: () => void }) {
+  const ref = useRef<HTMLDialogElement>(null);
+  useEffect(() => { ref.current?.showModal(); }, []);
+  return <dialog ref={ref} className="dialog" aria-labelledby="dialog-title" onClose={onClose}>
+    <h2 id="dialog-title">{title}</h2>
+    {children}
+  </dialog>;
 }
