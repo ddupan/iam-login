@@ -212,6 +212,12 @@ components:
           default: []
           description: Extra access-token audiences
           items: { type: string, minLength: 1, maxLength: 2048, pattern: "^[^,]*$" }
+        tokenEndpointAuthMethod:
+          type: string
+          enum: [client_secret_basic, client_secret_post, none]
+          description: |
+            How a confidential client sends its secret; absent means client_secret_basic, also on an update. Use
+            client_secret_post only for an application that cannot send Basic. Always none for a public client.
     MachineClient:
       type: object
       description: |

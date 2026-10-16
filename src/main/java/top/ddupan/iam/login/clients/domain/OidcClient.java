@@ -13,16 +13,29 @@ import java.util.Set;
  * <li>{@code publicClient}: no secret (a CLI, a browser app). PKCE is then mandatory; fixed at creation.</li>
  * <li>{@code deviceAuthorization}: also the device grant (RFC 8628), for clients without a browser.</li>
  * <li>{@code audiences}: extra access-token audiences, for resources that check {@code aud} (Incus).</li>
+ * <li>{@code tokenEndpointAuthMethod}: how a confidential client sends its secret, {@code client_secret_basic} unless
+ * the application can only send it in the form ({@code client_secret_post}, Artifact Keeper); {@code none} for a public
+ * client, whatever was asked.</li>
  * </ul>
  * Who may do what is the resource's decision, from the token's claims; a client admits everyone who can sign in.
- * The three are optional so that callers predating them keep working; absent means off / empty.
+ * These are optional so that callers predating them keep working; absent means off / empty / basic.
  */
 public record OidcClient(String id, String name, List<String> redirectUris, Set<String> scopes,
         List<String> postLogoutRedirectUris, Boolean loginEnabled, Boolean pkceRequired, Boolean publicClient,
-        Boolean deviceAuthorization, List<String> audiences) {
+        Boolean deviceAuthorization, List<String> audiences, String tokenEndpointAuthMethod) {
+    public static final String CLIENT_SECRET_BASIC = "client_secret_basic";
+    public static final String CLIENT_SECRET_POST = "client_secret_post";
+    public static final String NONE = "none";
+
     public OidcClient(String id, String name, List<String> redirectUris, Set<String> scopes,
             List<String> postLogoutRedirectUris, Boolean loginEnabled, Boolean pkceRequired) {
         this(id, name, redirectUris, scopes, postLogoutRedirectUris, loginEnabled, pkceRequired, false, false, List.of());
+    }
+    public OidcClient(String id, String name, List<String> redirectUris, Set<String> scopes,
+            List<String> postLogoutRedirectUris, Boolean loginEnabled, Boolean pkceRequired, Boolean publicClient,
+            Boolean deviceAuthorization, List<String> audiences) {
+        this(id, name, redirectUris, scopes, postLogoutRedirectUris, loginEnabled, pkceRequired, publicClient,
+            deviceAuthorization, audiences, null);
     }
 
     public OidcClient {
@@ -44,6 +57,14 @@ public record OidcClient(String id, String name, List<String> redirectUris, Set<
         // Without a secret, PKCE is what binds the code to the client that asked for it.
         if (publicClient && !pkceRequired) throw new IllegalArgumentException("Public clients require PKCE");
         audiences = requireAudiences(audiences);
+        if (publicClient) {
+            if (tokenEndpointAuthMethod != null && !NONE.equals(tokenEndpointAuthMethod)) throw new IllegalArgumentException("Public clients have no secret");
+            tokenEndpointAuthMethod = NONE;
+        } else {
+            if (tokenEndpointAuthMethod == null) tokenEndpointAuthMethod = CLIENT_SECRET_BASIC;
+            if (!Set.of(CLIENT_SECRET_BASIC, CLIENT_SECRET_POST).contains(tokenEndpointAuthMethod))
+                throw new IllegalArgumentException("Invalid token endpoint authentication method");
+        }
     }
     /** Well-formed RFC 6749 scope-tokens, at most 50. */
     static Set<String> requireScopes(Set<String> scopes) {
