@@ -4,6 +4,7 @@ import java.security.SecureRandom;
 import java.util.Base64;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -60,6 +61,15 @@ public final class RegisteredClients implements ClientRepository, MachineClientR
 
     public static boolean loginEnabled(RegisteredClient client) {
         return !Boolean.FALSE.equals(client.getClientSettings().getSetting(LOGIN_ENABLED));
+    }
+
+    /** The access-token audiences of a client: its ID, then the extra ones registered for it, without duplicates. */
+    public static List<String> tokenAudiences(RegisteredClient client) {
+        var audiences = new ArrayList<>(List.of(client.getClientId()));
+        for (var value : audiences(client.getClientSettings().getSetting(AUDIENCES))) {
+            if (!value.isBlank() && !audiences.contains(value.trim())) audiences.add(value.trim());
+        }
+        return audiences;
     }
 
     @Override public List<OidcClient> list(int page, int size) {

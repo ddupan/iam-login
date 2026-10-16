@@ -19,6 +19,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -31,12 +32,16 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.http.HttpHeaders;
 import org.springframework.security.authentication.AuthenticationProvider;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.oauth2.core.AuthorizationGrantType;
 import org.springframework.security.oauth2.core.ClientAuthenticationMethod;
 import org.springframework.security.oauth2.core.OAuth2AuthenticationException;
 import org.springframework.security.oauth2.core.OAuth2Error;
 import org.springframework.security.oauth2.core.OAuth2ErrorCodes;
 import org.springframework.security.oauth2.core.endpoint.OAuth2ParameterNames;
+import org.springframework.security.oauth2.server.authorization.authentication.OAuth2AccessTokenAuthenticationToken;
 import org.springframework.security.oauth2.server.authorization.authentication.OAuth2ClientAuthenticationToken;
+import org.springframework.security.oauth2.server.authorization.authentication.OAuth2ClientCredentialsAuthenticationToken;
+import org.springframework.security.oauth2.server.authorization.authentication.OAuth2TokenExchangeAuthenticationToken;
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClient;
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClientRepository;
 import org.springframework.security.web.authentication.AuthenticationConverter;
@@ -51,6 +56,9 @@ import top.ddupan.iam.login.clients.infrastructure.RegisteredClients;
  *
  * Keys come only from the SPIFFE Bundle Endpoint configured for the trust domain in the SPIFFE ID (6.1); the
  * token's {@code iss} is never used to find keys (6.2.4, 8.1), and is otherwise ignored.
+ *
+ * The same JWT-SVID is also accepted as the {@code subject_token} of an RFC 8693 token exchange, for clients that
+ * speak token exchange but not this draft: see {@link Converter} and {@link Exchange}.
  */
 final class SpiffeClients {
     private SpiffeClients() { }
@@ -58,6 +66,9 @@ final class SpiffeClients {
     /** The method name advertised in metadata (4) and registered on clients. */
     static final ClientAuthenticationMethod SPIFFE_JWT = RegisteredClients.SPIFFE_JWT;
     static final String ASSERTION_TYPE = "urn:ietf:params:oauth:client-assertion-type:jwt-spiffe";
+    /** RFC 8693 3: the token types an SVID exchange takes and issues. */
+    static final String JWT_TOKEN_TYPE = "urn:ietf:params:oauth:token-type:jwt";
+    static final String ACCESS_TOKEN_TYPE = "urn:ietf:params:oauth:token-type:access_token";
 
     /** Out-of-band trust (5): which bundle endpoint holds the keys of which trust domain (6.1). */
     @ConfigurationProperties("iam.spiffe")
@@ -104,10 +115,21 @@ final class SpiffeClients {
     /**
      * 3.1: client_assertion_type and a single client_assertion. client_id is optional; without it the client is the
      * one registered under the SPIFFE ID itself, read from the (not yet verified) sub only to look the client up.
+     *
+     * A token exchange with a JWT subject_token and no client credential of its own is read the same way: the
+     * subject_token is the SVID that authenticates the client, and {@link Exchange} issues for it.
      */
     static final class Converter implements AuthenticationConverter {
         @Override public @Nullable Authentication convert(HttpServletRequest request) {
             if (!"POST".equals(request.getMethod())) return null;
+            if (exchange(request)) {
+                var subjects = request.getParameterValues(OAuth2ParameterNames.SUBJECT_TOKEN);
+                var ids = request.getParameterValues(OAuth2ParameterNames.CLIENT_ID);
+                // Malformed exchanges are the framework converter's to reject, with its error.
+                if (subjects == null || subjects.length != 1 || ids != null && ids.length != 1) return null;
+                String clientId = ids != null ? ids[0] : subject(subjects[0]);
+                return clientId == null || clientId.isBlank() ? null : new Assertion(clientId, subjects[0]);
+            }
             if (!ASSERTION_TYPE.equals(request.getParameter(OAuth2ParameterNames.CLIENT_ASSERTION_TYPE))) return null;
             var types = request.getParameterValues(OAuth2ParameterNames.CLIENT_ASSERTION_TYPE);
             var assertions = request.getParameterValues(OAuth2ParameterNames.CLIENT_ASSERTION);
@@ -120,6 +142,14 @@ final class SpiffeClients {
             String clientId = ids != null ? ids[0] : subject(assertions[0]);
             if (clientId == null || clientId.isBlank()) throw new OAuth2AuthenticationException(OAuth2ErrorCodes.INVALID_CLIENT);
             return new Assertion(clientId, assertions[0]);
+        }
+
+        private static boolean exchange(HttpServletRequest request) {
+            return AuthorizationGrantType.TOKEN_EXCHANGE.getValue().equals(request.getParameter(OAuth2ParameterNames.GRANT_TYPE))
+                && JWT_TOKEN_TYPE.equals(request.getParameter(OAuth2ParameterNames.SUBJECT_TOKEN_TYPE))
+                && request.getParameter(OAuth2ParameterNames.CLIENT_ASSERTION_TYPE) == null
+                && request.getParameter(OAuth2ParameterNames.CLIENT_SECRET) == null
+                && request.getHeader(HttpHeaders.AUTHORIZATION) == null;
         }
 
         private static @Nullable String subject(String assertion) {
@@ -206,6 +236,54 @@ final class SpiffeClients {
 
         @Override public boolean supports(Class<?> type) {
             return Assertion.class.isAssignableFrom(type);
+        }
+    }
+
+    /**
+     * RFC 8693 for a client that authenticated with its JWT-SVID as the subject_token ({@link Converter}): the
+     * workload exchanges its SPIFFE identity for its own access token, exactly what client_credentials issues it
+     * (sub = client ID, aud = client ID plus registered audiences), with issued_token_type added (2.2.1). Any other
+     * exchange goes to the framework's provider, which this one replaces: the provider manager would otherwise try
+     * that one after an error here and answer with its error instead. No delegation: an actor_token is refused, and
+     * audience or resource may only name an audience the client is registered for.
+     */
+    static final class Exchange implements AuthenticationProvider {
+        private final AuthenticationProvider clientCredentials;
+        private final AuthenticationProvider framework;
+
+        Exchange(AuthenticationProvider clientCredentials, AuthenticationProvider framework) {
+            this.clientCredentials = clientCredentials;
+            this.framework = framework;
+        }
+
+        @Override public @Nullable Authentication authenticate(Authentication authentication) {
+            var request = (OAuth2TokenExchangeAuthenticationToken) authentication;
+            if (!(request.getPrincipal() instanceof OAuth2ClientAuthenticationToken client)
+                    || !SPIFFE_JWT.equals(client.getClientAuthenticationMethod())
+                    || !request.getSubjectToken().equals(client.getCredentials())) {
+                return framework.authenticate(authentication);
+            }
+            if (request.getActorToken() != null) throw new OAuth2AuthenticationException(OAuth2ErrorCodes.INVALID_REQUEST);
+            var type = request.getRequestedTokenType();
+            if (!ACCESS_TOKEN_TYPE.equals(type) && !JWT_TOKEN_TYPE.equals(type)) {
+                throw new OAuth2AuthenticationException(OAuth2ErrorCodes.INVALID_REQUEST);
+            }
+            var targets = new HashSet<>(request.getAudiences());
+            targets.addAll(request.getResources());
+            // 2.2.2: a target this server will not issue for.
+            if (!RegisteredClients.tokenAudiences(client.getRegisteredClient()).containsAll(targets)) {
+                throw new OAuth2AuthenticationException(new OAuth2Error("invalid_target"));
+            }
+            var issued = (OAuth2AccessTokenAuthenticationToken) clientCredentials.authenticate(
+                new OAuth2ClientCredentialsAuthenticationToken(client, request.getScopes(), Map.of()));
+            var parameters = new HashMap<>(issued.getAdditionalParameters());
+            parameters.put(OAuth2ParameterNames.ISSUED_TOKEN_TYPE, type);
+            return new OAuth2AccessTokenAuthenticationToken(issued.getRegisteredClient(), (Authentication) issued.getPrincipal(),
+                issued.getAccessToken(), issued.getRefreshToken(), parameters);
+        }
+
+        @Override public boolean supports(Class<?> type) {
+            return OAuth2TokenExchangeAuthenticationToken.class.isAssignableFrom(type);
         }
     }
 

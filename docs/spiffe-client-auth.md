@@ -73,6 +73,33 @@ iam:
 `sub` 为 client ID（即 SPIFFE ID），`aud` 为 client ID 加客户端登记的额外 audience，`scope` 为空格分隔字符串
 （RFC 9068，与用户 token 相同）。`client_credentials` 不签发 refresh token：随时可以用新的 SVID 再换。
 
+## Token exchange（RFC 8693）
+
+只会 RFC 8693 的客户端（STS 风格的 SDK、各类 workload identity 配置）可以把同一个 SVID 作为
+`subject_token` 交换：
+
+```
+POST /oauth2/token
+grant_type=urn:ietf:params:oauth:grant-type:token-exchange
+subject_token=<JWT-SVID，aud 为本服务 issuer>
+subject_token_type=urn:ietf:params:oauth:token-type:jwt
+client_id=<客户端 ID>
+[scope=...]
+[audience=... / resource=...]
+[requested_token_type=urn:ietf:params:oauth:token-type:access_token | ...:jwt]
+```
+
+- 请求不带其他客户端凭据时，`subject_token` 就是客户端认证用的 SVID，按上面「校验」逐条检查，
+  客户端须登记为 `spiffe_jwt`；`client_id` 的规则与 `client_credentials` 相同
+- 签发与 `client_credentials` 完全相同的 token，响应多带 `issued_token_type`（2.2.1）
+- `audience` / `resource` 只能是客户端已登记的 audience（含 client ID），否则 `invalid_target`；
+  它们不改变签发 token 的 `aud`
+- 不支持委托：带 `actor_token` 返回 `invalid_request`
+- 其他形式的交换（`subject_token` 是本服务签发的 token）仍由框架处理，需客户端登记 token-exchange grant
+
+代码在 `SpiffeClients.Converter` 与 `SpiffeClients.Exchange`，端到端测试
+`AuthorizationServerIntegrationTests.machinesExchangeTheirJwtSvidForAnAccessToken`。
+
 ## 未实现
 
 草案只要求三种方式至少支持一种（4），以下有意不做，条件出现时再加：
