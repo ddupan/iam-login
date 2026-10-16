@@ -126,8 +126,11 @@ class SecurityConfiguration {
         return http.authorizeHttpRequests(auth -> auth
                 .requestMatchers("/error").permitAll()
                 .anyRequest().denyAll())
+            // Nothing is served here, so to anyone it is not found. sendError, not a bare status, so a browser
+            // gets the error page (ErrorPages) instead of an empty body.
             .exceptionHandling(exceptions -> exceptions
-                .authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED)))
+                .authenticationEntryPoint((request, response, ex) -> response.sendError(HttpStatus.NOT_FOUND.value()))
+                .accessDeniedHandler((request, response, ex) -> response.sendError(HttpStatus.NOT_FOUND.value())))
             .requestCache(cache -> cache.disable())
             .logout(logout -> logout.disable())
             .build();

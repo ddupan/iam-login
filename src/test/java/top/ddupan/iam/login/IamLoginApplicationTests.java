@@ -32,10 +32,11 @@ class IamLoginApplicationTests {
 
     @Test
     void signInIsDisabledUntilDirectoryIsConfigured() throws Exception {
-        mvc.perform(get("/signin").secure(true)).andExpect(status().isUnauthorized());
+        // Without a directory the sign-in routes are not served at all.
+        mvc.perform(get("/signin").secure(true)).andExpect(status().isNotFound());
         mvc.perform(MockMvcRequestBuilders.post("/signin/password")
             .secure(true).with(SecurityMockMvcRequestPostProcessors.csrf()))
-            .andExpect(status().isUnauthorized());
+            .andExpect(status().isNotFound());
     }
 
     @Test

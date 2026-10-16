@@ -156,3 +156,15 @@ test("AD + passkey -> in-process authorization server: consent, tokens, userinfo
   await page.getByRole("button", { name: "退出", exact: true }).click();
   await expect.poll(() => new URL(page.url()).pathname).toBe("/signin");
 });
+
+test("errors a browser lands on show the error page, not the framework's", async ({ page }) => {
+  test.skip(process.env.IAM_AUTHORIZATION_SERVER_FIXTURE !== "1", "Start authorizationServerBrowserFixture; never runs against production");
+  const invalid = await page.goto(`${ISSUER}/oauth2/authorize?response_type=code&client_id=no-such-client`);
+  expect(invalid?.status()).toBe(400);
+  await expect(page.getByRole("heading", { name: "无法完成这个请求" })).toBeVisible();
+  await expect(page.getByText("Whitelabel")).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "前往账户" })).toHaveAttribute("href", "/account");
+  const missing = await page.goto(`${ISSUER}/no-such-page`);
+  expect(missing?.status()).toBe(404);
+  await expect(page.getByRole("heading", { name: "页面不存在" })).toBeVisible();
+});
