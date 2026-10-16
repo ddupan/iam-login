@@ -28,6 +28,15 @@ jobs:
             /tmp/iam-ci/npm
           key: iam-jvm-${{ hashFiles('build.gradle', 'gradle/wrapper/gradle-wrapper.properties', 'frontend/package-lock.json') }}
           restore-keys: iam-jvm-
+      # Gradle and npm run in containers with these directories as their homes; Docker Hub pulls
+      # (node, Testcontainers' Postgres) go through the job dockerd's mirror.
+      - uses: https://git.ddupan.top/panxiao81/ci-actions/setup-artifact-keeper@v1
+        with:
+          gradle: 'true'
+          gradle-user-home: /tmp/iam-ci/gradle
+          npm: 'true'
+          npm-home: /tmp/iam-ci/npm
+          docker: 'true'
       - name: JVM tests and boot jar
         env:
           # Leaves room in the Pod's 4Gi for dockerd and the Testcontainers database.
