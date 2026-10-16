@@ -32,10 +32,8 @@ public record OidcClient(String id, String name, List<String> redirectUris, Set<
         redirectUris = List.copyOf(redirectUris);
         // Scopes are delegation, not permission (resources check audience and identity), so any well-formed
         // RFC 6749 scope-token is accepted; openid is required because login is OIDC.
-        if (scopes == null || !scopes.contains("openid") || scopes.size() > 50
-                || !scopes.stream().allMatch(scope -> scope != null && scope.matches("[\\x21\\x23-\\x5B\\x5D-\\x7E]{1,128}")))
-            throw new IllegalArgumentException("Invalid scopes");
-        scopes = Set.copyOf(scopes);
+        if (scopes == null || !scopes.contains("openid")) throw new IllegalArgumentException("Invalid scopes");
+        scopes = requireScopes(scopes);
         postLogoutRedirectUris = postLogoutRedirectUris == null ? List.of() : List.copyOf(postLogoutRedirectUris);
         if (postLogoutRedirectUris.size() > 20) throw new IllegalArgumentException("Too many logout redirects");
         redirectUris.forEach(OidcClient::requireUri); postLogoutRedirectUris.forEach(OidcClient::requireUri);
@@ -45,10 +43,21 @@ public record OidcClient(String id, String name, List<String> redirectUris, Set<
         deviceAuthorization = Boolean.TRUE.equals(deviceAuthorization);
         // Without a secret, PKCE is what binds the code to the client that asked for it.
         if (publicClient && !pkceRequired) throw new IllegalArgumentException("Public clients require PKCE");
+        audiences = requireAudiences(audiences);
+    }
+    /** Well-formed RFC 6749 scope-tokens, at most 50. */
+    static Set<String> requireScopes(Set<String> scopes) {
+        if (scopes.size() > 50 || !scopes.stream().allMatch(scope -> scope != null && scope.matches("[\\x21\\x23-\\x5B\\x5D-\\x7E]{1,128}")))
+            throw new IllegalArgumentException("Invalid scopes");
+        return Set.copyOf(scopes);
+    }
+    /** At most 10; absent means none. */
+    static List<String> requireAudiences(List<String> audiences) {
         audiences = audiences == null ? List.of() : List.copyOf(audiences);
         // Stored comma-separated (RegisteredClients.AUDIENCES).
         if (audiences.size() > 10 || !audiences.stream().allMatch(a -> a != null && !a.isBlank() && a.length() <= 2048
                 && !a.contains(",") && a.equals(a.strip()))) throw new IllegalArgumentException("Invalid audiences");
+        return audiences;
     }
     public static void requireId(String id) {
         if (id == null || !id.matches("[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}")) throw new IllegalArgumentException("Invalid client ID");

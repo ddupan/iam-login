@@ -49,6 +49,7 @@ import org.springframework.security.oauth2.server.authorization.settings.TokenSe
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping;
 import org.springframework.web.util.UriComponentsBuilder;
@@ -429,6 +430,55 @@ class AuthorizationServerIntegrationTests {
                 .andExpect(jsonPath("$.revocation_endpoint_auth_methods_supported", Matchers.hasItem("spiffe_jwt")))
                 .andExpect(jsonPath("$.introspection_endpoint_auth_methods_supported", Matchers.hasItem("spiffe_jwt")));
         }
+    }
+
+    /** Machine clients: registered through their own API, then authenticated by any SVID their spiffeId covers. */
+    @Test void machineClientsAreManagedThroughTheirOwnApi() throws Exception {
+        var admin = token(List.of("iam-login"), List.of("gitea-admins"));
+        var body = """
+            {"id":"ci-publisher","name":"CI","spiffeId":"spiffe://example.test/ci/*","scopes":["artifacts.write"],
+             "audiences":["artifact-keeper"],"enabled":true}
+            """;
+        mvc.perform(post("/api/iam/machine-clients").with(https()).with(admin).contentType(MediaType.APPLICATION_JSON).content(body))
+            .andExpect(status().isCreated()).andExpect(jsonPath("spiffeId").value("spiffe://example.test/ci/*"));
+        mvc.perform(post("/api/iam/machine-clients").with(https()).with(admin).contentType(MediaType.APPLICATION_JSON).content(body))
+            .andExpect(status().isConflict());
+        // A wildcard only on a whole segment; enabled is required, not defaulted.
+        for (var invalid : List.of(body.replace("ci/*", "ci*"), body.replace(",\"enabled\":true", ""))) {
+            mvc.perform(post("/api/iam/machine-clients").with(https()).with(admin).contentType(MediaType.APPLICATION_JSON)
+                    .content(invalid.replace("ci-publisher", "invalid"))).andExpect(status().isBadRequest());
+        }
+        // Each API sees only its own kind.
+        mvc.perform(get("/api/iam/machine-clients").with(https()).with(admin)).andExpect(status().isOk())
+            .andExpect(jsonPath("$[?(@.id=='ci-publisher')]").exists()).andExpect(jsonPath("$[?(@.id=='spike-rp')]").doesNotExist());
+        mvc.perform(get("/api/iam/clients").with(https()).with(admin)).andExpect(status().isOk())
+            .andExpect(jsonPath("$[?(@.id=='ci-publisher')]").doesNotExist());
+        mvc.perform(get("/api/iam/clients/ci-publisher").with(https()).with(admin)).andExpect(status().isConflict());
+        mvc.perform(delete("/api/iam/machine-clients/iam-console").with(https()).with(admin)).andExpect(status().isConflict());
+
+        var svid = Fixtures.SPIRE.svid("spiffe://example.test/ci/publisher", List.of("https://localhost"), SpiffeFixture.ISSUER,
+            Instant.now().plusSeconds(300));
+        var tokens = json(machineToken("ci-publisher", svid).andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
+        assertThat(claims((String) tokens.get("access_token"))).containsEntry("sub", "ci-publisher")
+            .containsEntry("scope", "artifacts.write").containsEntry("aud", List.of("ci-publisher", "artifact-keeper"));
+        var outside = Fixtures.SPIRE.svid("spiffe://example.test/cicd", List.of("https://localhost"), SpiffeFixture.ISSUER,
+            Instant.now().plusSeconds(300));
+        machineToken("ci-publisher", outside).andExpect(status().isUnauthorized());
+
+        // Disabled: no more tokens.
+        mvc.perform(put("/api/iam/machine-clients/ci-publisher").with(https()).with(admin).contentType(MediaType.APPLICATION_JSON)
+                .content(body.replace("\"enabled\":true", "\"enabled\":false"))).andExpect(status().isOk())
+            .andExpect(jsonPath("enabled").value(false));
+        machineToken("ci-publisher", svid).andExpect(status().isUnauthorized()).andExpect(jsonPath("$.error").value("invalid_client"));
+
+        mvc.perform(delete("/api/iam/machine-clients/ci-publisher").with(https()).with(admin)).andExpect(status().isNoContent());
+        mvc.perform(get("/api/iam/machine-clients/ci-publisher").with(https()).with(admin)).andExpect(status().isNotFound());
+    }
+
+    private ResultActions machineToken(String clientId, String svid) throws Exception {
+        return mvc.perform(post("/oauth2/token").with(https()).param("grant_type", "client_credentials").param("client_id", clientId)
+            .param("client_assertion_type", "urn:ietf:params:oauth:client-assertion-type:jwt-spiffe").param("client_assertion", svid)
+            .param("scope", "artifacts.write"));
     }
 
     @Test void consoleIsAPublicClientWhoseTokensCarryTheApiAudience() throws Exception {
