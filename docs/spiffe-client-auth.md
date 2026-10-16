@@ -60,6 +60,15 @@ iam:
 
 ## 未实现
 
-- X509-SVID（3.2，mTLS）与 WIT-SVID（3.3）：草案只要求至少支持一种
-- Client ID Metadata Document（3.1.2）与 `spiffe_bundle_endpoint` 客户端元数据：trust domain 只来自本服务配置
+草案只要求三种方式至少支持一种（4），以下有意不做，条件出现时再加：
+
+- X509-SVID（3.2，mTLS）：能拿 X509-SVID 的工作负载同样能拿 JWT-SVID，不会多接入任何调用方；
+  它多给的只是证书绑定 token（RFC 8705 `cnf`），而现有下游都不检查。代价是 TLS 在 Envoy 终止，
+  客户端证书只能经 `X-Forwarded-Client-Cert` 转来，而 cloudflared 直连 8080 会原样转发请求头，
+  需另开仅 Envoy 可达的端口来守这条信任边界。等有下游要求证书绑定 token 时再做。
+- WIT-SVID（3.3）：SPIRE 1.15 不签发 WIT，且依赖的 WIMSE workload-creds 与 attestation-based
+  client auth 两份草案仍在变动。等 SPIRE 能签发时再做。
+- Client ID Metadata Document（3.1.2）与 `spiffe_bundle_endpoint` 客户端元数据（5.1）：等于开放注册，
+  且要由本服务去取外部给出的 URL（SSRF）。机器客户端都由本服务登记，trust domain 只来自本服务配置。
+  等有不归本服务登记的外部客户端时再做，届时须有主机白名单，且不得覆盖已配置 trust domain 的公钥来源。
 - 机器客户端的登记：暂无 API 或控制台入口，见后续工作
