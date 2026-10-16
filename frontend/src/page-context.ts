@@ -59,6 +59,8 @@ export type TotpSetupContext = PageBase & {
 
 export type AdminContext = { step: "admin"; authority: string; clientId: string };
 
+export type ErrorContext = { step: "error"; status: number };
+
 export type AccountContext = PageBase & {
   step: "account";
   profile: { username: string; displayName: string; email: string; directory: string; groups: string[] };
@@ -69,9 +71,10 @@ export type AccountContext = PageBase & {
   apps: { clientId: string; name: string; scopes: string[]; lastIssued: string }[];
 };
 
-export type PageContext = SignInContext | TotpSetupContext | ConsentContext | DeviceContext | AdminContext | AccountContext;
+export type PageContext = SignInContext | TotpSetupContext | ConsentContext | DeviceContext | AdminContext | AccountContext
+  | ErrorContext;
 
-const STEPS = ["admin", "password", "mfa-pending", "totp-setup", "consent", "device", "account"];
+const STEPS = ["admin", "password", "mfa-pending", "totp-setup", "consent", "device", "account", "error"];
 
 export function readPageContext(): PageContext {
   const data = document.getElementById("login-context")?.textContent;

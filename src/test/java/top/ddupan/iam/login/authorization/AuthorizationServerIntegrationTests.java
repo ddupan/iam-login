@@ -31,7 +31,10 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.core.convert.ConversionService;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.mock.web.MockHttpSession;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.GrantedAuthority;
@@ -58,6 +61,7 @@ import org.testcontainers.utility.DockerImageName;
 import org.yaml.snakeyaml.Yaml;
 import tools.jackson.databind.json.JsonMapper;
 import top.ddupan.iam.login.authentication.domain.User;
+import top.ddupan.iam.login.authentication.interfaces.web.ErrorPages;
 import top.ddupan.iam.login.authorization.infrastructure.persistence.Subjects;
 import top.ddupan.iam.login.configuration.ExpiredAuthorizations;
 import top.ddupan.iam.login.support.AdDirectoryFixture;
@@ -479,6 +483,21 @@ class AuthorizationServerIntegrationTests {
         return mvc.perform(post("/oauth2/token").with(https()).param("grant_type", "client_credentials").param("client_id", clientId)
             .param("client_assertion_type", "urn:ietf:params:oauth:client-assertion-type:jwt-spiffe").param("client_assertion", svid)
             .param("scope", "artifacts.write"));
+    }
+
+    /**
+     * Errors a browser lands on get the page shell, by status only. MockMvc does not perform the container's error
+     * dispatch, so the page itself is checked through the resolver here and end to end in the browser tests.
+     */
+    @Test void browsersGetAnErrorPage(@Autowired ErrorPages pages) throws Exception {
+        var request = new MockHttpServletRequest();
+        var response = new MockHttpServletResponse();
+        pages.resolveErrorView(request, HttpStatus.BAD_REQUEST, Map.of("message", "secret detail")).getView()
+            .render(Map.of(), request, response);
+        assertThat(response.getContentType()).startsWith("text/html");
+        assertThat(response.getContentAsString()).contains("\"step\":\"error\"", "\"status\":400").doesNotContain("secret detail");
+        // Unknown routes are not found, for anyone.
+        mvc.perform(get("/no-such-page").with(https()).accept(MediaType.TEXT_HTML)).andExpect(status().isNotFound());
     }
 
     @Test void consoleIsAPublicClientWhoseTokensCarryTheApiAudience() throws Exception {
