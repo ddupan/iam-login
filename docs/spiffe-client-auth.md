@@ -20,6 +20,21 @@ SVID 的 `aud` 必须**只有**本服务的 issuer（如 `https://sso.ddupan.top
 `spire-agent api fetch jwt -audience https://sso.ddupan.top`。不带 `client_id` 时，客户端就是以该 SPIFFE ID
 本身为 client ID 登记的那个。同样的认证也适用于 revocation 与 introspection 端点。
 
+## 登记
+
+机器客户端经管理 API `/api/iam/machine-clients` 登记（`docs/openapi.yaml` 的 `MachineClient`），与
+`/api/iam/clients` 的登录客户端互不可见：
+
+```json
+{"id": "ci-publisher", "name": "CI 发布", "spiffeId": "spiffe://ddupan.top/ci/*",
+ "scopes": ["artifacts.write"], "audiences": ["artifact-keeper"], "enabled": true}
+```
+
+- client ID 是普通标识，请求时以 `client_id` 带上；`spiffeId` 写进客户端设置 `spiffe_id`，可用 `/*` 覆盖一组工作负载
+- 认证方式固定 `spiffe_jwt`，只有 `client_credentials`，没有 secret
+- `audiences` 加进签发 token 的 `aud`，给按 `aud` 认 token 的下游（如 Artifact Keeper 的 CI OIDC provider）
+- `enabled: false` 立即停止签发；删除连同已签发的授权记录一起删
+
 ## 校验（3.1）
 
 1. 结构完整，`sub` 是合法 SPIFFE ID，有 `aud`、`exp`；头部 `alg` 属于 JWT-SVID 规范允许的非对称算法，`typ` 若有须为 `JWT`/`JOSE`
@@ -71,4 +86,3 @@ iam:
 - Client ID Metadata Document（3.1.2）与 `spiffe_bundle_endpoint` 客户端元数据（5.1）：等于开放注册，
   且要由本服务去取外部给出的 URL（SSRF）。机器客户端都由本服务登记，trust domain 只来自本服务配置。
   等有不归本服务登记的外部客户端时再做，届时须有主机白名单，且不得覆盖已配置 trust domain 的公钥来源。
-- 机器客户端的登记：暂无 API 或控制台入口，见后续工作

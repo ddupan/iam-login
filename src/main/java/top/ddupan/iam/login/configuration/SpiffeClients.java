@@ -40,6 +40,8 @@ import org.springframework.security.oauth2.server.authorization.authentication.O
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClient;
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClientRepository;
 import org.springframework.security.web.authentication.AuthenticationConverter;
+import top.ddupan.iam.login.clients.domain.MachineClient;
+import top.ddupan.iam.login.clients.infrastructure.RegisteredClients;
 
 /**
  * OAuth SPIFFE Client Authentication with JWT-SVIDs, as draft-ietf-oauth-spiffe-client-auth-02 specifies it:
@@ -54,10 +56,8 @@ final class SpiffeClients {
     private SpiffeClients() { }
 
     /** The method name advertised in metadata (4) and registered on clients. */
-    static final ClientAuthenticationMethod SPIFFE_JWT = new ClientAuthenticationMethod("spiffe_jwt");
+    static final ClientAuthenticationMethod SPIFFE_JWT = RegisteredClients.SPIFFE_JWT;
     static final String ASSERTION_TYPE = "urn:ietf:params:oauth:client-assertion-type:jwt-spiffe";
-    /** Client metadata spiffe_id (5.1); a client without it is matched by its client_id. */
-    static final String SPIFFE_ID = "settings.client.spiffe_id";
 
     /** Out-of-band trust (5): which bundle endpoint holds the keys of which trust domain (6.1). */
     @ConfigurationProperties("iam.spiffe")
@@ -84,17 +84,8 @@ final class SpiffeClients {
     }
 
     private static final Pattern TRUST_DOMAIN = Pattern.compile("[a-z0-9._-]+");
-    /** SPIFFE ID: scheme, trust domain, then segments that are neither empty, "." nor "..". */
-    private static final Pattern SPIFFE_ID_SYNTAX = Pattern.compile("spiffe://([a-z0-9._-]+)((?:/[A-Za-z0-9._-]+)*)");
-
     /** The trust domain of a well-formed SPIFFE ID, or null. */
-    static @Nullable String trustDomain(@Nullable String spiffeId) {
-        if (spiffeId == null || spiffeId.length() > 2048) return null;
-        var match = SPIFFE_ID_SYNTAX.matcher(spiffeId);
-        if (!match.matches()) return null;
-        for (var segment : match.group(2).split("/")) if (segment.equals(".") || segment.equals("..")) return null;
-        return match.group(1);
-    }
+    static @Nullable String trustDomain(@Nullable String spiffeId) { return MachineClient.trustDomain(spiffeId); }
 
     /** 5.1: exact, or with a trailing "/*" a prefix of whole path segments. */
     static boolean matches(String registered, String spiffeId) {
@@ -163,6 +154,8 @@ final class SpiffeClients {
             var assertion = String.valueOf(request.getCredentials());
             RegisteredClient client = clients.findByClientId(String.valueOf(request.getPrincipal()));
             if (client == null || !client.getClientAuthenticationMethods().contains(SPIFFE_JWT)) throw invalid("unknown client");
+            // The console's emergency stop; client_credentials has no authorization or refresh step to stop it at.
+            if (!RegisteredClients.loginEnabled(client)) throw invalid("disabled");
             try {
                 var jwt = SignedJWT.parse(assertion);
                 var header = jwt.getHeader();
@@ -184,7 +177,7 @@ final class SpiffeClients {
                 // 4: signed by a key of the trust domain the SPIFFE ID belongs to.
                 if (!verified(jwt, keys.apply(trustDomain))) throw invalid("signature");
                 // 5: the SPIFFE ID belongs to the client.
-                String registered = client.getClientSettings().getSetting(SPIFFE_ID);
+                String registered = client.getClientSettings().getSetting(RegisteredClients.SPIFFE_ID);
                 if (!matches(registered != null ? registered : client.getClientId(), spiffeId)) throw invalid("subject");
             } catch (ParseException ex) {
                 throw invalid("malformed");

@@ -92,6 +92,72 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
         "502": { $ref: "#/components/responses/Unavailable" }
+  /api/iam/machine-clients:
+    get:
+      summary: Machine clients (SPIFFE JWT-SVID, client_credentials), one page (a page may come back short)
+      parameters:
+        - { name: page, in: query, schema: { type: integer, minimum: 0, default: 0 } }
+        - { name: size, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+      responses:
+        "200":
+          description: Machine clients ordered by ID
+          content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/MachineClient" } } } }
+        "400": { $ref: "#/components/responses/Invalid" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "502": { $ref: "#/components/responses/Unavailable" }
+    post:
+      summary: Register a machine client; it has no secret
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/MachineClient" } } }
+      responses:
+        "201":
+          description: Created
+          content: { application/json: { schema: { $ref: "#/components/schemas/MachineClient" } } }
+        "400": { $ref: "#/components/responses/Invalid" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "502": { $ref: "#/components/responses/Unavailable" }
+  /api/iam/machine-clients/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { $ref: "#/components/schemas/ClientId" } }
+    get:
+      summary: One machine client
+      responses:
+        "200":
+          description: The machine client
+          content: { application/json: { schema: { $ref: "#/components/schemas/MachineClient" } } }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "502": { $ref: "#/components/responses/Unavailable" }
+    put:
+      summary: Replace all fields
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/MachineClient" } } }
+      responses:
+        "200":
+          description: The machine client as stored
+          content: { application/json: { schema: { $ref: "#/components/schemas/MachineClient" } } }
+        "400": { $ref: "#/components/responses/Invalid" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "502": { $ref: "#/components/responses/Unavailable" }
+    delete:
+      summary: Delete a machine client with its authorizations
+      responses:
+        "204": { description: Deleted }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "502": { $ref: "#/components/responses/Unavailable" }
   /api/iam/users/{username}:
     parameters:
       - { name: username, in: path, required: true, description: sAMAccountName, schema: { type: string } }
@@ -146,6 +212,33 @@ components:
           default: []
           description: Extra access-token audiences
           items: { type: string, minLength: 1, maxLength: 2048, pattern: "^[^,]*$" }
+    MachineClient:
+      type: object
+      description: |
+        Authenticates at the token endpoint with a JWT-SVID (draft-ietf-oauth-spiffe-client-auth; spiffe-client-auth.md),
+        grant client_credentials only, sending client_id = id. 409 on a client of the other kind.
+      required: [id, name, spiffeId, enabled]
+      properties:
+        id: { $ref: "#/components/schemas/ClientId" }
+        name: { type: string, minLength: 1, maxLength: 200 }
+        spiffeId:
+          type: string
+          maxLength: 2050
+          pattern: "^spiffe://[a-z0-9._-]+(/[A-Za-z0-9._-]+)*(/\\*)?$"
+          description: The SVID's SPIFFE ID; ending in /* matches every ID below that path (whole segments)
+        scopes:
+          type: array
+          maxItems: 50
+          uniqueItems: true
+          default: []
+          items: { type: string, pattern: "^[\\x21\\x23-\\x5B\\x5D-\\x7E]{1,128}$" }
+        audiences:
+          type: array
+          maxItems: 10
+          default: []
+          description: Extra access-token audiences
+          items: { type: string, minLength: 1, maxLength: 2048, pattern: "^[^,]*$" }
+        enabled: { type: boolean, description: "false: no more tokens" }
     Created:
       type: object
       required: [client, secret]

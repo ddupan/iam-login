@@ -41,13 +41,14 @@ import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import top.ddupan.iam.login.clients.domain.ClientRepository;
+import top.ddupan.iam.login.clients.domain.MachineClient;
 import top.ddupan.iam.login.clients.domain.OidcClient;
 import top.ddupan.iam.login.clients.infrastructure.RegisteredClients;
 
 @Configuration(proxyBeanMethods = false)
 @ConditionalOnProperty(prefix = "iam.authorization-server", name = "enabled", havingValue = "true")
 @EnableConfigurationProperties(ClientManagementConfiguration.Access.class)
-@RegisterReflectionForBinding({OidcClient.class, ClientRepository.Created.class})
+@RegisterReflectionForBinding({OidcClient.class, ClientRepository.Created.class, MachineClient.class})
 class ClientManagementConfiguration {
     /** The audience the client-management API accepts; only clients registered for it receive it. */
     static final String AUDIENCE = "iam-login";
@@ -92,7 +93,8 @@ class ClientManagementConfiguration {
     // Client secrets are stored encoded ({bcrypt} for new ones); the framework matches with the same encoder.
     @Bean PasswordEncoder clientSecrets() { return PasswordEncoderFactories.createDelegatingPasswordEncoder(); }
 
-    @Bean ClientRepository clientRepository(RegisteredClientRepository clients, DSLContext db,
+    // One store for both kinds of client; each API sees only its own (RegisteredClients).
+    @Bean RegisteredClients clientRepository(RegisteredClientRepository clients, DSLContext db,
             PlatformTransactionManager transactions, PasswordEncoder clientSecrets) {
         return new RegisteredClients(clients, db, new TransactionTemplate(transactions), clientSecrets);
     }

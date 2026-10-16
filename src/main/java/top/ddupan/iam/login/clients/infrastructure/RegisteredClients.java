@@ -21,6 +21,8 @@ import org.springframework.security.oauth2.server.authorization.settings.TokenSe
 import org.springframework.transaction.support.TransactionOperations;
 import top.ddupan.iam.login.clients.domain.ClientRepository;
 import top.ddupan.iam.login.clients.domain.ClientRepositoryException;
+import top.ddupan.iam.login.clients.domain.MachineClient;
+import top.ddupan.iam.login.clients.domain.MachineClientRepository;
 import top.ddupan.iam.login.clients.domain.OidcClient;
 import static top.ddupan.iam.login.persistence.schema.Tables.OAUTH2_AUTHORIZATION;
 import static top.ddupan.iam.login.persistence.schema.Tables.OAUTH2_AUTHORIZATION_CONSENT;
@@ -30,9 +32,14 @@ import static top.ddupan.iam.login.persistence.schema.Tables.OAUTH2_REGISTERED_C
  * Clients of the in-process authorization server. Only clients created through this API (marked {@link #MANAGED}),
  * and confidential authorization-code clients registered before the mark existed, are managed here; others (such
  * as the console client) are invisible to this API and cannot be changed or deleted through it. Secrets are stored
- * encoded; the plain value is returned once.
+ * encoded; the plain value is returned once. Machine clients (authenticated by {@link #SPIFFE_JWT}) are managed
+ * through {@link MachineClientRepository} only; each API sees only its own kind.
  */
-public final class RegisteredClients implements ClientRepository {
+public final class RegisteredClients implements ClientRepository, MachineClientRepository {
+    /** draft-ietf-oauth-spiffe-client-auth: client authentication with a JWT-SVID. */
+    public static final ClientAuthenticationMethod SPIFFE_JWT = new ClientAuthenticationMethod("spiffe_jwt");
+    /** Client metadata spiffe_id (5.1); a client without it is matched by its client_id. */
+    public static final String SPIFFE_ID = "settings.client.spiffe_id";
     /** Client setting: false stops new authorizations and refreshes for the client. Absent means enabled. */
     public static final String LOGIN_ENABLED = "settings.client.iam.login-enabled";
     /** Client setting: comma-separated extra audiences for its access tokens (the framework has no audience parameter). */
@@ -56,13 +63,40 @@ public final class RegisteredClients implements ClientRepository {
     }
 
     @Override public List<OidcClient> list(int page, int size) {
-        if (page < 0 || size < 1 || size > 100) throw new IllegalArgumentException("Invalid pagination");
-        // ponytail: pages over all registrations, then drops unmanaged ones; a page can come back short.
-        return db.select(OAUTH2_REGISTERED_CLIENT.CLIENT_ID).from(OAUTH2_REGISTERED_CLIENT)
-                .orderBy(OAUTH2_REGISTERED_CLIENT.CLIENT_ID).limit(size).offset((long) page * size)
-                .fetch(OAUTH2_REGISTERED_CLIENT.CLIENT_ID).stream()
-            .map(clients::findByClientId).filter(Objects::nonNull).filter(RegisteredClients::managed)
+        return ids(page, size).stream().map(clients::findByClientId).filter(Objects::nonNull).filter(RegisteredClients::managed)
             .map(RegisteredClients::view).toList();
+    }
+
+    @Override public List<MachineClient> listMachines(int page, int size) {
+        return ids(page, size).stream().map(clients::findByClientId).filter(Objects::nonNull)
+            .filter(RegisteredClients::machine).map(RegisteredClients::machineView).toList();
+    }
+
+    @Override public MachineClient getMachine(String id) { return machineView(machineClient(id)); }
+
+    @Override public MachineClient createMachine(MachineClient client) {
+        if (clients.findByClientId(client.id()) != null) throw new ClientRepositoryException(ClientRepositoryException.Kind.CONFLICT);
+        var registered = applyMachine(RegisteredClient.withId(UUID.randomUUID().toString()).clientId(client.id()), client,
+            ClientSettings.builder().setting(MANAGED, true).build()).build();
+        clients.save(registered);
+        return machineView(registered);
+    }
+
+    @Override public MachineClient updateMachine(MachineClient client) {
+        var existing = machineClient(client.id());
+        var updated = applyMachine(RegisteredClient.from(existing), client, existing.getClientSettings()).build();
+        clients.save(updated);
+        return machineView(updated);
+    }
+
+    @Override public void deleteMachine(String id) { remove(machineClient(id)); }
+
+    private List<String> ids(int page, int size) {
+        if (page < 0 || size < 1 || size > 100) throw new IllegalArgumentException("Invalid pagination");
+        // ponytail: pages over all registrations, then drops other kinds; a page can come back short.
+        return db.select(OAUTH2_REGISTERED_CLIENT.CLIENT_ID).from(OAUTH2_REGISTERED_CLIENT)
+            .orderBy(OAUTH2_REGISTERED_CLIENT.CLIENT_ID).limit(size).offset((long) page * size)
+            .fetch(OAUTH2_REGISTERED_CLIENT.CLIENT_ID);
     }
 
     @Override public OidcClient get(String id) { return view(managedClient(id)); }
@@ -91,8 +125,9 @@ public final class RegisteredClients implements ClientRepository {
         return view(updated);
     }
 
-    @Override public void delete(String id) {
-        var existing = managedClient(id);
+    @Override public void delete(String id) { remove(managedClient(id)); }
+
+    private void remove(RegisteredClient existing) {
         // The framework cannot load an authorization whose client is gone, so they go together.
         transactions.executeWithoutResult(status -> {
             db.deleteFrom(OAUTH2_AUTHORIZATION).where(OAUTH2_AUTHORIZATION.REGISTERED_CLIENT_ID.eq(existing.getId())).execute();
@@ -134,6 +169,39 @@ public final class RegisteredClients implements ClientRepository {
         return settings;
     }
 
+    /** Only client_credentials: a machine acts for itself. No refresh token; a fresh SVID gets a fresh token. */
+    private static RegisteredClient.Builder applyMachine(RegisteredClient.Builder builder, MachineClient client, ClientSettings current) {
+        var settings = new HashMap<>(current.getSettings());
+        settings.put(LOGIN_ENABLED, client.enabled());
+        settings.put(SPIFFE_ID, client.spiffeId());
+        settings.remove(AUDIENCES);
+        if (!client.audiences().isEmpty()) settings.put(AUDIENCES, String.join(",", client.audiences()));
+        return builder.clientName(client.name())
+            .clientAuthenticationMethods(methods -> { methods.clear(); methods.add(SPIFFE_JWT); })
+            .authorizationGrantTypes(grants -> { grants.clear(); grants.add(AuthorizationGrantType.CLIENT_CREDENTIALS); })
+            .scopes(scopes -> { scopes.clear(); scopes.addAll(client.scopes()); })
+            .clientSettings(ClientSettings.withSettings(settings).build());
+    }
+
+    private RegisteredClient machineClient(String id) {
+        OidcClient.requireId(id);
+        var client = clients.findByClientId(id);
+        if (client == null) throw new ClientRepositoryException(ClientRepositoryException.Kind.NOT_FOUND);
+        if (!machine(client)) throw new ClientRepositoryException(ClientRepositoryException.Kind.CONFLICT);
+        return client;
+    }
+
+    private static boolean machine(RegisteredClient client) {
+        return Boolean.TRUE.equals(client.getClientSettings().getSetting(MANAGED))
+            && client.getClientAuthenticationMethods().equals(Set.of(SPIFFE_JWT));
+    }
+
+    private static MachineClient machineView(RegisteredClient client) {
+        var settings = client.getClientSettings();
+        return new MachineClient(client.getClientId(), client.getClientName(), settings.getSetting(SPIFFE_ID),
+            new HashSet<>(client.getScopes()), audiences(settings.getSetting(AUDIENCES)), loginEnabled(client));
+    }
+
     private RegisteredClient managedClient(String id) {
         OidcClient.requireId(id);
         var client = clients.findByClientId(id);
@@ -143,6 +211,7 @@ public final class RegisteredClients implements ClientRepository {
     }
 
     private static boolean managed(RegisteredClient client) {
+        if (machine(client)) return false;
         if (Boolean.TRUE.equals(client.getClientSettings().getSetting(MANAGED))) return true;
         // Registered before the mark: gitea and the first clients after it.
         return client.getClientAuthenticationMethods().equals(Set.of(ClientAuthenticationMethod.CLIENT_SECRET_BASIC))

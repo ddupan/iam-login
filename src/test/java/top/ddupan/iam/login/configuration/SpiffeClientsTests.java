@@ -31,6 +31,7 @@ import org.springframework.security.oauth2.server.authorization.authentication.O
 import org.springframework.security.oauth2.server.authorization.client.InMemoryRegisteredClientRepository;
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClient;
 import org.springframework.security.oauth2.server.authorization.settings.ClientSettings;
+import top.ddupan.iam.login.clients.infrastructure.RegisteredClients;
 import top.ddupan.iam.login.support.SpiffeFixture;
 import static org.assertj.core.api.Assertions.*;
 
@@ -184,7 +185,7 @@ class SpiffeClientsTests {
 
     private static RegisteredClient client(String clientId, String spiffeId) {
         var settings = ClientSettings.builder();
-        if (spiffeId != null) settings.setting(SpiffeClients.SPIFFE_ID, spiffeId);
+        if (spiffeId != null) settings.setting(RegisteredClients.SPIFFE_ID, spiffeId);
         return RegisteredClient.withId(UUID.randomUUID().toString()).clientId(clientId)
             .clientAuthenticationMethod(SpiffeClients.SPIFFE_JWT)
             .authorizationGrantType(AuthorizationGrantType.CLIENT_CREDENTIALS).clientSettings(settings.build()).build();
