@@ -11,9 +11,11 @@ socket=${SPIFFE_ENDPOINT_SOCKET:-unix:///run/spire-agent/agent.sock}
 
 docker build -q -t "$repo:$tag" .
 
+# The runner is long-lived and every main push tags a new image; once in zot the local copy is only dead
+# weight (28 of them filled the build LXC's disk on 2026-10-16). Removed on failure too.
 export DOCKER_CONFIG
 DOCKER_CONFIG=$(mktemp -d)
-trap 'rm -rf -- "$DOCKER_CONFIG"' EXIT
+trap 'rm -rf -- "$DOCKER_CONFIG"; docker rmi "$repo:$tag" >/dev/null 2>&1 || true' EXIT
 /usr/local/bin/spire-agent api fetch jwt -audience zot -output json -socketPath "${socket#unix://}" | python3 -c '
 import json, sys
 blocks = json.load(sys.stdin)
