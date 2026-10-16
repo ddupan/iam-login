@@ -21,12 +21,12 @@ jobs:
       - name: Remove containers left by cancelled runs
         # Capacity 1: no other job of this runner is running, so every labelled container is an orphan.
         run: docker ps -aq --filter label=iam-login.ci=1 | xargs -r docker rm -f
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: OpenID conformance suite
         run: scripts/conformance
       - name: Results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: conformance-results
           path: build/conformance/

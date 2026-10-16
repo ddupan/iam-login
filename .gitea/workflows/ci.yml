@@ -19,8 +19,8 @@ jobs:
       IAM_NPM_CACHE: /tmp/iam-ci/npm
       IAM_BUILD_CPUS: "2"
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/cache@v4
+      - uses: actions/checkout@v7
+      - uses: actions/cache@v6
         with:
           path: |
             /tmp/iam-ci/gradle/caches/modules-2
@@ -68,7 +68,7 @@ jobs:
         # Capacity 1: no other job of this runner is running, so every labelled container is an orphan.
         # A cancelled native run kept compiling and starved the next one of memory (2026-10-05).
         run: docker ps -aq --filter label=iam-login.ci=1 | xargs -r docker rm -f
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Native image
         env:
           IAM_BUILD_MEMORY: 7g
