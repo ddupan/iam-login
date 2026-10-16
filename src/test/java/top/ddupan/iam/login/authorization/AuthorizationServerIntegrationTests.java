@@ -106,6 +106,9 @@ class AuthorizationServerIntegrationTests {
         r.add("iam.authorization-server.signing-keys[0]", () -> "file:" + Fixtures.ACTIVE_KEY);
         r.add("iam.authorization-server.signing-keys[1]", () -> "file:" + Fixtures.PREVIOUS_KEY);
         r.add("iam.clients.spiffe.jwk-set-uri", () -> Fixtures.SPIRE.jwkSetUri());
+        // One property source for the whole list entry: Boot does not merge an indexed list across sources.
+        r.add("iam.spiffe.trust-domains[0].name", () -> "example.test");
+        r.add("iam.spiffe.trust-domains[0].bundle-endpoint", () -> Fixtures.SPIRE.bundleEndpoint());
     }
     @AfterAll static void close() { Fixtures.DIRECTORY.close(); Fixtures.DATABASE.stop(); Fixtures.SPIRE.close(); }
 
@@ -397,6 +400,35 @@ class AuthorizationServerIntegrationTests {
         paths.forEach((path, operations) -> operations.keySet().stream().filter(key -> !key.equals("parameters"))
             .forEach(method -> defined.add(method.toUpperCase(Locale.ROOT) + " " + path)));
         assertThat(defined).isNotEmpty().isEqualTo(mapped);
+    }
+
+    /** draft-ietf-oauth-spiffe-client-auth-02: a machine authenticates with its JWT-SVID, no secret. */
+    @Test void machinesAuthenticateWithAJwtSvidAtTheTokenEndpoint() throws Exception {
+        var machine = "spiffe://example.test/ci/machine";
+        if (clients.findByClientId(machine) == null) {
+            clients.save(RegisteredClient.withId(UUID.randomUUID().toString()).clientId(machine)
+                .clientAuthenticationMethod(new ClientAuthenticationMethod("spiffe_jwt"))
+                .authorizationGrantType(AuthorizationGrantType.CLIENT_CREDENTIALS).scope("machine.read").build());
+        }
+        var svid = Fixtures.SPIRE.svid(machine, List.of("https://localhost"), SpiffeFixture.ISSUER, Instant.now().plusSeconds(300));
+        var tokens = json(mvc.perform(post("/oauth2/token").with(https()).param("grant_type", "client_credentials")
+                .param("client_assertion_type", "urn:ietf:params:oauth:client-assertion-type:jwt-spiffe")
+                .param("client_assertion", svid).param("scope", "machine.read"))
+            .andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
+        assertThat(claims((String) tokens.get("access_token"))).containsEntry("sub", machine).containsEntry("scope", "machine.read");
+        assertThat(tokens).doesNotContainKey("refresh_token");
+        // An SVID for another audience (here: what the management API accepts directly) is not a client credential.
+        mvc.perform(post("/oauth2/token").with(https()).param("grant_type", "client_credentials")
+                .param("client_assertion_type", "urn:ietf:params:oauth:client-assertion-type:jwt-spiffe")
+                .param("client_assertion", Fixtures.SPIRE.svid(machine)))
+            .andExpect(status().isUnauthorized()).andExpect(jsonPath("$.error").value("invalid_client"));
+        // Section 4: advertised in both metadata documents, for every endpoint that authenticates clients.
+        for (var metadata : List.of("/.well-known/oauth-authorization-server", "/.well-known/openid-configuration")) {
+            mvc.perform(get(metadata).with(https())).andExpect(status().isOk())
+                .andExpect(jsonPath("$.token_endpoint_auth_methods_supported", Matchers.hasItem("spiffe_jwt")))
+                .andExpect(jsonPath("$.revocation_endpoint_auth_methods_supported", Matchers.hasItem("spiffe_jwt")))
+                .andExpect(jsonPath("$.introspection_endpoint_auth_methods_supported", Matchers.hasItem("spiffe_jwt")));
+        }
     }
 
     @Test void consoleIsAPublicClientWhoseTokensCarryTheApiAudience() throws Exception {
