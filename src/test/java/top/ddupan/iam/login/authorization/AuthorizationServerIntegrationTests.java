@@ -590,6 +590,37 @@ class AuthorizationServerIntegrationTests {
         mvc.perform(delete("/api/iam/clients/iam-console").with(https()).with(admin)).andExpect(status().isConflict());
     }
 
+    /** A client that can send its secret only in the form (Artifact Keeper) gets client_secret_post, and only that. */
+    @Test void aClientCanSendItsSecretInTheForm() throws Exception {
+        var admin = token(List.of("iam-login"), List.of("gitea-admins"));
+        var body = """
+            {"id":"post-app","name":"Post","redirectUris":["https://rp.example/managed"],"scopes":["openid"],
+             "loginEnabled":true,"pkceRequired":true,"tokenEndpointAuthMethod":"client_secret_post"}
+            """;
+        var created = json(mvc.perform(post("/api/iam/clients").with(https()).with(admin).contentType(MediaType.APPLICATION_JSON).content(body))
+            .andExpect(status().isCreated()).andExpect(jsonPath("client.tokenEndpointAuthMethod").value("client_secret_post"))
+            .andReturn().getResponse().getContentAsString());
+        var secret = (String) created.get("secret");
+        assertThat(postTokenError("post-app", secret)).isEqualTo("invalid_grant");
+        assertThat(tokenError("post-app", secret)).isEqualTo("invalid_client");
+        // Absent on an update means the default again; a public client cannot have a secret method.
+        mvc.perform(put("/api/iam/clients/post-app").with(https()).with(admin).contentType(MediaType.APPLICATION_JSON)
+                .content(body.replace(",\"tokenEndpointAuthMethod\":\"client_secret_post\"", ""))).andExpect(status().isOk())
+            .andExpect(jsonPath("tokenEndpointAuthMethod").value("client_secret_basic"));
+        assertThat(tokenError("post-app", secret)).isEqualTo("invalid_grant");
+        mvc.perform(post("/api/iam/clients").with(https()).with(admin).contentType(MediaType.APPLICATION_JSON)
+                .content(body.replace("post-app", "public-post").replace("\"loginEnabled\"", "\"publicClient\":true,\"loginEnabled\"")))
+            .andExpect(status().isBadRequest());
+        mvc.perform(delete("/api/iam/clients/post-app").with(https()).with(admin)).andExpect(status().isNoContent());
+    }
+
+    private String postTokenError(String client, String secret) throws Exception {
+        return (String) json(mvc.perform(post("/oauth2/token").with(https()).param("client_id", client).param("client_secret", secret)
+                .param("grant_type", "authorization_code").param("code", "invalid-code")
+                .param("redirect_uri", "https://rp.example/managed").param("code_verifier", verifier()))
+            .andReturn().getResponse().getContentAsString()).get("error");
+    }
+
     // A CLI or browser app: no secret, PKCE for the code, then refreshes with client_id alone. The framework
     // covers only the PKCE exchange; refresh tokens and client_id-only requests are PublicClients.
     @Test void publicClientsRefreshWithClientIdAloneAndRotate() throws Exception {

@@ -73,7 +73,12 @@ iam:
 ```
 
 - 回调必须 HTTPS（隔离开发允许 loopback HTTP），不允许通配符、fragment 或 URL 用户信息。
-- 固定 `authorization_code`；confidential 客户端用 `client_secret_basic`。refresh token 每次使用都轮换。
+- 固定 `authorization_code`。refresh token 每次使用都轮换。
+- `tokenEndpointAuthMethod`（可选）：confidential 客户端在 token 端点出示 secret 的方式，即 RFC 7591 的
+  `token_endpoint_auth_method`，每个客户端只登记一种。缺省（更新时也是）为 `client_secret_basic`（RFC 6749
+  2.3.1 要求必须支持）；`client_secret_post` 只给发不了 Basic 的应用（如 Artifact Keeper），RFC 6749 不推荐
+  客户端这样做。public 客户端固定为 `none`，填别的值 400；RFC 7591 的其他取值（如 `private_key_jwt`）暂不支持，
+  同样 400。discovery 的 `token_endpoint_auth_methods_supported` 列的是服务端能力，不代表每个客户端都能用。
 - `publicClient`（可选，默认 `false`）：不签发 secret，客户端认证方式为 `none`（CLI、浏览器应用）。此时
   `pkceRequired` 必须为 `true`；创建后不可改变（换类型即换客户端），也没有 secret 可轮换（409）。
   授权码由 PKCE 绑定；device 授权与 refresh 只凭 `client_id`。public 客户端同样拿到 refresh token

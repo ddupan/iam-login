@@ -108,8 +108,7 @@ public final class RegisteredClients implements ClientRepository, MachineClientR
             // Rotate refresh tokens; the framework reuses them by default. For public clients this rotation is what
             // RFC 9700 4.14.2 asks of refresh tokens that are not sender-constrained.
             .tokenSettings(TokenSettings.builder().reuseRefreshTokens(false).build());
-        if (secret == null) builder.clientAuthenticationMethod(ClientAuthenticationMethod.NONE);
-        else builder.clientSecret(passwords.encode(secret)).clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_BASIC);
+        if (secret != null) builder.clientSecret(passwords.encode(secret));
         var registered = apply(builder, client, ClientSettings.builder().requireProofKey(true).requireAuthorizationConsent(true)
             .setting(MANAGED, true).build()).build();
         clients.save(registered);
@@ -148,6 +147,11 @@ public final class RegisteredClients implements ClientRepository, MachineClientR
     /** Copies the managed fields onto a registration. offline_access needs the refresh_token grant (OIDC Core 11). */
     private static RegisteredClient.Builder apply(RegisteredClient.Builder builder, OidcClient client, ClientSettings settings) {
         return builder.clientName(client.name())
+            // One method each; public clients are "none" (OidcClient).
+            .clientAuthenticationMethods(methods -> {
+                methods.clear();
+                methods.add(new ClientAuthenticationMethod(client.tokenEndpointAuthMethod()));
+            })
             .authorizationGrantTypes(grants -> {
                 grants.clear();
                 grants.add(AuthorizationGrantType.AUTHORIZATION_CODE);
@@ -234,7 +238,9 @@ public final class RegisteredClients implements ClientRepository, MachineClientR
             new HashSet<>(client.getScopes()), List.copyOf(client.getPostLogoutRedirectUris()), loginEnabled(client),
             settings.isRequireProofKey(), isPublic(client),
             client.getAuthorizationGrantTypes().contains(AuthorizationGrantType.DEVICE_CODE),
-            audiences(settings.getSetting(AUDIENCES)));
+            audiences(settings.getSetting(AUDIENCES)),
+            client.getClientAuthenticationMethods().contains(ClientAuthenticationMethod.CLIENT_SECRET_POST)
+                ? OidcClient.CLIENT_SECRET_POST : null);
     }
 
     private static String newSecret() {

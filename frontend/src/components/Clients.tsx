@@ -6,6 +6,8 @@ import { Link, Navigate, useAction, type Api } from "./consoleKit";
 export type Client = {
   id: string; name: string; redirectUris: string[]; scopes: string[]; postLogoutRedirectUris: string[];
   loginEnabled: boolean; pkceRequired: boolean; publicClient: boolean; deviceAuthorization: boolean; audiences: string[];
+  /** Kept as stored when editing; the form does not show it. */
+  tokenEndpointAuthMethod?: string;
 };
 export type Secret = { id: string; value: string; kind: "created" | "rotated" };
 type Props = { api: Api; onExpired: () => void };
