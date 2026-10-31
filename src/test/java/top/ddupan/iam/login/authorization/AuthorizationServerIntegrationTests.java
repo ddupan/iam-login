@@ -225,7 +225,8 @@ class AuthorizationServerIntegrationTests {
         var idToken = claims((String) tokens.get("id_token"));
         assertThat(idToken).containsEntry("sub", "human:existing-subject").containsEntry("preferred_username", "alice");
         assertThat(idToken.get("groups")).asInstanceOf(InstanceOfAssertFactories.LIST).contains("gitea-admins");
-        assertThat(claims((String) tokens.get("access_token"))).containsEntry("sub", "human:existing-subject");
+        assertThat(claims((String) tokens.get("access_token"))).containsEntry("sub", "human:existing-subject")
+            .containsEntry("client_id", "spike-rp");
         assertThat(tokens.get("refresh_token")).as("offline_access was granted").isNotNull();
         // UserInfo releases the same scope claims (OIDC Core 5.4), groups included; email was not requested.
         var userInfo = json(mvc.perform(get("/userinfo").with(https()).header("Authorization", "Bearer " + tokens.get("access_token")))
@@ -421,7 +422,8 @@ class AuthorizationServerIntegrationTests {
                 .param("client_assertion_type", "urn:ietf:params:oauth:client-assertion-type:jwt-spiffe")
                 .param("client_assertion", svid).param("scope", "machine.read"))
             .andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
-        assertThat(claims((String) tokens.get("access_token"))).containsEntry("sub", machine).containsEntry("scope", "machine.read");
+        assertThat(claims((String) tokens.get("access_token"))).containsEntry("sub", machine).containsEntry("scope", "machine.read")
+            .containsEntry("client_id", machine);
         assertThat(tokens).doesNotContainKey("refresh_token");
         // An SVID for another audience (here: what the management API accepts directly) is not a client credential.
         mvc.perform(post("/oauth2/token").with(https()).param("grant_type", "client_credentials")
@@ -452,7 +454,7 @@ class AuthorizationServerIntegrationTests {
             .andReturn().getResponse().getContentAsString());
         assertThat(tokens).containsEntry("issued_token_type", "urn:ietf:params:oauth:token-type:access_token")
             .containsEntry("token_type", "Bearer").doesNotContainKey("refresh_token");
-        assertThat(claims((String) tokens.get("access_token"))).containsEntry("sub", "exchanger")
+        assertThat(claims((String) tokens.get("access_token"))).containsEntry("sub", "exchanger").containsEntry("client_id", "exchanger")
             .containsEntry("scope", "artifacts.write").containsEntry("aud", List.of("exchanger", "artifact-keeper"));
         // Only audiences the client is registered for, and no delegation.
         exchange(svid, "audience", "elsewhere").andExpect(status().isBadRequest()).andExpect(jsonPath("$.error").value("invalid_target"));

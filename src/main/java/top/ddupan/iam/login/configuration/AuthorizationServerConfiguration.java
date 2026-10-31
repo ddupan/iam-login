@@ -414,6 +414,10 @@ class AuthorizationServerConfiguration {
         return context -> {
             var scopes = context.getAuthorizedScopes();
             // Every access token, a machine's (client_credentials) as much as a person's.
+            if (OAuth2TokenType.ACCESS_TOKEN.equals(context.getTokenType())) {
+                // RFC 9068 2.2: required; the framework leaves it out.
+                context.getClaims().claim(OAuth2ParameterNames.CLIENT_ID, context.getRegisteredClient().getClientId());
+            }
             if (OAuth2TokenType.ACCESS_TOKEN.equals(context.getTokenType()) && !scopes.isEmpty()) {
                 // RFC 9068 2.2.3: a space-delimited string. The framework writes an array, which strict
                 // resource servers (Incus, via zitadel/oidc) fail to parse and treat as unauthenticated.
