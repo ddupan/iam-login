@@ -17,6 +17,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -143,6 +144,20 @@ class SpiffeClientsTests {
         var withSecret = request(Map.of("client_assertion_type", SpiffeClients.ASSERTION_TYPE, "client_assertion", svid(c -> c),
             "client_secret", "x"));
         assertThatThrownBy(() -> converter.convert(withSecret)).isInstanceOf(OAuth2AuthenticationException.class);
+    }
+
+    @Test void aTokenExchangeWithoutOtherClientCredentialsIsAuthenticatedByItsSubjectToken() {
+        var converter = new SpiffeClients.Converter();
+        var exchange = Map.of("grant_type", "urn:ietf:params:oauth:grant-type:token-exchange", "subject_token", svid(c -> c),
+            "subject_token_type", SpiffeClients.JWT_TOKEN_TYPE);
+        assertThat(converter.convert(request(exchange)).getPrincipal()).isEqualTo(MACHINE);
+        // An access token to exchange, or a client that authenticates itself, is not this converter's.
+        var accessToken = new HashMap<>(exchange);
+        accessToken.put("subject_token_type", SpiffeClients.ACCESS_TOKEN_TYPE);
+        assertThat(converter.convert(request(accessToken))).isNull();
+        var withSecret = new HashMap<>(exchange);
+        withSecret.put("client_secret", "x");
+        assertThat(converter.convert(request(withSecret))).isNull();
     }
 
     private void rejected(String clientId, String assertion) {

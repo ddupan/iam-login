@@ -67,6 +67,7 @@ import top.ddupan.iam.login.configuration.ExpiredAuthorizations;
 import top.ddupan.iam.login.support.AdDirectoryFixture;
 import top.ddupan.iam.login.support.SessionRoundTrip;
 import top.ddupan.iam.login.support.SigningKeyFixture;
+import top.ddupan.iam.login.clients.infrastructure.RegisteredClients;
 import top.ddupan.iam.login.support.SpiffeFixture;
 import static org.assertj.core.api.Assertions.*;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
@@ -434,6 +435,40 @@ class AuthorizationServerIntegrationTests {
                 .andExpect(jsonPath("$.revocation_endpoint_auth_methods_supported", Matchers.hasItem("spiffe_jwt")))
                 .andExpect(jsonPath("$.introspection_endpoint_auth_methods_supported", Matchers.hasItem("spiffe_jwt")));
         }
+    }
+
+    /** RFC 8693: the JWT-SVID as subject_token, for clients that speak token exchange rather than the draft. */
+    @Test void machinesExchangeTheirJwtSvidForAnAccessToken() throws Exception {
+        var machine = "spiffe://example.test/ci/exchanger";
+        if (clients.findByClientId("exchanger") == null) {
+            clients.save(RegisteredClient.withId(UUID.randomUUID().toString()).clientId("exchanger")
+                .clientAuthenticationMethod(new ClientAuthenticationMethod("spiffe_jwt"))
+                .authorizationGrantType(AuthorizationGrantType.CLIENT_CREDENTIALS).scope("artifacts.write")
+                .clientSettings(ClientSettings.builder().setting(RegisteredClients.SPIFFE_ID, machine)
+                    .setting(RegisteredClients.AUDIENCES, "artifact-keeper").build()).build());
+        }
+        var svid = Fixtures.SPIRE.svid(machine, List.of("https://localhost"), SpiffeFixture.ISSUER, Instant.now().plusSeconds(300));
+        var tokens = json(exchange(svid, "audience", "artifact-keeper").andExpect(status().isOk())
+            .andReturn().getResponse().getContentAsString());
+        assertThat(tokens).containsEntry("issued_token_type", "urn:ietf:params:oauth:token-type:access_token")
+            .containsEntry("token_type", "Bearer").doesNotContainKey("refresh_token");
+        assertThat(claims((String) tokens.get("access_token"))).containsEntry("sub", "exchanger")
+            .containsEntry("scope", "artifacts.write").containsEntry("aud", List.of("exchanger", "artifact-keeper"));
+        // Only audiences the client is registered for, and no delegation.
+        exchange(svid, "audience", "elsewhere").andExpect(status().isBadRequest()).andExpect(jsonPath("$.error").value("invalid_target"));
+        exchange(svid, "actor_token", svid, "actor_token_type", "urn:ietf:params:oauth:token-type:jwt")
+            .andExpect(status().isBadRequest()).andExpect(jsonPath("$.error").value("invalid_request"));
+        // The SVID is checked as for client authentication: one for another audience is not accepted.
+        exchange(Fixtures.SPIRE.svid(machine)).andExpect(status().isUnauthorized()).andExpect(jsonPath("$.error").value("invalid_client"));
+    }
+
+    private ResultActions exchange(String svid, String... parameters) throws Exception {
+        // client_id names the client registered for the SPIFFE ID, as for client_credentials.
+        var request = post("/oauth2/token").with(https()).param("grant_type", "urn:ietf:params:oauth:grant-type:token-exchange")
+            .param("client_id", "exchanger").param("subject_token", svid).param("subject_token_type", "urn:ietf:params:oauth:token-type:jwt")
+            .param("scope", "artifacts.write");
+        for (int i = 0; i < parameters.length; i += 2) request.param(parameters[i], parameters[i + 1]);
+        return mvc.perform(request);
     }
 
     /** Machine clients: registered through their own API, then authenticated by any SVID their spiffeId covers. */

@@ -8,7 +8,6 @@ import jakarta.servlet.http.HttpServletRequest;
 import java.net.URI;
 import java.security.Principal;
 import java.time.Clock;
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -63,11 +62,13 @@ import org.springframework.security.oauth2.server.authorization.authentication.O
 import org.springframework.security.oauth2.server.authorization.authentication.OAuth2AuthorizationCodeRequestAuthenticationValidator;
 import org.springframework.security.oauth2.server.authorization.authentication.OAuth2AuthorizationConsentAuthenticationToken;
 import org.springframework.security.oauth2.server.authorization.authentication.OAuth2ClientAuthenticationToken;
+import org.springframework.security.oauth2.server.authorization.authentication.OAuth2ClientCredentialsAuthenticationProvider;
 import org.springframework.security.oauth2.server.authorization.authentication.OAuth2DeviceAuthorizationConsentAuthenticationToken;
 import org.springframework.security.oauth2.server.authorization.authentication.OAuth2DeviceAuthorizationRequestAuthenticationProvider;
 import org.springframework.security.oauth2.server.authorization.authentication.OAuth2DeviceAuthorizationRequestAuthenticationToken;
 import org.springframework.security.oauth2.server.authorization.authentication.OAuth2DeviceVerificationAuthenticationToken;
 import org.springframework.security.oauth2.server.authorization.authentication.OAuth2RefreshTokenAuthenticationToken;
+import org.springframework.security.oauth2.server.authorization.authentication.OAuth2TokenExchangeAuthenticationProvider;
 import org.springframework.security.oauth2.server.authorization.client.JdbcRegisteredClientRepository;
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClientRepository;
 import org.springframework.security.oauth2.server.authorization.oidc.authentication.OidcUserInfoAuthenticationContext;
@@ -185,10 +186,16 @@ class AuthorizationServerConfiguration {
                             && OAuth2ErrorCodes.ACCESS_DENIED.equals(oauth.getError().getErrorCode()) ? "denied" : "invalid")))
                     .authenticationProvider(new DeviceMfaGate(OAuth2DeviceVerificationAuthenticationToken.class, requiredFactors))
                     .authenticationProvider(new DeviceMfaGate(OAuth2DeviceAuthorizationConsentAuthenticationToken.class, requiredFactors)))
-                .tokenEndpoint(endpoint -> endpoint.authenticationProviders(providers ->
+                .tokenEndpoint(endpoint -> endpoint.authenticationProviders(providers -> {
                     providers.addFirst(new RefreshPolicy(authorizations, subjects,
                         // Without AD nothing can vouch for a directory account any more.
-                        users.getIfAvailable(() -> UserRepository.NONE)))));
+                        users.getIfAvailable(() -> UserRepository.NONE)));
+                    // RFC 8693 with a JWT-SVID as subject_token: issued as client_credentials would.
+                    providers.stream().filter(OAuth2ClientCredentialsAuthenticationProvider.class::isInstance).findFirst()
+                        .ifPresent(clientCredentials -> providers.replaceAll(provider ->
+                            provider instanceof OAuth2TokenExchangeAuthenticationProvider
+                                ? new SpiffeClients.Exchange(clientCredentials, provider) : provider));
+                }));
         })
             // Only the user-facing endpoint needs a human with both factors; token, introspection and
             // revocation authenticate the client, and discovery/JWKS are public. The endpoint filter runs after
@@ -413,11 +420,9 @@ class AuthorizationServerConfiguration {
                 context.getClaims().claim(OAuth2ParameterNames.SCOPE, String.join(" ", scopes));
             }
             if (OAuth2TokenType.ACCESS_TOKEN.equals(context.getTokenType())
-                    && context.getRegisteredClient().getClientSettings().getSetting(RegisteredClients.AUDIENCES) instanceof String extra) {
+                    && context.getRegisteredClient().getClientSettings().getSetting(RegisteredClients.AUDIENCES) != null) {
                 // Resource audiences registered for the client (the framework has no audience parameter).
-                var audience = new ArrayList<>(List.of(context.getRegisteredClient().getClientId()));
-                for (var value : extra.split(",")) if (!value.isBlank() && !audience.contains(value.trim())) audience.add(value.trim());
-                context.getClaims().audience(audience);
+                context.getClaims().audience(RegisteredClients.tokenAudiences(context.getRegisteredClient()));
             }
             if (!(context.getPrincipal().getPrincipal() instanceof DirectoryPrincipal principal)) return;
             var user = principal.user();
