@@ -70,7 +70,7 @@ iam:
 
 ## 签发的 token
 
-`sub` 为 client ID（即 SPIFFE ID），`aud` 为 client ID 加客户端登记的额外 audience，`scope` 为空格分隔字符串
+`sub` 与 `client_id` 均为 client ID（即 SPIFFE ID），`aud` 为 client ID 加客户端登记的额外 audience，`scope` 为空格分隔字符串
 （RFC 9068，与用户 token 相同）。`client_credentials` 不签发 refresh token：随时可以用新的 SVID 再换。
 
 ## Token exchange（RFC 8693）
