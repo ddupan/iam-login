@@ -1,6 +1,27 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": [
-    "config:recommended"
+  "extends": ["config:recommended"],
+  "packageRules": [
+    {
+      "description": "Boot pins the jOOQ runtime; the codegen plugin and meta-extensions must match it (build.gradle).",
+      "matchPackageNames": ["org.springframework.boot", "org.jooq.jooq-codegen-gradle", "org.jooq:jooq-meta-extensions"],
+      "groupName": "spring-boot",
+      "prBodyNotes": ["影响 AOT/Native：合并后、发布前在 main 上手动运行 ci，确认 native 通过。"]
+    },
+    {
+      "description": "Native toolchain: only the manually dispatched native job exercises it.",
+      "matchPackageNames": ["org.graalvm.buildtools.native", "ghcr.io/graalvm/native-image-community"],
+      "groupName": "native toolchain",
+      "prBodyNotes": ["只有手动触发的 native job 会用到：合并后、发布前在 main 上手动运行 ci，确认 native 通过。"]
+    }
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Container images pinned at line ends in scripts/ (image=repo:tag, or before a line continuation).",
+      "managerFilePatterns": ["/^scripts//"],
+      "matchStrings": ["(?:=|\\s)(?<depName>(?:[a-z0-9.-]+/)*[a-z0-9.-]+):(?<currentValue>\\d[\\w.-]*) ?\\\\?\\n"],
+      "datasourceTemplate": "docker"
+    }
   ]
 }
