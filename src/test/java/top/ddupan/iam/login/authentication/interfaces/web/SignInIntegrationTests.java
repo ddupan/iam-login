@@ -69,7 +69,10 @@ class SignInIntegrationTests {
         var session = new MockHttpSession();
         mvc.perform(get("/signin").with(https()).session(session)).andExpect(status().isOk());
         String oldId = session.getId();
+        // A browser sends its session cookie; without a requested session ID MockMvc (spring-test 7.0.10+) reports
+        // it invalid and Spring Security skips session fixation protection.
         mvc.perform(post("/signin/password").with(https()).session(session).with(csrf())
+            .with(request -> { request.setRequestedSessionId(oldId); return request; })
             .param("username", "alice").param("password", "fixture-password"))
             .andExpect(redirectedUrl("/signin/mfa"));
         assertThat(session.getId()).isNotEqualTo(oldId);
