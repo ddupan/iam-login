@@ -8,7 +8,7 @@ repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 binary=$repo_root/build/native/nativeCompile/iam-login
 graalvm=ghcr.io/graalvm/native-image-community:25.0.2
 postgres=postgres:18.6
-playwright=mcr.microsoft.com/playwright:v1.63.0-noble   # matches @playwright/test in frontend/package.json
+playwright=mcr.microsoft.com/playwright:v1.64.1-noble   # matches @playwright/test in frontend/package.json (one Renovate group)
 docker_cmd=(docker)
 if [[ ${IAM_DOCKER_USE_SUDO:-0} == 1 ]]; then docker_cmd=(sudo -n docker); fi
 [[ -x $binary ]] || { echo "native binary missing: $binary" >&2; exit 1; }
@@ -40,6 +40,18 @@ wait_for() {  # wait_for <seconds> <description> <command...>
   for _ in $(seq "$limit"); do "$@" >/dev/null 2>&1 && return 0; sleep 1; done
   echo "timed out waiting for $what" >&2; return 1
 }
+retry() {  # retry <command...>: for anything that fetches from the internet
+  local attempt
+  for attempt in 1 2 3 4 5; do
+    "$@" && return 0
+    echo "attempt $attempt failed: $*" >&2; sleep $((attempt * 10))
+  done
+  return 1
+}
+
+# Pulled up front with retries: an implicit pull inside `docker run` gets one try, and the WAN drops at
+# random (a v1.63.0 pull timing out on mcr.microsoft.com failed a release on 2026-11-03).
+for image in "$graalvm" "$postgres" "$playwright"; do retry "${docker_cmd[@]}" pull -q "$image" >/dev/null; done
 
 # Signing key as infrastructure would provide it, and a truststore for the fixture's LDAPS certificate.
 openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out "$work/signing-key.pem" 2>/dev/null

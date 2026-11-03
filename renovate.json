@@ -28,7 +28,7 @@
       "allowedVersions": "<7"
     },
     {
-      "description": "The conformance browser image must match @playwright/test (scripts/conformance); after the conformance rule so it wins.",
+      "description": "The browser images in scripts/conformance and scripts/native-smoke must match @playwright/test; after the conformance rule so it wins.",
       "matchDepNames": ["@playwright/test", "mcr.microsoft.com/playwright"],
       "groupName": "playwright"
     }
@@ -44,7 +44,7 @@
     {
       "customType": "regex",
       "description": "The Playwright image: v-prefixed tag with an OS suffix and a trailing comment, which the rule above skips.",
-      "managerFilePatterns": ["/^scripts/conformance$/"],
+      "managerFilePatterns": ["/^scripts/(conformance|native-smoke)$/"],
       "matchStrings": ["=(?<depName>mcr\\.microsoft\\.com/playwright):(?<currentValue>v[\\d.]+-noble)\\s"],
       "datasourceTemplate": "docker",
       "versioningTemplate": "regex:^v(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)-noble$"
