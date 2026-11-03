@@ -3,16 +3,23 @@
   "extends": ["config:recommended"],
   "packageRules": [
     {
-      "description": "Boot pins the jOOQ runtime; the codegen plugin and meta-extensions must match it (build.gradle).",
-      "matchPackageNames": ["org.springframework.boot", "org.jooq.jooq-codegen-gradle", "org.jooq:jooq-meta-extensions"],
+      "description": "Boot pins the jOOQ runtime; the codegen plugin and meta-extensions must match it (build.gradle). Dep names: a Gradle plugin's package name is <id>:<id>.gradle.plugin, which matchPackageNames misses.",
+      "matchDepNames": ["org.springframework.boot", "org.jooq.jooq-codegen-gradle", "org.jooq:jooq-meta-extensions"],
       "groupName": "spring-boot",
       "prBodyNotes": ["影响 AOT/Native：合并后、发布前在 main 上手动运行 ci，确认 native 通过。"]
     },
     {
       "description": "Native toolchain: only the manually dispatched native job exercises it.",
-      "matchPackageNames": ["org.graalvm.buildtools.native", "ghcr.io/graalvm/native-image-community"],
+      "matchDepNames": ["org.graalvm.buildtools.native", "ghcr.io/graalvm/native-image-community"],
       "groupName": "native toolchain",
       "prBodyNotes": ["只有手动触发的 native job 会用到：合并后、发布前在 main 上手动运行 ci，确认 native 通过。"]
+    },
+    {
+      "description": "The conformance suite's images run only in the manually dispatched conformance workflow; one PR, majors included.",
+      "matchFileNames": ["scripts/conformance"],
+      "groupName": "conformance images",
+      "separateMajorMinor": false,
+      "prBodyNotes": ["只有手动运行的 conformance workflow 会用到这些镜像：合并前在本分支手动跑一次 conformance。"]
     }
   ],
   "customManagers": [
