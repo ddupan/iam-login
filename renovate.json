@@ -15,11 +15,16 @@
       "prBodyNotes": ["只有手动触发的 native job 会用到：合并后、发布前在 main 上手动运行 ci，确认 native 通过。"]
     },
     {
-      "description": "The conformance suite's images run only in the manually dispatched conformance workflow; one PR, majors included.",
+      "description": "The conformance suite's images: one PR, majors included; the PR runs the conformance workflow (paths filter).",
       "matchFileNames": ["scripts/conformance"],
       "groupName": "conformance images",
       "separateMajorMinor": false,
-      "prBodyNotes": ["只有手动运行的 conformance workflow 会用到这些镜像：合并前在本分支手动跑一次 conformance。"]
+      "prBodyNotes": ["这些镜像只有 conformance workflow 会用到；本 PR 会自动跑 conformance，合并前确认它通过。"]
+    },
+    {
+      "description": "The conformance browser image must match @playwright/test (scripts/conformance); after the conformance rule so it wins.",
+      "matchDepNames": ["@playwright/test", "mcr.microsoft.com/playwright"],
+      "groupName": "playwright"
     }
   ],
   "customManagers": [
@@ -29,6 +34,14 @@
       "managerFilePatterns": ["/^scripts//"],
       "matchStrings": ["(?:=|\\s)(?<depName>(?:[a-z0-9.-]+/)*[a-z0-9.-]+):(?<currentValue>\\d[\\w.-]*) ?\\\\?\\n"],
       "datasourceTemplate": "docker"
+    },
+    {
+      "customType": "regex",
+      "description": "The Playwright image: v-prefixed tag with an OS suffix and a trailing comment, which the rule above skips.",
+      "managerFilePatterns": ["/^scripts/conformance$/"],
+      "matchStrings": ["=(?<depName>mcr\\.microsoft\\.com/playwright):(?<currentValue>v[\\d.]+-noble)\\s"],
+      "datasourceTemplate": "docker",
+      "versioningTemplate": "regex:^v(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)-noble$"
     }
   ]
 }

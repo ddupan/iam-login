@@ -1,11 +1,17 @@
 name: conformance
 # OpenID Foundation conformance suite, run by hand (Actions → conformance → Run workflow): it takes too long and
-# pulls too much for every PR.
+# pulls too much for every PR. PRs that change the suite itself (its script, images or browser driver) run it
+# automatically, since nothing else exercises them.
 # Runs on "iam-build", not the pod pool: suite JVM + MongoDB + the app (Gradle, Testcontainers PostgreSQL)
 # + Chromium do not fit a 4Gi pool Pod, and the runner's persistent disk keeps the suite build cached
 # (scripts/conformance), so a run does not depend on Maven Central over the flaky WAN.
 on:
   workflow_dispatch:
+  pull_request:
+    paths:
+      - scripts/conformance
+      - frontend/tests/conformance/**
+      - .gitea/workflows/conformance.yml
 
 jobs:
   conformance:
