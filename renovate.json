@@ -22,6 +22,12 @@
       "prBodyNotes": ["这些镜像只有 conformance workflow 会用到；本 PR 会自动跑 conformance，合并前确认它通过。"]
     },
     {
+      "description": "Stay on the MongoDB major the suite's own docker-compose uses. mongo 9.0.4 also refuses to start on kernels 6.19-7.0.13 (SERVER-121912), which the iam-build runner (pve1) is on.",
+      "matchFileNames": ["scripts/conformance"],
+      "matchDepNames": ["mongo"],
+      "allowedVersions": "<7"
+    },
+    {
       "description": "The conformance browser image must match @playwright/test (scripts/conformance); after the conformance rule so it wins.",
       "matchDepNames": ["@playwright/test", "mcr.microsoft.com/playwright"],
       "groupName": "playwright"
