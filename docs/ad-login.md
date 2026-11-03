@@ -12,8 +12,7 @@ URL、base DN 与 JNDI 环境（忽略 referral、`objectGUID` 二进制、超�
 成功后重定向到 `/signin/mfa`，显示目录账号、objectGUID、邮箱、直接所属组及组 DN。
 **密码成功本身不是完整登录成功。** Spring Security 先保存仅含 `FACTOR_PASSWORD`
 的认证结果；启用 [WebAuthn](webauthn.md) 后在此继续第二因素，否则停留在等待页面。
-未实现的应用请求使用 `denyAll`，
-不替换现役 Go/Authelia/Gitea 登录链路。
+未实现的应用请求使用 `denyAll`。
 
 ## 目录和组语义
 
