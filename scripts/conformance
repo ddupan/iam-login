@@ -48,8 +48,11 @@ work=$(mktemp -d)
 cleanup() {
   local status=$?
   # Container logs are part of the evidence; collect them before the containers go.
-  for name in iam-conf-suite iam-conf-driver; do
-    "${docker_cmd[@]}" logs "$name" > "$out/${name#iam-conf-}.log" 2>&1 || true
+  # The exit line catches a container that died without logging (illegal instruction, OOM kill).
+  for name in iam-conf-mongo iam-conf-nginx iam-conf-suite iam-conf-driver; do
+    { "${docker_cmd[@]}" logs "$name"
+      "${docker_cmd[@]}" inspect -f 'exit={{.State.ExitCode}} oom={{.State.OOMKilled}}' "$name"
+    } > "$out/${name#iam-conf-}.log" 2>&1 || true
   done
   if ((status != 0)) && [[ -f $out/fixture.log ]]; then
     echo "--- fixture.log (last 40 lines)" >&2; tail -n 40 "$out/fixture.log" >&2
