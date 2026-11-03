@@ -11,6 +11,8 @@ type Account = {
 };
 type Problem = "missing" | "forbidden" | "unavailable" | "failed";
 
+const path = (username: string) => `/api/iam/users/${encodeURIComponent(username)}`;
+
 /** Looks one account up and resets its two-step verification; the accounts themselves live in the directory. */
 export function UsersPanel({ api, onExpired }: { api: Api; onExpired: () => void }) {
   const { t, i18n } = useTranslation();
@@ -21,7 +23,6 @@ export function UsersPanel({ api, onExpired }: { api: Api; onExpired: () => void
 
   const time = (value?: string) => value
     ? new Intl.DateTimeFormat(i18n.language, { dateStyle: "medium", timeStyle: "short" }).format(new Date(value)) : "";
-  const path = (username: string) => `/api/iam/users/${encodeURIComponent(username)}`;
   const problem: Problem | null = status === null ? null
     : status === 404 ? "missing" : status === 403 ? "forbidden" : status === 502 ? "unavailable" : "failed";
 

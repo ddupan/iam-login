@@ -108,7 +108,7 @@ export function ClientDetail({ api, onExpired, id, onSecret }: Props & { id: str
         <dl className="facts">
           <div className="wide"><dt>{t("clients.redirectUris")}</dt><dd>{list(client.redirectUris)}</dd></div>
           <div className="wide"><dt>{t("clients.scopes")}</dt>
-            <dd><span className="chips">{[...client.scopes].sort().map(scope => <span key={scope} className="chip">{scope}</span>)}</span></dd></div>
+            <dd><span className="chips">{client.scopes.toSorted().map(scope => <span key={scope} className="chip">{scope}</span>)}</span></dd></div>
           <div><dt>{t("clients.type")}</dt><dd>{t(client.publicClient ? "clients.public" : "clients.confidential")}</dd></div>
           <div><dt>{t("clients.deviceLogin")}</dt><dd>{t(client.deviceAuthorization ? "clients.allowed" : "clients.notAllowed")}</dd></div>
           <div><dt>{t("clients.pkce")}</dt><dd>{t(client.pkceRequired ? "clients.required" : "clients.off")}</dd></div>
