@@ -21,7 +21,7 @@ out=${IAM_CONFORMANCE_OUT:-$repo_root/build/conformance}
 # the server: it is the same JDK the jar was built with, and one image fewer to pull over the flaky WAN.
 maven=maven:3.10.0-eclipse-temurin-21
 mongo=mongo:6.0.28
-nginx=nginx:1.27.3
+nginx=nginx:1.31.8
 python=python:3.15.2-slim
 playwright=mcr.microsoft.com/playwright:v1.64.1-noble   # matches @playwright/test in frontend/package.json (one Renovate group)
 suite_host=localhost.emobix.co.uk   # the suite's dev base URL; its public DNS points at 127.0.0.1
