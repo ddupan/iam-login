@@ -1,6 +1,6 @@
 plugins {
 	id 'java'
-	id 'org.springframework.boot' version '4.1.1'
+	id 'org.springframework.boot' version '4.1.2'
 	id 'io.spring.dependency-management' version '1.1.7'
 	id 'org.graalvm.buildtools.native' version '1.1.18'
 	// Same version as the jOOQ runtime Spring Boot manages (3.21.7 with Boot 4.1.1).
@@ -40,7 +40,7 @@ dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-restclient'
 	implementation 'org.springframework.security:spring-security-webauthn'
 	// The schema is read from the Flyway scripts themselves: no database at build time.
-	jooqCodegen 'org.jooq:jooq-meta-extensions:3.21.7'
+	jooqCodegen 'org.jooq:jooq-meta-extensions:3.21.9'
 	compileOnly 'org.projectlombok:lombok'
 	developmentOnly 'org.springframework.boot:spring-boot-devtools'
 	runtimeOnly 'io.micrometer:micrometer-registry-prometheus'
