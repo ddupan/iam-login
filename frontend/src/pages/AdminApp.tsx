@@ -47,6 +47,8 @@ export function AdminApp({ context }: { context: AdminContext }) {
   }, [manager]);
 
   useEffect(() => {
+    // Starting the sign-in redirect is the effect's job; clearing the error first is that, not derived state.
+    // oxlint-disable-next-line react/set-state-in-effect
     if (window.location.pathname !== CALLBACK) { signIn(window.location.pathname); return; }
     manager.signinRedirectCallback().then(signedIn => {
       const target = typeof signedIn.state === "string" && signedIn.state.startsWith("/console") ? signedIn.state : "/console";

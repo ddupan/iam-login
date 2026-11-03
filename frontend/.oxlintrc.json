@@ -1,0 +1,24 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  // Runs in `npm run build` (tsc, oxlint, vite): an error fails the build and so CI.
+  // ESLint is not an option: typescript-eslint needs the TypeScript JS API, which TypeScript 7 does not ship.
+  "plugins": ["typescript", "react", "jsx-a11y", "oxc", "unicorn", "promise"],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "error"
+  },
+  "env": { "browser": true, "es2024": true },
+  "ignorePatterns": ["dist/**", "test-results/**"],
+  "rules": {
+    // The automatic JSX runtime (tsconfig "jsx": "react-jsx") needs no React import.
+    "react/react-in-jsx-scope": "off",
+    // Each page that autofocuses has exactly one thing to type (password, code, device code): focus is the point.
+    "jsx-a11y/no-autofocus": "off",
+    // role="status" on a <p> is the live region we want; <output> means a computed result, and <search> is too new.
+    "jsx-a11y/prefer-tag-over-role": "off",
+    // Fires on TypeScript parameter properties (Failure's `problem` vs the problem() helper), not on real shadowing.
+    "eslint/no-shadow": "off",
+    // then() callbacks here are side effects (set state, navigate); nothing chains on their return value.
+    "promise/always-return": "off"
+  }
+}

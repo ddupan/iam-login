@@ -1,0 +1,23 @@
+name: security-scan
+# semgrep (code), gitleaks (secrets) and trivy (dependency vulnerabilities) in report mode: findings are posted as
+# one PR comment, updated in place on re-runs, and never fail the job. On a PR, semgrep and gitleaks report only
+# what the PR adds; the weekly run scans everything, because new vulnerabilities appear without any change here.
+# Static analysis that does fail the build lives in the build itself: Error Prone (build.gradle) and oxlint
+# (frontend/.oxlintrc.json).
+on:
+  pull_request:
+  schedule:
+    - cron: '23 3 * * 1'
+  workflow_dispatch:
+
+jobs:
+  security-scan:
+    runs-on: [self-hosted, pod]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: https://git.ddupan.top/panxiao81/ci-actions/setup-artifact-keeper@v1
+        with:
+          pypi: 'true'   # semgrep is installed from the PyPI cache
+      - uses: https://git.ddupan.top/panxiao81/ci-actions/security-scan@v1
+        with:
+          semgrep-config: p/default p/java p/typescript p/react

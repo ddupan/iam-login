@@ -5,6 +5,7 @@ plugins {
 	id 'org.graalvm.buildtools.native' version '1.1.18'
 	// Same version as the jOOQ runtime Spring Boot manages (3.21.7 with Boot 4.1.1).
 	id 'org.jooq.jooq-codegen-gradle' version '3.21.9'
+	id 'net.ltgt.errorprone' version '5.2.0'
 }
 
 group = 'top.ddupan.iam'
@@ -46,6 +47,7 @@ dependencies {
 	runtimeOnly 'io.micrometer:micrometer-registry-prometheus'
 	annotationProcessor 'org.projectlombok:lombok'
 	annotationProcessor 'org.springframework.boot:spring-boot-configuration-processor'
+	errorprone 'com.google.errorprone:error_prone_core:2.52.0'
 	testImplementation 'org.springframework.boot:spring-boot-starter-actuator-test'
 	testImplementation 'org.springframework.boot:spring-boot-starter-data-ldap-test'
 	testImplementation 'org.springframework.boot:spring-boot-starter-ldap'
@@ -65,6 +67,15 @@ dependencies {
 
 tasks.named('test') {
 	useJUnitPlatform()
+}
+
+// Static analysis at compile time: Error Prone's ERROR-level checks fail the build (and so CI), warnings are
+// reported. Generated code (jOOQ tables, Spring AOT sources) is not ours to fix.
+tasks.withType(JavaCompile).configureEach {
+	options.errorprone {
+		disableWarningsInGeneratedCode = true
+		excludedPaths = '.*/build/generated[^/]*/.*'
+	}
 }
 
 // Run generated AOT test context on the JVM before the more expensive native compile.
