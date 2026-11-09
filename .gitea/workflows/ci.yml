@@ -1,9 +1,9 @@
 name: ci
 # JVM checks run for every change on the shared pod pool (Docker inside the executor Pod). The native image
-# (~11 min, ~5.5 GB peak, more than a pool Pod gets) runs only when dispatched by hand, on the repository runner
-# "iam-build": a host-mode runner in a disposable LXC on pve1 with persistent caches. Not on every merge: it
-# competes with everything else on pve1, and most merges (dependency bumps) need no release. Dispatched on main,
-# the tested binary is also published to zot (scripts/publish-image), so releases are never rebuilt.
+# (~11 min, ~5.5 GB peak, more than a pool Pod gets) runs only when dispatched by hand, in a "large" Pod (4 CPU /
+# 9Gi, only the laptop's runner has this label). Not on every merge: it takes that capacity from the laptop's
+# other services, and most merges (dependency bumps) need no release. Dispatched on main, the tested binary is
+# also published to zot (scripts/publish-image), so releases are never rebuilt.
 on:
   pull_request:
   push:
@@ -56,20 +56,35 @@ jobs:
                           print(f"{case.get('classname')}.{case.get('name')}: {(problem.get('message') or '')[:500]}")
           PY
 
-  native:
+  # The job key is the last segment of this job's SPIFFE ID, which zot's ACL for iam/iam-login names:
+  # renaming it stops publishing.
+  publish:
     if: github.event_name == 'workflow_dispatch'
     needs: jvm
-    runs-on: iam-build
+    runs-on: [self-hosted, container, large]
     env:
-      IAM_GRADLE_CACHE: /srv/iam/ci/gradle
-      IAM_NPM_CACHE: /srv/iam/ci/npm
+      IAM_GRADLE_CACHE: /tmp/iam-ci/gradle
+      IAM_NPM_CACHE: /tmp/iam-ci/npm
       IAM_BUILD_CPUS: "4"
     steps:
-      - name: Remove containers left by cancelled runs
-        # Capacity 1: no other job of this runner is running, so every labelled container is an orphan.
-        # A cancelled native run kept compiling and starved the next one of memory (2026-10-05).
-        run: docker ps -aq --filter label=iam-login.ci=1 | xargs -r docker rm -f
       - uses: actions/checkout@v7
+      - uses: actions/cache@v6
+        with:
+          path: |
+            /tmp/iam-ci/gradle/caches/modules-2
+            /tmp/iam-ci/gradle/wrapper
+            /tmp/iam-ci/npm
+          key: iam-native-${{ hashFiles('build.gradle', 'gradle/wrapper/gradle-wrapper.properties', 'frontend/package-lock.json') }}
+          restore-keys: |
+            iam-native-
+            iam-jvm-
+      - uses: https://git.ddupan.top/panxiao81/ci-actions/setup-artifact-keeper@v1
+        with:
+          gradle: 'true'
+          gradle-user-home: /tmp/iam-ci/gradle
+          npm: 'true'
+          npm-home: /tmp/iam-ci/npm
+          docker: 'true'
       - name: Native image
         env:
           IAM_BUILD_MEMORY: 7g

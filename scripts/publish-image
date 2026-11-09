@@ -1,22 +1,20 @@
 #!/usr/bin/env bash
 # Packages the native binary that just passed the browser test and pushes it to zot, so the
-# image that ships is the binary CI tested (no separate release build). Runs on the iam-build
-# runner, whose SPIRE agent gives this job spiffe://ddupan.top/ci/panxiao81/iam-login/publish.
+# image that ships is the binary CI tested (no separate release build). Runs in the "publish" job,
+# whose executor Pod has the identity spiffe://ddupan.top/ci/panxiao81/iam-login/publish.
 # The JWT-SVID only travels through a pipe and a throwaway DOCKER_CONFIG.
 set -euo pipefail
 
 repo=zot.lab.ddupan.top/iam/iam-login
 tag=${GITHUB_SHA:?}
-socket=${SPIFFE_ENDPOINT_SOCKET:-unix:///run/spire-agent/agent.sock}
+socket=${SPIRE_AGENT_SOCKET:-/run/spire/agent-sockets/spire-agent.sock}
 
 docker build -q -t "$repo:$tag" .
 
-# The runner is long-lived and every main push tags a new image; once in zot the local copy is only dead
-# weight (28 of them filled the build LXC's disk on 2026-10-16). Removed on failure too.
 export DOCKER_CONFIG
 DOCKER_CONFIG=$(mktemp -d)
-trap 'rm -rf -- "$DOCKER_CONFIG"; docker rmi "$repo:$tag" >/dev/null 2>&1 || true' EXIT
-/usr/local/bin/spire-agent api fetch jwt -audience zot -output json -socketPath "${socket#unix://}" | python3 -c '
+trap 'rm -rf -- "$DOCKER_CONFIG"' EXIT
+spire-agent api fetch jwt -audience zot -output json -socketPath "$socket" | python3 -c '
 import json, sys
 blocks = json.load(sys.stdin)
 blocks = blocks if isinstance(blocks, list) else [blocks]
