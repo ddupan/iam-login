@@ -1,7 +1,7 @@
 # iam-login
 
 独立 IAM 的登录、认证与 token 签发服务，以 Java、Spring Security 和 GraalVM Native 实现。
-已实现 AD 密码与直接所属组查询、Passkey（WebAuthn）与验证器 App（TOTP）第二因素，以及进程内的
+已实现 AD 密码与直接所属组查询、Passkey（WebAuthn，也可单独无密码登录）与验证器 App（TOTP）第二因素，以及进程内的
 OAuth 2.0 / OIDC 授权服务器（Spring Security 7）与客户端管理。2026-10-04 起以 Native 镜像在
 `https://sso.ddupan.top` 生产运行，Hydra 与 Authelia 均已退役。原 Hydra Login/Consent 方案存档于
 `archive/hydra` 分支。

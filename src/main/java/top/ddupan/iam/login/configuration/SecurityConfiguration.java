@@ -75,9 +75,9 @@ class SecurityConfiguration {
                     // before adding, renaming or removing a factor or revoking an application.
                     auth.requestMatchers("/account", "/account/**").access(mfa.policy.complete);
                     auth.requestMatchers(HttpMethod.POST, "/webauthn/register")
-                        .access(mfa.policy.password);
+                        .access(mfa.policy.enroll);
                     // Like adding a passkey; the page itself asks for the second factor too once one exists.
-                    auth.requestMatchers(HttpMethod.GET, WebAuthnBrowserConfigurer.TOTP_SETUP).access(mfa.policy.password);
+                    auth.requestMatchers(HttpMethod.GET, WebAuthnBrowserConfigurer.TOTP_SETUP).access(mfa.policy.enroll);
                 }
                 // /signin/device decides itself: it saves the request before sending a visitor to sign in.
                 // "/" only redirects to /account, which then asks for whatever sign-in is missing.

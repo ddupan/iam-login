@@ -47,6 +47,13 @@ test("AD + PostgreSQL + real WebAuthn ceremony, factor gating and persisted re-l
     headers: { [token.headerName]: token.value }, data: assertion,
   });
   expect(replay.status()).toBe(401);
+  // Passwordless: the same passkey is the whole sign-in, no password typed; the visit resumes where it started.
+  await page.getByRole("button", { name: "退出", exact: true }).click();
+  await page.goto("https://localhost:18083/account");
+  await expect(page).toHaveURL(/\/signin$/);
+  await page.getByRole("button", { name: "使用 Passkey 登录", exact: true }).click();
+  await expect(page).toHaveURL(/\/account$/);
+  await expect(page.getByRole("heading", { name: "我的账户", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "退出", exact: true }).click();
   await login("bob");
   // Bob has no credential. A discoverable Alice credential must not become Bob's second factor.

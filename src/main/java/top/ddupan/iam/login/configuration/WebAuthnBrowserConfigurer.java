@@ -49,7 +49,10 @@ final class WebAuthnBrowserConfigurer {
 
     void configure(HttpSecurity http) throws Exception {
         http.setSharedObject(UserDetailsService.class, name -> {
-            if (!policy.current().getName().equals(name)) throw new UsernameNotFoundException("Directory identity mismatch");
+            // Called after the relying party verified the passkey and resolved its account (passwordless included).
+            if (policy.secondStep().filter(p -> !p.getName().equals(name)).isPresent()) {
+                throw new UsernameNotFoundException("Directory identity mismatch");
+            }
             // Spring Security merges the existing password factor, retaining its original issue time.
             return new User(name, "", List.of());
         });

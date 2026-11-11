@@ -42,9 +42,11 @@ public final class TotpAuthenticationProvider implements AuthenticationProvider 
         var request = (TotpCode) authentication;
         var current = SecurityContextHolder.getContext().getAuthentication();
         var principal = allowed(() -> {
-            var directory = policy.current();
-            // Setting up needs the same as adding a passkey: a fresh password, plus a fresh second factor once one exists.
-            if (request.enrolling() != null) policy.requireEnrollment(current);
+            // A code is only ever the second step after a fresh password. Setting one up needs the same as adding a
+            // passkey: a fresh password for the first factor, a full fresh sign-in (a passkey alone included) after.
+            if (request.enrolling() == null) return policy.current();
+            var directory = policy.signedIn();
+            policy.requireEnrollment(current);
             return directory;
         });
         var owner = principal.getName();

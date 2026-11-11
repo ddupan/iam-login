@@ -1,4 +1,4 @@
-# 第二因素：Passkey 与验证器 App
+# Passkey 与验证器 App
 
 WebAuthn 使用 Spring Security 官方过滤器、WebAuthn4J 校验和 JDBC 仓储。
 PostgreSQL 保存 user handle、凭据公钥与签名计数等记录，不保存用户密码或认证器私钥。
@@ -11,9 +11,28 @@ AD 仍为用户与组权威；凭据按目录 authority + objectGUID 关联，�
    Passkey，`?method=totp` 切换到验证码。
 3. Passkey 注册只保存凭据，必须再次实际验证，才取得 `FACTOR_WEBAUTHN`；验证器 App 设置时输入的验证码即
    是实际验证，确认后直接取得 `FACTOR_TOTP`。
-4. `/signin/complete` 要求密码因素和任一第二因素（`FACTOR_WEBAUTHN` 或 `FACTOR_TOTP`）均在 10 分钟内有效；存在被打断的授权请求时恢复该请求（见[内置授权服务器](authorization-server.md)），否则进入账户页 `/account`。
+4. `/signin/complete` 要求完整登录在 10 分钟内：密码加任一第二因素（`FACTOR_WEBAUTHN` 或 `FACTOR_TOTP`），
+   或单独一个 `FACTOR_WEBAUTHN`（见下）。存在被打断的授权请求时恢复该请求（见[内置授权服务器](authorization-server.md)），否则进入账户页 `/account`。
 
-首次注册信任近期 AD 密码验证。已有凭据后的新增注册同时要求密码与 WebAuthn 因素；
+### 无密码登录
+
+`/signin` 的“使用 Passkey 登录”不需要先输入密码：一次 Passkey 验证就是完整登录。注册和验证都要求 user
+verification，服务端按 options 校验 UV 标志，所以一次验证本身就包含持有设备与 PIN/生物识别两个因素；
+验证器 App 的验证码始终只作为密码之后的第二步。
+
+同一组端点（`/webauthn/authenticate/options`、`/login/webauthn`）按会话分两种情况（`MfaPolicy.secondStep`，
+`DirectoryRelyingPartyOperations`）：
+
+- 会话里有 10 分钟内的密码：第二步。options 只列出该账号的 Passkey，断言必须属于该账号。
+- 否则：无密码登录。options 不列出凭据（discoverable），由浏览器给出本站的 Passkey；验签后按凭据记录的
+  `authority:objectGUID` 以服务账号读 AD，账号不存在或已禁用即失败。challenge 记为不属于任何账号
+  （`SessionChallenges.PASSWORDLESS`）。换成另一个人的 Passkey 时，框架只替换认证、不合并因素
+  （按用户名判断是否同一人）。
+
+改密码不影响 Passkey 登录；但改密码之前建立的会话，无论用哪种方式登录，都要重新登录（`ActiveAccount`，
+比较的是最近一次密码或 Passkey 因素）。
+
+首次注册信任近期 AD 密码验证。已有因素后的新增注册要求完整登录（密码加第二因素，或单独 Passkey），均在 10 分钟内；
 新增和删除在账户页自助完成，不提供恢复码。按维护者确认的
 自用范围，遗失全部第二因素由管理员重置（管理控制台实现之前人工操作数据库），不以开发恢复 UI 作为上线条件。
 人工恢复只处理核实后的目标主体凭据，并按首次注册规则重新绑定；不能清空整个凭据库。

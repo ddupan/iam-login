@@ -1,6 +1,6 @@
 import { Trans, useTranslation } from "react-i18next";
 import { Alert, Single, Steps } from "../components/Chrome";
-import { Passkey } from "../components/Passkey";
+import { Passkey, PasskeySignIn } from "../components/Passkey";
 import { SubmitForm } from "../components/SubmitForm";
 import { TotpCode } from "../components/TotpCode";
 import type { SignInContext } from "../page-context";
@@ -40,6 +40,7 @@ export function SignInPage({ context }: { context: SignInContext }) {
               maxLength={1024} aria-invalid={error ? true : undefined} />
           </div>
         </SubmitForm>
+        <PasskeySignIn csrf={context.csrf} />
       </Single>
     );
   }

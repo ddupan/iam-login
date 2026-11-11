@@ -21,16 +21,58 @@ function supported() {
   }
 }
 
-async function post(csrf: CsrfToken, path: string, body?: unknown) {
+async function post(csrf: CsrfToken, path: string, body?: unknown, failure: Problem = "expired") {
   const response = await fetch(path, {
     method: "POST", credentials: "same-origin", redirect: "error",
     headers: { "Content-Type": "application/json", [csrf.headerName]: csrf.value },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   if (!response.ok || !response.headers.get("content-type")?.includes("application/json")) {
-    throw new Failure("expired");
+    throw new Failure(failure);
   }
   return response.json();
+}
+
+/**
+ * The authentication ceremony, then on to wherever the server sends the browser. The server decides whose passkey
+ * it is: the account of the sign-in in progress, or (passwordless) the passkey's own.
+ */
+export async function verifyPasskey(csrf: CsrfToken) {
+  supported();
+  const options = await post(csrf, "/webauthn/authenticate/options");
+  const credential = await navigator.credentials.get({
+    publicKey: PublicKeyCredential.parseRequestOptionsFromJSON(options),
+  }) as PublicKeyCredential | null;
+  if (!credential) throw new Failure("cancelled");
+  // Spring Security answers with the request that was interrupted for login (it consumes the saved request);
+  // "/" means there was none, and the sign-in result page decides what comes next.
+  const result = await post(csrf, "/login/webauthn", credential.toJSON(), "failed");
+  const target = typeof result.redirectUrl === "string" ? new URL(result.redirectUrl, window.location.origin) : null;
+  window.location.assign(target && target.origin === window.location.origin && target.pathname !== "/"
+    ? target.toString() : "/signin/complete");
+}
+
+/** Signing in with a passkey instead of the password: one ceremony is the whole sign-in. */
+export function PasskeySignIn({ csrf }: { csrf: CsrfToken }) {
+  const { t } = useTranslation();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<Problem | null>(null);
+  async function perform() {
+    setBusy(true);
+    setError(null);
+    try {
+      await verifyPasskey(csrf);
+    } catch (cause) {
+      setError(problem(cause));
+      setBusy(false);
+    }
+  }
+  return <>
+    {error && <Alert>{t(`passkey.error.${error}`)}</Alert>}
+    <button className="secondary" type="button" disabled={busy} onClick={perform}>
+      {busy ? t("passkey.waitingShort") : t("signin.usePasskey")}
+    </button>
+  </>;
 }
 
 /** The registration ceremony: the server decides whether this session may add a credential. */
@@ -67,17 +109,7 @@ export function Passkey({ csrf, initial, who, alternative }: {
         setRegistered(true);
         setStep("authenticate");
       } else {
-        const options = await post(csrf, "/webauthn/authenticate/options");
-        const credential = await navigator.credentials.get({
-          publicKey: PublicKeyCredential.parseRequestOptionsFromJSON(options),
-        }) as PublicKeyCredential | null;
-        if (!credential) throw new Failure("cancelled");
-        // Spring Security answers with the request that was interrupted for login (it consumes the saved
-        // request); "/" means there was none, and the sign-in result page decides what comes next.
-        const result = await post(csrf, "/login/webauthn", credential.toJSON());
-        const target = typeof result.redirectUrl === "string" ? new URL(result.redirectUrl, window.location.origin) : null;
-        window.location.assign(target && target.origin === window.location.origin && target.pathname !== "/"
-          ? target.toString() : "/signin/complete");
+        await verifyPasskey(csrf);
       }
     } catch (cause) {
       setError(problem(cause));
