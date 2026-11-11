@@ -70,7 +70,7 @@ class SecurityConfiguration {
             .authorizeHttpRequests(auth -> {
                 if (mfa != null) {
                     auth.requestMatchers("/signin/complete").access(mfa.policy.complete);
-                    auth.requestMatchers("/signin/consent").access(mfa.policy.complete);
+                    auth.requestMatchers("/signin/consent").access(mfa.policy.session);
                     // Both factors fresh (10 minutes) for the page and every change on it: the re-verification
                     // before adding, renaming or removing a factor or revoking an application.
                     auth.requestMatchers("/account", "/account/**").access(mfa.policy.complete);

@@ -1,6 +1,10 @@
 spring:
   application:
     name: iam-login
+  # Idle timeout of the sign-in session. Without this it is 30 minutes and ends the sign-in long before
+  # iam.signin.sso.lifetime (MfaPolicy.Properties) does.
+  session:
+    timeout: ${iam.signin.sso.lifetime:12h}
   # AD connection (urls and base are set per environment; iam.ad.domain completes it). Sign-in binds
   # as the user; Boot's own connection (reads without the user present, e.g. on refresh, and the
   # health check) binds as the read-only service account in spring.ldap.username/password, set per

@@ -9,11 +9,14 @@ import com.unboundid.ldap.listener.interceptor.InMemoryOperationInterceptor;
 import com.unboundid.ldap.sdk.Attribute;
 import com.unboundid.ldap.sdk.Entry;
 import com.unboundid.ldap.sdk.LDAPException;
+import com.unboundid.ldap.sdk.Modification;
+import com.unboundid.ldap.sdk.ModificationType;
 import com.unboundid.ldap.sdk.ResultCode;
 import com.unboundid.ldap.sdk.SearchResultReference;
 import com.unboundid.ldap.sdk.SimpleBindRequest;
 import java.net.InetAddress;
 import java.security.KeyStore;
+import java.time.Instant;
 import java.util.HexFormat;
 import java.util.concurrent.atomic.AtomicInteger;
 import javax.net.ssl.KeyManagerFactory;
@@ -130,6 +133,13 @@ public final class AdDirectoryFixture implements AutoCloseable {
 
 
     public String url() { return "ldaps://localhost:" + ldap.getListenPort(); }
+    /** Sets alice's pwdLastSet (a FILETIME), as AD does when the password changes. */
+    public void passwordChanged(Instant at) {
+        long filetime = (at.getEpochSecond() * 10_000_000L + at.getNano() / 100) + 116_444_736_000_000_000L;
+        try {
+            ldap.modify(USER_DN, new Modification(ModificationType.REPLACE, "pwdLastSet", Long.toString(filetime)));
+        } catch (LDAPException ex) { throw new IllegalStateException(ex); }
+    }
     public String mismatchedHostnameUrl() { return "ldaps://127.0.0.1:" + ldap.getListenPort(); }
     @Override public void close() { ldap.shutDown(true); SSLContext.setDefault(original); }
 }

@@ -47,6 +47,21 @@ provider 再抛错。
 认证的时刻并清除当前认证（会话、保存的请求与标记保留）；之后签发的因素满足要求，ID token 的
 `auth_time`（最近因素时间）随之更新。
 
+## 单点登录时长
+
+一次登录（密码加任一两步验证）在 `iam.signin.sso.lifetime`（默认 12 小时，从因素签发时起算）内可以直接进入其他
+应用，包括授权确认页与 device 授权；会话闲置超时跟随这个值。账户页和 `/signin/complete` 仍要求 10 分钟内的因素，
+要求更强认证的 RP 用 `max_age` 或 `prompt=login`。
+
+时长以小时计，所以登录状态要能随时撤销：
+
+- 每次授权都按 `objectGUID` 复核账号（`ActiveAccount`）：在 AD 中被禁用或删除，或者 `pwdLastSet` 晚于本次密码登录
+  （改了密码，或被要求下次登录时改密码），都视为密码因素过期，浏览器回到 `/signin`，重新登录后继续原来的授权请求，
+  禁用的账号则登录不了。AD 不可达时同样处理，与 refresh 一致。比较时容许 1 分钟时钟偏差。
+- 用户在账户页删除 Passkey 或验证器 App 后，本人的其他会话全部结束，当前会话保留；管理员重置两步验证结束
+  该用户的全部会话（`SecondFactors`，按 `spring_session.principal_name` 删除）。
+- 已签发的 access token 到期前仍然有效，refresh 照常按 AD 状态复核。
+
 ## Token 与策略
 
 - `sub` 由本服务签发：账号首次登录时生成随机 UUID，存在 `subjects` 表，之后不变、不复用。账号

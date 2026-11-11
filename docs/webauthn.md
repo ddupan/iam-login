@@ -52,6 +52,7 @@ Spring Security 没有 TOTP 支持；验证码由框架通用的 `Authentication
 
 - Passkey：添加走框架的注册端点（已有 Passkey 时同样要求完整验证）；改名 `PUT /account/passkeys/{id}/label`
   （1–64 字符）；删除 `DELETE /account/passkeys/{id}`。语句均按所有者限定，他人的 id 一律 404。
+  删除成功后，本人的其他会话全部结束，当前会话保留（可能正是丢失的设备登录的）。
   **至少保留一种两步验证方式**（Passkey 与验证器 App 合计）：删除最后一个返回 409 `last`，在注册锁
   （`CredentialRegistration`）内判断，并发删除不能同时通过。框架自带的 `DELETE /webauthn/register/{id}` 没有这条规则，仍关闭。
 - 验证器 App：设置或「换一台手机」走 `/signin/totp/setup`；删除 `DELETE /account/authenticator`，同样受上面的规则约束。

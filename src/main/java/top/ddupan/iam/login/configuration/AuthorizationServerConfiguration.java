@@ -8,12 +8,16 @@ import jakarta.servlet.http.HttpServletRequest;
 import java.net.URI;
 import java.security.Principal;
 import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Supplier;
 import org.jooq.DSLContext;
+import org.jspecify.annotations.Nullable;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.ConfigurationProperties;
@@ -30,6 +34,10 @@ import org.springframework.security.authentication.AnonymousAuthenticationToken;
 import org.springframework.security.authentication.AuthenticationProvider;
 import org.springframework.security.authentication.InternalAuthenticationServiceException;
 import org.springframework.security.authorization.AuthorizationManager;
+import org.springframework.security.authorization.AuthorizationResult;
+import org.springframework.security.authorization.FactorAuthorizationDecision;
+import org.springframework.security.authorization.RequiredFactor;
+import org.springframework.security.authorization.RequiredFactorError;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.OAuth2AuthorizationServerConfiguration;
@@ -110,7 +118,7 @@ class AuthorizationServerConfiguration {
     SecurityFilterChain authorizationServer(HttpSecurity http, MfaPolicy mfa,
             Subjects subjects, OAuth2AuthorizationService authorizations, RegisteredClientRepository clients,
             AuthorizationServerSettings settings, ObjectProvider<UserRepository> users, SpiffeClients.Properties spiffe) throws Exception {
-        var requiredFactors = mfa.complete;
+        var requiredFactors = new ActiveAccount(mfa.session, users.getIfAvailable(() -> UserRepository.NONE));
         // Registered at the authorization endpoint's position before the endpoint itself (added later, while
         // building); filters of equal order keep insertion order, so this runs first.
         http.addFilterBefore(new Reauthentication(Clock.systemUTC()),
@@ -217,6 +225,46 @@ class AuthorizationServerConfiguration {
                 .defaultDeniedHandlerForMissingAuthority(new LoginUrlAuthenticationEntryPoint("/signin"),
                     FactorGrantedAuthority.PASSWORD_AUTHORITY));
         return http.build();
+    }
+
+    /**
+     * The SSO lifetime is hours, so holding the factors is not enough. The directory is asked on every
+     * authorization: an account disabled or deleted there, or whose password changed after this sign-in, must not
+     * enter applications any more. The answer is "the password factor is missing", so the browser goes through
+     * the same path as any missing or stale factor (the denied handler for FACTOR_PASSWORD): sign in again (which a disabled account cannot), then the interrupted
+     * request resumes. Like refresh (RefreshPolicy), an unreachable directory refuses rather than assumes; a
+     * password sign-in could not succeed then either.
+     */
+    record ActiveAccount(AuthorizationManager<Object> factors, UserRepository users) implements AuthorizationManager<Object> {
+        /** The DC's clock against ours: a sign-in right after changing the password must not loop. */
+        private static final Duration CLOCK_SKEW = Duration.ofMinutes(1);
+        static final AuthorizationResult SIGN_IN_AGAIN = new FactorAuthorizationDecision(List.of(RequiredFactorError.createMissing(
+            RequiredFactor.withAuthority(FactorGrantedAuthority.PASSWORD_AUTHORITY).build())));
+
+        @Override public @Nullable AuthorizationResult authorize(Supplier<? extends @Nullable Authentication> authentication, Object object) {
+            var decision = factors.authorize(authentication, object);
+            if (decision == null || !decision.isGranted()) return decision;
+            var current = authentication.get();
+            return current != null && current.getPrincipal() instanceof DirectoryPrincipal principal
+                && stillValid(principal, passwordSignIn(current)) ? decision : SIGN_IN_AGAIN;
+        }
+
+        private boolean stillValid(DirectoryPrincipal principal, @Nullable Instant signedIn) {
+            try {
+                var user = users.findActive(principal.user().id());
+                if (user.isEmpty()) return false;
+                var changed = user.get().passwordChangedAt();
+                return changed.isEmpty() || (signedIn != null && signedIn.plus(CLOCK_SKEW).isAfter(changed.get()));
+            } catch (UserRepository.AccessFailure ex) {
+                return false;
+            }
+        }
+
+        private static @Nullable Instant passwordSignIn(Authentication authentication) {
+            return authentication.getAuthorities().stream()
+                .filter(a -> a instanceof FactorGrantedAuthority f && FactorGrantedAuthority.PASSWORD_AUTHORITY.equals(f.getAuthority()))
+                .map(a -> ((FactorGrantedAuthority) a).getIssuedAt()).findFirst().orElse(null);
+        }
     }
 
     /**

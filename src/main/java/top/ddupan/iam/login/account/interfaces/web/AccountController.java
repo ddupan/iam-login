@@ -1,5 +1,6 @@
 package top.ddupan.iam.login.account.interfaces.web;
 
+import jakarta.servlet.http.HttpSession;
 import java.net.URI;
 import java.time.ZoneOffset;
 import java.util.Map;
@@ -76,14 +77,17 @@ class AccountController {
         return factors.rename(principal.getName(), id, label) ? ResponseEntity.noContent().build() : error(404, "missing");
     }
 
+    // The page requires a fresh sign-in, so there is a session; it is kept, the account's others end (SecondFactors).
     @DeleteMapping("/account/passkeys/{id}")
-    ResponseEntity<Map<String, String>> remove(@AuthenticationPrincipal DirectoryPrincipal principal, @PathVariable String id) {
-        return removed(factors.removePasskey(principal.getName(), id));
+    ResponseEntity<Map<String, String>> remove(@AuthenticationPrincipal DirectoryPrincipal principal, @PathVariable String id,
+            HttpSession session) {
+        return removed(factors.removePasskey(principal.getName(), id, session.getId()));
     }
 
     @DeleteMapping("/account/authenticator")
-    ResponseEntity<Map<String, String>> removeAuthenticator(@AuthenticationPrincipal DirectoryPrincipal principal) {
-        return removed(factors.removeAuthenticator(principal.getName()));
+    ResponseEntity<Map<String, String>> removeAuthenticator(@AuthenticationPrincipal DirectoryPrincipal principal,
+            HttpSession session) {
+        return removed(factors.removeAuthenticator(principal.getName(), session.getId()));
     }
 
     private static ResponseEntity<Map<String, String>> removed(SecondFactors.Removal removal) {

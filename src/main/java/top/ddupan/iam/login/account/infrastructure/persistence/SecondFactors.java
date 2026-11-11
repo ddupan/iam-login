@@ -47,7 +47,11 @@ public final class SecondFactors {
             .execute() == 1;
     }
 
-    public Removal removePasskey(String owner, String id) {
+    /**
+     * Removing a factor also ends every other session of the account ({@code currentSession} stays): the factor may
+     * be the one a lost device signed in with, and a session outlives its factors by up to the SSO lifetime.
+     */
+    public Removal removePasskey(String owner, String id, String currentSession) {
         var user = userId(owner);
         if (user == null) return Removal.NOT_FOUND;
         return registrations.register(owner, () -> {
@@ -55,15 +59,18 @@ public final class SecondFactors {
             if (!mine) return Removal.NOT_FOUND;
             if (count(owner) <= 1) return Removal.LAST;
             db.deleteFrom(USER_CREDENTIALS).where(USER_CREDENTIALS.CREDENTIAL_ID.eq(id)).execute();
+            endOtherSessions(owner, currentSession);
             return Removal.REMOVED;
         });
     }
 
-    public Removal removeAuthenticator(String owner) {
+    /** As {@link #removePasskey}: other sessions end. */
+    public Removal removeAuthenticator(String owner, String currentSession) {
         return registrations.register(owner, () -> {
             if (!db.fetchExists(TOTP_CREDENTIALS, TOTP_CREDENTIALS.OWNER.eq(owner))) return Removal.NOT_FOUND;
             if (count(owner) <= 1) return Removal.LAST;
             db.deleteFrom(TOTP_CREDENTIALS).where(TOTP_CREDENTIALS.OWNER.eq(owner)).execute();
+            endOtherSessions(owner, currentSession);
             return Removal.REMOVED;
         });
     }
@@ -82,6 +89,11 @@ public final class SecondFactors {
             db.deleteFrom(SPRING_SESSION).where(SPRING_SESSION.PRINCIPAL_NAME.eq(owner)).execute();
             return removed;
         });
+    }
+
+    /** Spring Session indexes each session by the authentication's name, which is the owner (see reset). */
+    private void endOtherSessions(String owner, String currentSession) {
+        db.deleteFrom(SPRING_SESSION).where(SPRING_SESSION.PRINCIPAL_NAME.eq(owner), SPRING_SESSION.SESSION_ID.ne(currentSession)).execute();
     }
 
     private int count(String owner) {
