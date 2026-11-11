@@ -42,7 +42,7 @@ class DeviceController {
             @RequestParam(defaultValue = "") String result, HttpServletRequest request, HttpServletResponse response,
             CsrfToken csrf) {
         var authentication = SecurityContextHolder.getContext().getAuthentication();
-        if (!granted(policy.complete.authorize(() -> authentication, null))) {
+        if (!granted(policy.session.authorize(() -> authentication, null))) {
             new HttpSessionRequestCache().saveRequest(request, response);
             var next = granted(policy.password.authorize(() -> authentication, null)) ? "/signin/mfa" : "/signin";
             return ResponseEntity.status(303).header("Cache-Control", "no-store").location(URI.create(next)).build();

@@ -1,6 +1,7 @@
 package top.ddupan.iam.login.authentication.infrastructure.webauthn;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
@@ -36,7 +37,7 @@ class SessionChallengesTests {
     static final PostgreSQLContainer DATABASE = new PostgreSQLContainer(DockerImageName.parse(
         "postgres:18.6").asCompatibleSubstituteFor("postgres"));
     static DSLContext db;
-    private final MfaPolicy policy = new MfaPolicy(new MapPublicKeyCredentialUserEntityRepository(), new MapUserCredentialRepository(), null);
+    private final MfaPolicy policy = new MfaPolicy(new MapPublicKeyCredentialUserEntityRepository(), new MapUserCredentialRepository(), null, Duration.ofHours(12));
 
     @BeforeAll static void database() {
         DATABASE.start();

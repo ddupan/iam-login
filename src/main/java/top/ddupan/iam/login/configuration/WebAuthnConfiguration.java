@@ -29,7 +29,7 @@ import top.ddupan.iam.login.authentication.infrastructure.webauthn.*;
 
 @Configuration(proxyBeanMethods = false)
 @ConditionalOnProperty(prefix = "iam.webauthn", name = "enabled", havingValue = "true")
-@EnableConfigurationProperties({WebAuthnProperties.class, TotpProperties.class})
+@EnableConfigurationProperties({WebAuthnProperties.class, TotpProperties.class, MfaPolicy.Properties.class})
 class WebAuthnConfiguration {
     @Bean
     PublicKeyCredentialUserEntityRepository credentialUsers(JdbcOperations jdbc) {
@@ -43,8 +43,8 @@ class WebAuthnConfiguration {
 
     @Bean
     MfaPolicy mfaPolicy(PublicKeyCredentialUserEntityRepository users, UserCredentialRepository credentials,
-            TotpCredentials totp) {
-        return new MfaPolicy(users, credentials, totp);
+            TotpCredentials totp, MfaPolicy.Properties properties) {
+        return new MfaPolicy(users, credentials, totp, properties.lifetime());
     }
 
     @Bean

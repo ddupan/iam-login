@@ -215,6 +215,15 @@ class AuthorizationServerIntegrationTests {
         assertThat(code(session, verifier)).isNotBlank();
     }
 
+    @Test void oneSignInOpensApplicationsForTheSsoLifetimeButNotTheAccountPage() throws Exception {
+        var session = login(); secondFactor(session, Instant.now().minusSeconds(3600));
+        assertThat(query(location(session, authorize(verifier())))).containsKey("code");
+        assertThat(location(session, "/account")).startsWith("/signin");
+
+        var expired = login(); secondFactor(expired, Instant.now().minusSeconds(13 * 3600));
+        assertThat(location(expired, authorize(verifier()))).startsWith("/signin").doesNotContain("code=");
+    }
+
     @Test void codeExchangeKeepsExistingSubjectReleasesGroupsAndRefreshes() throws Exception {
         var verifier = verifier();
         var session = login(); secondFactor(session);

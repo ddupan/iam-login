@@ -13,7 +13,9 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Supplier;
 import org.jooq.DSLContext;
+import org.jspecify.annotations.Nullable;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.ConfigurationProperties;
@@ -29,7 +31,9 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.security.authentication.AnonymousAuthenticationToken;
 import org.springframework.security.authentication.AuthenticationProvider;
 import org.springframework.security.authentication.InternalAuthenticationServiceException;
+import org.springframework.security.authorization.AuthorizationDecision;
 import org.springframework.security.authorization.AuthorizationManager;
+import org.springframework.security.authorization.AuthorizationResult;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.OAuth2AuthorizationServerConfiguration;
@@ -110,7 +114,7 @@ class AuthorizationServerConfiguration {
     SecurityFilterChain authorizationServer(HttpSecurity http, MfaPolicy mfa,
             Subjects subjects, OAuth2AuthorizationService authorizations, RegisteredClientRepository clients,
             AuthorizationServerSettings settings, ObjectProvider<UserRepository> users, SpiffeClients.Properties spiffe) throws Exception {
-        var requiredFactors = mfa.complete;
+        var requiredFactors = new ActiveAccount(mfa.session, users.getIfAvailable(() -> UserRepository.NONE));
         // Registered at the authorization endpoint's position before the endpoint itself (added later, while
         // building); filters of equal order keep insertion order, so this runs first.
         http.addFilterBefore(new Reauthentication(Clock.systemUTC()),
@@ -217,6 +221,24 @@ class AuthorizationServerConfiguration {
                 .defaultDeniedHandlerForMissingAuthority(new LoginUrlAuthenticationEntryPoint("/signin"),
                     FactorGrantedAuthority.PASSWORD_AUTHORITY));
         return http.build();
+    }
+
+    /**
+     * The SSO lifetime is hours, so holding the factors is not enough: an account disabled or deleted in the
+     * directory must stop entering applications at once, as it stops refreshing (RefreshPolicy). Like refresh, an
+     * unreachable directory refuses rather than assumes; a password sign-in could not succeed then either.
+     */
+    record ActiveAccount(AuthorizationManager<Object> factors, UserRepository users) implements AuthorizationManager<Object> {
+        @Override public AuthorizationResult authorize(Supplier<? extends @Nullable Authentication> authentication, Object object) {
+            var decision = factors.authorize(authentication, object);
+            if (decision == null || !decision.isGranted()) return decision;
+            if (!(authentication.get().getPrincipal() instanceof DirectoryPrincipal principal)) return new AuthorizationDecision(false);
+            try {
+                return new AuthorizationDecision(users.findActive(principal.user().id()).isPresent());
+            } catch (UserRepository.AccessFailure ex) {
+                return new AuthorizationDecision(false);
+            }
+        }
     }
 
     /**
