@@ -238,6 +238,14 @@ class WebAuthnIntegrationTests {
         var principal = context.getAuthentication().getPrincipal();
         credential(credentials, users.findByUsername(context.getAuthentication().getName()).getId(), "laptop");
         try {
+            // Identifier first: an account with a passkey is asked for it, and may switch to its password.
+            var fresh = new MockHttpSession();
+            mvc.perform(post("/signin/identify").session(fresh).with(https()).with(csrf()).param("username", "alice"))
+                .andExpect(redirectedUrl("/signin"));
+            mvc.perform(get("/signin").session(fresh).with(https()))
+                .andExpect(content().string(Matchers.containsString("\"step\":\"passkey\"")));
+            mvc.perform(get("/signin").param("method", "password").session(fresh).with(https()))
+                .andExpect(content().string(Matchers.containsString("\"step\":\"password\"")));
             passkeyOnly(context, principal, Instant.now());
             mvc.perform(get("/account").session(session).with(https())).andExpect(status().isOk());
             mvc.perform(get("/signin/complete").session(session).with(https())).andExpect(redirectedUrl("/account"));

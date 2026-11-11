@@ -17,15 +17,21 @@ test("AD HTTPS page uses native POST and keeps failed credentials out of the res
   const session = (await context.cookies()).find(cookie => cookie.name === "SESSION");
   expect(session).toMatchObject({ secure: true, httpOnly: true, sameSite: "Lax" });
   await page.getByLabel("用户名", { exact: true }).fill("ui-check@invalid.example");
+  await page.getByRole("button", { name: "继续", exact: true }).click();
+  // An unknown name gets the same password step as any account without a passkey.
+  await expect(page.getByRole("heading", { name: "输入密码", exact: true })).toBeVisible();
   await page.getByLabel("密码", { exact: true }).fill("synthetic-ui-check");
   await page.getByRole("button", { name: "继续", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText("无法验证账号");
   await expect(page.getByLabel("密码", { exact: true })).toHaveValue("");
   expect(await page.content()).not.toContain("synthetic-ui-check");
-  expect(requests.filter(request => request.method === "POST")).toEqual([
+  expect(requests.filter(request => request.method === "POST" && request.type === "document")).toEqual([
+    { method: "POST", type: "document", path: "/signin/identify" },
     { method: "POST", type: "document", path: "/signin/password" },
   ]);
-  expect(requests.filter(request => ["fetch", "xhr"].includes(request.type))).toHaveLength(0);
+  // The password goes only in the native form post; the one script request is the passkey autofill's challenge.
+  expect(requests.filter(request => ["fetch", "xhr"].includes(request.type))
+    .every(request => request.path === "/webauthn/authenticate/options")).toBe(true);
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
 });

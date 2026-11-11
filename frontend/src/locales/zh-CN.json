@@ -28,7 +28,10 @@
       "unavailable": "目录服务暂时不可用，请稍后重试。",
       "throttled": "尝试次数过多，请稍后再试。"
     },
-    "usePasskey": "使用 Passkey 登录"
+    "usePasskey": "使用 Passkey 登录",
+    "passwordHeading": "输入密码",
+    "passkeyHeading": "用 Passkey 登录",
+    "usePassword": "改用密码"
   },
   "passkey": {
     "createHeading": "设置两步验证",

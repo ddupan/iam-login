@@ -109,6 +109,33 @@ class SignInIntegrationTests {
         assertThat(session.isInvalid()).isTrue();
     }
     @Test
+    void identifierFirstGivesUnknownNamesThePasswordStepAndCountsThem() throws Exception {
+        var session = new MockHttpSession();
+        mvc.perform(get("/signin").with(https()).session(session))
+            .andExpect(content().string(Matchers.containsString("\"step\":\"identify\"")));
+        // Without passkeys (none in this context) an account signs in with its password.
+        for (int i = 0; i < 6; i++) {
+            mvc.perform(post("/signin/identify").with(https()).session(session).with(csrf()).param("username", "alice"))
+                .andExpect(status().isSeeOther()).andExpect(redirectedUrl("/signin"));
+        }
+        mvc.perform(get("/signin").with(https()).session(session))
+            .andExpect(content().string(Matchers.containsString("\"step\":\"password\"")))
+            .andExpect(content().string(Matchers.containsString("\"name\":\"alice\"")));
+        // An unknown name: the same step, but each look-up counts like a failed password.
+        var unknown = new MockHttpSession();
+        for (int i = 0; i < 5; i++) {
+            mvc.perform(post("/signin/identify").with(https()).session(unknown).with(csrf()).param("username", "nobody"))
+                .andExpect(redirectedUrl("/signin"));
+        }
+        mvc.perform(get("/signin").with(https()).session(unknown))
+            .andExpect(content().string(Matchers.containsString("\"step\":\"password\"")));
+        mvc.perform(post("/signin/identify").with(https()).session(unknown).with(csrf()).param("username", "nobody"))
+            .andExpect(redirectedUrl("/signin?error=throttled"));
+        mvc.perform(post("/signin/identify").with(https()).with(csrf()).param("username", "alice")).andExpect(redirectedUrl("/signin"));
+        mvc.perform(post("/signin/identify").with(https()).param("username", "alice")).andExpect(status().isForbidden());
+    }
+
+    @Test
     void repeatedFailuresAreRejectedWithoutAskingTheDirectory() throws Exception {
         for (int i = 0; i < 5; i++) {
             mvc.perform(post("/signin/password").with(https()).with(csrf())

@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { CsrfToken } from "../page-context";
 import { Alert } from "./Chrome";
@@ -37,11 +37,13 @@ async function post(csrf: CsrfToken, path: string, body?: unknown, failure: Prob
  * The authentication ceremony, then on to wherever the server sends the browser. The server decides whose passkey
  * it is: the account of the sign-in in progress, or (passwordless) the passkey's own.
  */
-export async function verifyPasskey(csrf: CsrfToken) {
+export async function verifyPasskey(csrf: CsrfToken, autofill?: AbortSignal) {
   supported();
   const options = await post(csrf, "/webauthn/authenticate/options");
   const credential = await navigator.credentials.get({
     publicKey: PublicKeyCredential.parseRequestOptionsFromJSON(options),
+    // Autofill: the browser offers the site's passkeys in the name field's suggestions instead of a dialog.
+    ...(autofill && { mediation: "conditional" as const, signal: autofill }),
   }) as PublicKeyCredential | null;
   if (!credential) throw new Failure("cancelled");
   // Spring Security answers with the request that was interrupted for login (it consumes the saved request);
@@ -52,12 +54,39 @@ export async function verifyPasskey(csrf: CsrfToken) {
     ? target.toString() : "/signin/complete");
 }
 
+/**
+ * Passkey autofill on the name field (autocomplete "username webauthn"): picking a passkey from the suggestions is
+ * the whole sign-in. Returns the abort for it, since only one ceremony may be pending at a time.
+ */
+export function usePasskeyAutofill(csrf: CsrfToken, onError: (problem: Problem) => void) {
+  const controller = useRef<AbortController | null>(null);
+  const report = useRef(onError);
+  useEffect(() => { report.current = onError; });
+  // Once per page (csrf does not change): a new ceremony would replace the pending challenge.
+  useEffect(() => {
+    const autofill = new AbortController();
+    controller.current = autofill;
+    void (async () => {
+      if (!(await PublicKeyCredential.isConditionalMediationAvailable?.())) return;
+      try {
+        await verifyPasskey(csrf, autofill.signal);
+      } catch (cause) {
+        // Aborted: the page started another ceremony, or is going away.
+        if (!autofill.signal.aborted) report.current(problem(cause));
+      }
+    })();
+    return () => autofill.abort();
+  }, [csrf]);
+  return () => controller.current?.abort();
+}
+
 /** Signing in with a passkey instead of the password: one ceremony is the whole sign-in. */
-export function PasskeySignIn({ csrf }: { csrf: CsrfToken }) {
+export function PasskeySignIn({ csrf, label, before }: { csrf: CsrfToken; label: string; before?: () => void }) {
   const { t } = useTranslation();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<Problem | null>(null);
   async function perform() {
+    before?.();
     setBusy(true);
     setError(null);
     try {
@@ -70,7 +99,7 @@ export function PasskeySignIn({ csrf }: { csrf: CsrfToken }) {
   return <>
     {error && <Alert>{t(`passkey.error.${error}`)}</Alert>}
     <button className="secondary" type="button" disabled={busy} onClick={perform}>
-      {busy ? t("passkey.waitingShort") : t("signin.usePasskey")}
+      {busy ? t("passkey.waitingShort") : label}
     </button>
   </>;
 }

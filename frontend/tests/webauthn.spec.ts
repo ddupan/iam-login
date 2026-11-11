@@ -8,13 +8,29 @@ test("AD + PostgreSQL + real WebAuthn ceremony, factor gating and persisted re-l
   test.skip(process.env.IAM_WEBAUTHN_FIXTURE !== "1", "Start the test-only webauthnBrowserFixture first");
   const cdp = await context.newCDPSession(page);
   await cdp.send("WebAuthn.enable");
-  await cdp.send("WebAuthn.addVirtualAuthenticator", { options: {
+  const { authenticatorId } = await cdp.send("WebAuthn.addVirtualAuthenticator", { options: {
     protocol: "ctap2", transport: "internal", hasResidentKey: true,
     hasUserVerification: true, isUserVerified: true, automaticPresenceSimulation: true,
   } });
+  // With simulated presence the authenticator answers the first screen's passkey autofill by itself, as a person
+  // picking the suggestion would: off while a test means to take another path, on for every deliberate ceremony.
+  const presence = (enabled: boolean) => cdp.send("WebAuthn.setAutomaticPresenceSimulation", { authenticatorId, enabled });
+  async function logout() {
+    await presence(false);
+    await page.getByRole("button", { name: "退出", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "登录", exact: true })).toBeVisible();
+  }
+  /** The password path: name, then (switching from the passkey once there is one) the password. */
   async function login(username = "alice") {
+    await presence(false);
     await page.goto("https://localhost:18083/signin");
     await page.getByLabel("用户名", { exact: true }).fill(username);
+    await page.getByRole("button", { name: "继续", exact: true }).click();
+    // Same URL (/signin) either way: wait for the second screen itself.
+    await expect(page.getByRole("heading", { name: /^(输入密码|用 Passkey 登录)$/ })).toBeVisible();
+    const usePassword = page.getByRole("link", { name: "改用密码", exact: true });
+    if (await usePassword.isVisible()) await usePassword.click();
+    await presence(true);
     await page.getByLabel("密码", { exact: true }).fill("fixture-password");
     await page.getByRole("button", { name: "继续", exact: true }).click();
     await expect(page).toHaveURL(/\/signin\/mfa$/);
@@ -35,7 +51,7 @@ test("AD + PostgreSQL + real WebAuthn ceremony, factor gating and persisted re-l
   await expect(page.getByRole("heading", { name: "我的账户", exact: true })).toBeVisible();
   await expect(page.getByText("gitea-admins", { exact: true })).toBeVisible();
   expect((await context.cookies()).find(c => c.name === "SESSION")!.value).not.toBe(beforeMfa);
-  await page.getByRole("button", { name: "退出", exact: true }).click();
+  await logout();
   await login();
   await expect(page.getByRole("button", { name: "创建 Passkey", exact: true })).toHaveCount(0);
   const assertionRequest = page.waitForRequest(request => new URL(request.url()).pathname === "/login/webauthn");
@@ -47,14 +63,24 @@ test("AD + PostgreSQL + real WebAuthn ceremony, factor gating and persisted re-l
     headers: { [token.headerName]: token.value }, data: assertion,
   });
   expect(replay.status()).toBe(401);
-  // Passwordless: the same passkey is the whole sign-in, no password typed; the visit resumes where it started.
-  await page.getByRole("button", { name: "退出", exact: true }).click();
+  // Passwordless: after the name, the account's passkey is the whole sign-in; the visit resumes where it started.
+  await logout();
   await page.goto("https://localhost:18083/account");
   await expect(page).toHaveURL(/\/signin$/);
+  await page.getByLabel("用户名", { exact: true }).fill("alice");
+  await page.getByRole("button", { name: "继续", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "用 Passkey 登录", exact: true })).toBeVisible();
+  await presence(true);
   await page.getByRole("button", { name: "使用 Passkey 登录", exact: true }).click();
   await expect(page).toHaveURL(/\/account$/);
   await expect(page.getByRole("heading", { name: "我的账户", exact: true })).toBeVisible();
+  // Autofill: the first screen offers the passkey in the name field's suggestions; picking it signs in without
+  // typing anything. The virtual authenticator decides when the request starts, so presence stays on through the
+  // sign-out: the first screen's request is answered as soon as it is made.
   await page.getByRole("button", { name: "退出", exact: true }).click();
+  await expect(page).toHaveURL(/\/account$/, { timeout: 10000 });
+  await expect(page.getByRole("heading", { name: "我的账户", exact: true })).toBeVisible();
+  await logout();
   await login("bob");
   // Bob has no credential. A discoverable Alice credential must not become Bob's second factor.
   const foreignStatus = await page.evaluate(async () => {
@@ -81,6 +107,7 @@ test("account page manages the account's own passkeys", async ({ page, context }
   await page.goto("https://localhost:18083/account");
   await expect(page).toHaveURL(/\/signin$/);
   await page.getByLabel("用户名", { exact: true }).fill("bob");
+  await page.getByRole("button", { name: "继续", exact: true }).click();
   await page.getByLabel("密码", { exact: true }).fill("fixture-password");
   await page.getByRole("button", { name: "继续", exact: true }).click();
   await page.getByRole("button", { name: "创建 Passkey", exact: true }).click();
@@ -125,7 +152,9 @@ test("account page manages the account's own passkeys", async ({ page, context }
   await expect(authenticator.getByRole("button", { name: "删除", exact: true })).toBeDisabled();
 
   await page.getByRole("button", { name: "退出", exact: true }).click();
+  // Bob has only the authenticator app now: the password step, then the code.
   await page.getByLabel("用户名", { exact: true }).fill("bob");
+  await page.getByRole("button", { name: "继续", exact: true }).click();
   await page.getByLabel("密码", { exact: true }).fill("fixture-password");
   await page.getByRole("button", { name: "继续", exact: true }).click();
   await expect(page.getByRole("heading", { name: "输入验证码", exact: true })).toBeVisible();
