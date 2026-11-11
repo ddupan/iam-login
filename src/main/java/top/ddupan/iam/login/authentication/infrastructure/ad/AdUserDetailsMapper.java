@@ -2,6 +2,7 @@ package top.ddupan.iam.login.authentication.infrastructure.ad;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
 import java.util.TreeMap;
@@ -58,7 +59,24 @@ final class AdUserDetailsMapper implements UserDetailsContextMapper {
         }
         return new User(new UserId(authority, guid(entry.getObjectGuid())), entry.getAccountName(),
             entry.getDisplayName() == null ? entry.getAccountName() : entry.getDisplayName(),
-            entry.getEmail() == null ? "" : entry.getEmail(), List.copyOf(groups.values()));
+            entry.getEmail() == null ? "" : entry.getEmail(), List.copyOf(groups.values()),
+            passwordChangedAt(entry.getPasswordLastSet()));
+    }
+
+    /** 100 ns intervals between 1601-01-01 (FILETIME's epoch) and 1970-01-01. */
+    private static final long FILETIME_UNIX_EPOCH = 116_444_736_000_000_000L;
+
+    /**
+     * pwdLastSet is a FILETIME. 0 means "must change at next logon" (an administrator reset or forced it); absent
+     * means unknown, which revokes nothing.
+     */
+    static Instant passwordChangedAt(String pwdLastSet) {
+        if (pwdLastSet == null || pwdLastSet.isBlank()) return null;
+        long filetime;
+        try { filetime = Long.parseLong(pwdLastSet.strip()); } catch (NumberFormatException ex) { throw new UserRepository.AccessFailure(); }
+        if (filetime == 0) return Instant.MAX;
+        long units = filetime - FILETIME_UNIX_EPOCH;
+        return Instant.ofEpochSecond(Math.floorDiv(units, 10_000_000L), Math.floorMod(units, 10_000_000L) * 100);
     }
 
     static String guid(byte[] bytes) {

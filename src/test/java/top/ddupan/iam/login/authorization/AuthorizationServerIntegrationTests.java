@@ -224,6 +224,21 @@ class AuthorizationServerIntegrationTests {
         assertThat(location(expired, authorize(verifier()))).startsWith("/signin").doesNotContain("code=");
     }
 
+    @Test void aPasswordChangedAfterSignInSendsTheBrowserToSignInAgainAndThenResumes() throws Exception {
+        var session = login(); secondFactor(session, Instant.now().minusSeconds(3600));
+        try {
+            Fixtures.DIRECTORY.passwordChanged(Instant.now().minusSeconds(600));
+            var request = authorize(verifier());
+            // The framework's missing-factor redirect; the page reads only "error".
+            assertThat(location(session, request)).startsWith("/signin?factor.type=password");
+            // Signing in again with the (new) password is enough: the second factor is still within the lifetime.
+            password(session);
+            assertThat(query(location(session, request))).containsKey("code");
+        } finally {
+            Fixtures.DIRECTORY.passwordChanged(Instant.EPOCH);
+        }
+    }
+
     @Test void codeExchangeKeepsExistingSubjectReleasesGroupsAndRefreshes() throws Exception {
         var verifier = verifier();
         var session = login(); secondFactor(session);

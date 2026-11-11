@@ -8,6 +8,8 @@ import jakarta.servlet.http.HttpServletRequest;
 import java.net.URI;
 import java.security.Principal;
 import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -31,9 +33,11 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.security.authentication.AnonymousAuthenticationToken;
 import org.springframework.security.authentication.AuthenticationProvider;
 import org.springframework.security.authentication.InternalAuthenticationServiceException;
-import org.springframework.security.authorization.AuthorizationDecision;
 import org.springframework.security.authorization.AuthorizationManager;
 import org.springframework.security.authorization.AuthorizationResult;
+import org.springframework.security.authorization.FactorAuthorizationDecision;
+import org.springframework.security.authorization.RequiredFactor;
+import org.springframework.security.authorization.RequiredFactorError;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.OAuth2AuthorizationServerConfiguration;
@@ -224,20 +228,42 @@ class AuthorizationServerConfiguration {
     }
 
     /**
-     * The SSO lifetime is hours, so holding the factors is not enough: an account disabled or deleted in the
-     * directory must stop entering applications at once, as it stops refreshing (RefreshPolicy). Like refresh, an
-     * unreachable directory refuses rather than assumes; a password sign-in could not succeed then either.
+     * The SSO lifetime is hours, so holding the factors is not enough. The directory is asked on every
+     * authorization: an account disabled or deleted there, or whose password changed after this sign-in, must not
+     * enter applications any more. The answer is "the password factor is missing", so the browser goes through
+     * the same path as any missing or stale factor (the denied handler for FACTOR_PASSWORD): sign in again (which a disabled account cannot), then the interrupted
+     * request resumes. Like refresh (RefreshPolicy), an unreachable directory refuses rather than assumes; a
+     * password sign-in could not succeed then either.
      */
     record ActiveAccount(AuthorizationManager<Object> factors, UserRepository users) implements AuthorizationManager<Object> {
-        @Override public AuthorizationResult authorize(Supplier<? extends @Nullable Authentication> authentication, Object object) {
+        /** The DC's clock against ours: a sign-in right after changing the password must not loop. */
+        private static final Duration CLOCK_SKEW = Duration.ofMinutes(1);
+        static final AuthorizationResult SIGN_IN_AGAIN = new FactorAuthorizationDecision(List.of(RequiredFactorError.createMissing(
+            RequiredFactor.withAuthority(FactorGrantedAuthority.PASSWORD_AUTHORITY).build())));
+
+        @Override public @Nullable AuthorizationResult authorize(Supplier<? extends @Nullable Authentication> authentication, Object object) {
             var decision = factors.authorize(authentication, object);
             if (decision == null || !decision.isGranted()) return decision;
-            if (!(authentication.get().getPrincipal() instanceof DirectoryPrincipal principal)) return new AuthorizationDecision(false);
+            var current = authentication.get();
+            return current != null && current.getPrincipal() instanceof DirectoryPrincipal principal
+                && stillValid(principal, passwordSignIn(current)) ? decision : SIGN_IN_AGAIN;
+        }
+
+        private boolean stillValid(DirectoryPrincipal principal, @Nullable Instant signedIn) {
             try {
-                return new AuthorizationDecision(users.findActive(principal.user().id()).isPresent());
+                var user = users.findActive(principal.user().id());
+                if (user.isEmpty()) return false;
+                var changed = user.get().passwordChangedAt();
+                return changed.isEmpty() || (signedIn != null && signedIn.plus(CLOCK_SKEW).isAfter(changed.get()));
             } catch (UserRepository.AccessFailure ex) {
-                return new AuthorizationDecision(false);
+                return false;
             }
+        }
+
+        private static @Nullable Instant passwordSignIn(Authentication authentication) {
+            return authentication.getAuthorities().stream()
+                .filter(a -> a instanceof FactorGrantedAuthority f && FactorGrantedAuthority.PASSWORD_AUTHORITY.equals(f.getAuthority()))
+                .map(a -> ((FactorGrantedAuthority) a).getIssuedAt()).findFirst().orElse(null);
         }
     }
 

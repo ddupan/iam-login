@@ -69,6 +69,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static top.ddupan.iam.login.persistence.schema.Tables.OAUTH2_AUTHORIZATION;
 import static top.ddupan.iam.login.persistence.schema.Tables.OAUTH2_AUTHORIZATION_CONSENT;
 import static top.ddupan.iam.login.persistence.schema.Tables.OAUTH2_REGISTERED_CLIENT;
+import static top.ddupan.iam.login.persistence.schema.Tables.SPRING_SESSION;
 import static top.ddupan.iam.login.persistence.schema.Tables.TOTP_CREDENTIALS;
 import static top.ddupan.iam.login.persistence.schema.Tables.USER_CREDENTIALS;
 import static top.ddupan.iam.login.persistence.schema.Tables.USER_ENTITIES;
@@ -262,14 +263,23 @@ class WebAuthnIntegrationTests {
                 .contentType("application/json").content("{\"label\":\"mine\"}")).andExpect(status().isNotFound());
             mvc.perform(delete("/account/passkeys/" + foreign).session(session).with(https()).with(csrf()))
                 .andExpect(status().isNotFound());
+            // Sessions as Spring Session JDBC stores them: this browser's, another of this account's, a stranger's.
+            storedSession(session.getId(), name);
+            var elsewhere = storedSession(UUID.randomUUID().toString(), name);
+            var theirs = storedSession(UUID.randomUUID().toString(), "example.test:stranger");
             mvc.perform(delete("/account/passkeys/" + second).session(session).with(https()).with(csrf()))
                 .andExpect(status().isNoContent());
+            // session_id is CHAR(36): a short test id comes back space-padded.
+            assertThat(db.select(SPRING_SESSION.SESSION_ID).from(SPRING_SESSION).fetch(r -> r.value1().strip()))
+                .as("the account's other sessions end; this one and other accounts' stay")
+                .contains(session.getId(), theirs).doesNotContain(elsewhere);
             mvc.perform(delete("/account/passkeys/" + first).session(session).with(https()).with(csrf()))
                 .andExpect(status().isConflict()).andExpect(jsonPath("error").value("last"));
             assertThat(credentials.findByUserId(owner)).hasSize(1);
             assertThat(credentials.findByUserId(stranger)).hasSize(1);
         } finally {
             db.deleteFrom(USER_CREDENTIALS).execute();
+            db.deleteFrom(SPRING_SESSION).execute();
             db.deleteFrom(USER_ENTITIES).where(USER_ENTITIES.ID.eq(stranger.toBase64UrlString())).execute();
         }
     }
@@ -387,5 +397,13 @@ class WebAuthnIntegrationTests {
     }
     private static RequestPostProcessor https() {
         return request -> { request.setScheme("https"); request.setSecure(true); request.setServerPort(443); return request; };
+    }
+
+    private String storedSession(String id, String owner) {
+        db.insertInto(SPRING_SESSION).set(SPRING_SESSION.PRIMARY_ID, UUID.randomUUID().toString())
+            .set(SPRING_SESSION.SESSION_ID, id).set(SPRING_SESSION.CREATION_TIME, 0L)
+            .set(SPRING_SESSION.LAST_ACCESS_TIME, 0L).set(SPRING_SESSION.MAX_INACTIVE_INTERVAL, 1800)
+            .set(SPRING_SESSION.EXPIRY_TIME, Long.MAX_VALUE).set(SPRING_SESSION.PRINCIPAL_NAME, owner).execute();
+        return id;
     }
 }
