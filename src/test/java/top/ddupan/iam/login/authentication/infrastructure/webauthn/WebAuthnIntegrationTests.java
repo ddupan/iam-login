@@ -214,9 +214,11 @@ class WebAuthnIntegrationTests {
     }
 
     @Test
-    void optionsRequireFreshPasswordEvenThoughFrameworkProcessesThemBeforeAuthorization() throws Exception {
-        mvc.perform(post("/webauthn/authenticate/options").with(https()).with(csrf()))
-            .andExpect(status().isUnauthorized());
+    void passwordlessOptionsListNoPasskeysButRegistrationStillNeedsAFreshPassword() throws Exception {
+        // Nobody signed in: a passwordless ceremony. No passkeys listed, user verification demanded.
+        mvc.perform(post("/webauthn/authenticate/options").with(https()).with(csrf())).andExpect(status().isOk())
+            .andExpect(jsonPath("allowCredentials").isEmpty()).andExpect(jsonPath("userVerification").value("required"));
+        mvc.perform(post("/webauthn/register/options").with(https()).with(csrf())).andExpect(status().is4xxClientError());
         var session = login();
         var context = (SecurityContext) session.getAttribute("SPRING_SECURITY_CONTEXT");
         var auth = context.getAuthentication();
@@ -225,6 +227,44 @@ class WebAuthnIntegrationTests {
                 .issuedAt(Instant.now().minusSeconds(601)).build())));
         mvc.perform(post("/webauthn/register/options").session(session).with(https()).with(csrf()))
             .andExpect(status().is3xxRedirection());
+    }
+
+    @Test
+    void aPasskeyAloneIsAFullSignInAndMayAddFactors(@Autowired PublicKeyCredentialUserEntityRepository users,
+            @Autowired UserCredentialRepository credentials) throws Exception {
+        var session = login();
+        mvc.perform(post("/webauthn/register/options").session(session).with(https()).with(csrf())).andExpect(status().isOk());
+        var context = (SecurityContext) session.getAttribute("SPRING_SECURITY_CONTEXT");
+        var principal = context.getAuthentication().getPrincipal();
+        credential(credentials, users.findByUsername(context.getAuthentication().getName()).getId(), "laptop");
+        try {
+            // Identifier first: an account with a passkey is asked for it, and may switch to its password.
+            var fresh = new MockHttpSession();
+            mvc.perform(post("/signin/identify").session(fresh).with(https()).with(csrf()).param("username", "alice"))
+                .andExpect(redirectedUrl("/signin"));
+            mvc.perform(get("/signin").session(fresh).with(https()))
+                .andExpect(content().string(Matchers.containsString("\"step\":\"passkey\"")));
+            mvc.perform(get("/signin").param("method", "password").session(fresh).with(https()))
+                .andExpect(content().string(Matchers.containsString("\"step\":\"password\"")));
+            passkeyOnly(context, principal, Instant.now());
+            mvc.perform(get("/account").session(session).with(https())).andExpect(status().isOk());
+            mvc.perform(get("/signin/complete").session(session).with(https())).andExpect(redirectedUrl("/account"));
+            mvc.perform(post("/webauthn/register/options").session(session).with(https()).with(csrf())).andExpect(status().isOk());
+            mvc.perform(get("/signin/totp/setup").session(session).with(https())).andExpect(status().isOk());
+            // A code is only ever the second step after the password.
+            mvc.perform(post("/signin/totp").session(session).with(https()).with(csrf()).param("code", "000000"))
+                .andExpect(redirectedUrlPattern("/signin/mfa?*"));
+            // Stale: re-verify before changing the account.
+            passkeyOnly(context, principal, Instant.now().minusSeconds(601));
+            mvc.perform(get("/account").session(session).with(https())).andExpect(status().is3xxRedirection());
+        } finally {
+            db.deleteFrom(USER_CREDENTIALS).execute();
+        }
+    }
+
+    private static void passkeyOnly(SecurityContext context, Object principal, Instant issued) {
+        context.setAuthentication(UsernamePasswordAuthenticationToken.authenticated(principal, null,
+            List.of(FactorGrantedAuthority.withAuthority(FactorGrantedAuthority.WEBAUTHN_AUTHORITY).issuedAt(issued).build())));
     }
 
     @Test

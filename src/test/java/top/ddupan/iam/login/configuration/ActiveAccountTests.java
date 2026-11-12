@@ -56,6 +56,19 @@ class ActiveAccountTests {
         assertThat(decide(true).isGranted()).as("within the DC clock skew").isTrue();
     }
 
+    @Test void aPasskeySignInAfterThePasswordChangeCounts() {
+        directory(signedIn.plusSeconds(600));
+        // Merged into the session, the old password factor stays; the later passkey is what proves the person.
+        var merged = UsernamePasswordAuthenticationToken.authenticated(new DirectoryPrincipal(user), null, List.of(
+            FactorGrantedAuthority.withAuthority(FactorGrantedAuthority.PASSWORD_AUTHORITY).issuedAt(signedIn).build(),
+            FactorGrantedAuthority.withAuthority(FactorGrantedAuthority.WEBAUTHN_AUTHORITY).issuedAt(signedIn.plusSeconds(900)).build()));
+        var gate = new AuthorizationServerConfiguration.ActiveAccount((a, o) -> new AuthorizationDecision(true), users);
+        assertThat(gate.authorize(() -> merged, new Object()).isGranted()).isTrue();
+        var passkeyBefore = UsernamePasswordAuthenticationToken.authenticated(new DirectoryPrincipal(user), null, List.of(
+            FactorGrantedAuthority.withAuthority(FactorGrantedAuthority.WEBAUTHN_AUTHORITY).issuedAt(signedIn).build()));
+        signInAgain(gate.authorize(() -> passkeyBefore, new Object()));
+    }
+
     @Test void aChangedPasswordOrAnInactiveAccountMustSignInAgain() {
         directory(signedIn.plusSeconds(600));
         signInAgain(decide(true));

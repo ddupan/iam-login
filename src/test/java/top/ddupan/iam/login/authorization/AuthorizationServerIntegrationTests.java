@@ -224,6 +224,14 @@ class AuthorizationServerIntegrationTests {
         assertThat(location(expired, authorize(verifier()))).startsWith("/signin").doesNotContain("code=");
     }
 
+    @Test void aSessionSignedInWithAPasskeyAloneOpensApplications() throws Exception {
+        var session = login();
+        var context = (SecurityContext) session.getAttribute("SPRING_SECURITY_CONTEXT");
+        context.setAuthentication(UsernamePasswordAuthenticationToken.authenticated(context.getAuthentication().getPrincipal(), null,
+            List.of(FactorGrantedAuthority.withAuthority("FACTOR_WEBAUTHN").issuedAt(Instant.now().minusSeconds(3600)).build())));
+        assertThat(query(location(session, authorize(verifier())))).containsKey("code");
+    }
+
     @Test void aPasswordChangedAfterSignInSendsTheBrowserToSignInAgainAndThenResumes() throws Exception {
         var session = login(); secondFactor(session, Instant.now().minusSeconds(3600));
         try {

@@ -16,11 +16,14 @@ import org.springframework.security.oauth2.server.authorization.client.Registere
 import org.springframework.security.web.csrf.CsrfToken;
 import org.springframework.security.web.savedrequest.HttpSessionRequestCache;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.util.UriUtils;
 import top.ddupan.iam.login.authentication.domain.User.GroupMembership;
+import top.ddupan.iam.login.authentication.domain.UserRepository;
 import top.ddupan.iam.login.authentication.infrastructure.security.DirectoryPrincipal;
+import top.ddupan.iam.login.authentication.infrastructure.security.SignInThrottle;
 import top.ddupan.iam.login.authentication.infrastructure.totp.Totp;
 import top.ddupan.iam.login.authentication.infrastructure.totp.TotpCode;
 import top.ddupan.iam.login.authentication.infrastructure.totp.TotpProperties;
@@ -34,25 +37,74 @@ public class SignInController {
     private final ObjectProvider<MfaPolicy> policies;
     private final ObjectProvider<RegisteredClientRepository> clients;
     private final ObjectProvider<TotpProperties> totp;
+    private final ObjectProvider<UserRepository> users;
+    private final SignInThrottle throttle;
+
+    /** The name entered on the first screen, and how that account signs in; plain strings (session JSON). */
+    static final String USERNAME = "iam.signin.username", METHOD = "iam.signin.method";
+    private static final int MAX_USERNAME = 256;
 
     public SignInController(PageRenderer renderer, ObjectProvider<MfaPolicy> policies,
-            ObjectProvider<RegisteredClientRepository> clients, ObjectProvider<TotpProperties> totp) {
+            ObjectProvider<RegisteredClientRepository> clients, ObjectProvider<TotpProperties> totp,
+            ObjectProvider<UserRepository> users, SignInThrottle throttle) {
         this.renderer = renderer;
         this.policies = policies;
         this.clients = clients;
         this.totp = totp;
+        this.users = users;
+        this.throttle = throttle;
     }
 
+    /**
+     * Identifier first: the name, then whatever that account signs in with. Once a name is entered (identify), the
+     * page asks for its passkey or its password; {@code method=password} switches from the passkey. "Switch
+     * account" (/signin/restart) ends the session and with it the name.
+     */
     @GetMapping(value = "/signin", produces = MediaType.TEXT_HTML_VALUE)
-    ResponseEntity<String> page(@RequestParam(required = false) String error, CsrfToken csrf,
-            HttpServletRequest request, HttpServletResponse response) {
-        return renderer.render(Map.of("step", "password", "name", "", "app", app(request, response),
+    ResponseEntity<String> page(@RequestParam(required = false) String error, @RequestParam(required = false) String method,
+            CsrfToken csrf, HttpServletRequest request, HttpServletResponse response) {
+        var session = request.getSession(false);
+        var username = session != null && session.getAttribute(USERNAME) instanceof String name ? name : "";
+        var step = username.isEmpty() ? "identify"
+            : "passkey".equals(session.getAttribute(METHOD)) && !"password".equals(method) ? "passkey" : "password";
+        return renderer.render(Map.of("step", step, "name", username, "app", app(request, response),
             // A code, not a sentence: the page translates it into the browser's language.
             "error", error == null ? "" : switch (error) {
                 case "unavailable", "throttled" -> error;
                 default -> "invalid";
             },
-            "action", "/signin/password", "csrf", csrf(csrf)));
+            "action", "identify".equals(step) ? "/signin/identify" : "/signin/password", "csrf", csrf(csrf)));
+    }
+
+    /**
+     * Which way the named account signs in: its passkey if it has one, otherwise the password. A name that is not an
+     * active account gets the password step too, exactly like an account without a passkey, so the answer tells
+     * apart only "has a passkey"; every account sets up a second factor at its first sign-in, so that is almost
+     * every account. Such names count as failures against the sign-in throttle: probing for names shares the limit
+     * with guessing passwords, while looking up one's own account never counts.
+     */
+    @PostMapping("/signin/identify")
+    ResponseEntity<Void> identify(@RequestParam(defaultValue = "") String username, HttpServletRequest request) {
+        var name = username.strip();
+        if (name.isEmpty() || name.length() > MAX_USERNAME) return seeOther("/signin");
+        if (throttle.blocked(name, request.getRemoteAddr())) return seeOther("/signin?error=throttled");
+        boolean passkey;
+        try {
+            var user = users.getIfAvailable(() -> UserRepository.NONE).findActive(name);
+            if (user.isEmpty()) throttle.failed(name, request.getRemoteAddr());
+            var policy = policies.getIfAvailable();
+            passkey = user.isPresent() && policy != null && policy.passkeys(new DirectoryPrincipal(user.get()).getName());
+        } catch (UserRepository.AccessFailure ex) {
+            return seeOther("/signin?error=unavailable");
+        }
+        var session = request.getSession();
+        session.setAttribute(USERNAME, name);
+        session.setAttribute(METHOD, passkey ? "passkey" : "password");
+        return seeOther("/signin");
+    }
+
+    private static ResponseEntity<Void> seeOther(String location) {
+        return ResponseEntity.status(303).header("Cache-Control", "no-store").location(URI.create(location)).build();
     }
 
     /**

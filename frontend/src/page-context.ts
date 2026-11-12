@@ -8,7 +8,8 @@ type PageBase = {
 };
 
 export type SignInContext = PageBase & { app: string } & (
-  | { step: "password" }
+  /** Identifier first: the name ("identify"), then that account's passkey or its password. "name" is the account. */
+  | { step: "identify" | "password" | "passkey" }
   | {
       step: "mfa-pending";
       /** "choose": nothing set up yet; otherwise the method to verify with. */
@@ -74,7 +75,7 @@ export type AccountContext = PageBase & {
 export type PageContext = SignInContext | TotpSetupContext | ConsentContext | DeviceContext | AdminContext | AccountContext
   | ErrorContext;
 
-const STEPS = ["admin", "password", "mfa-pending", "totp-setup", "consent", "device", "account", "error"];
+const STEPS = ["admin", "identify", "password", "passkey", "mfa-pending", "totp-setup", "consent", "device", "account", "error"];
 
 export function readPageContext(): PageContext {
   const data = document.getElementById("login-context")?.textContent;

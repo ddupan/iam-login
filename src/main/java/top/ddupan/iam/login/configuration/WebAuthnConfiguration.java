@@ -4,6 +4,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.util.Set;
 import org.jooq.DSLContext;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -20,6 +21,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import top.ddupan.iam.login.account.infrastructure.persistence.Grants;
 import top.ddupan.iam.login.account.infrastructure.persistence.SecondFactors;
+import top.ddupan.iam.login.authentication.domain.UserRepository;
 import top.ddupan.iam.login.authentication.infrastructure.persistence.CredentialRegistration;
 import top.ddupan.iam.login.authentication.infrastructure.security.SignInThrottle;
 import top.ddupan.iam.login.authentication.infrastructure.totp.TotpAuthenticationProvider;
@@ -61,7 +63,7 @@ class WebAuthnConfiguration {
     @Bean
     WebAuthnRelyingPartyOperations relyingParty(WebAuthnProperties properties, MfaPolicy policy,
             PublicKeyCredentialUserEntityRepository users, UserCredentialRepository credentials,
-            CredentialRegistration registrations) {
+            CredentialRegistration registrations, ObjectProvider<UserRepository> directory) {
         var delegate = new Webauthn4JRelyingPartyOperations(users, credentials,
             PublicKeyCredentialRpEntity.builder().id(properties.rpId()).name("IAM Login").build(),
             Set.of(properties.origin()));
@@ -72,7 +74,7 @@ class WebAuthnConfiguration {
         delegate.setCustomizeRequestOptions(options -> options.timeout(Duration.ofMinutes(5))
             .userVerification(UserVerificationRequirement.REQUIRED));
         return new DirectoryRelyingPartyOperations(delegate, policy, users, credentials,
-            registrations);
+            registrations, directory.getIfAvailable(() -> UserRepository.NONE));
     }
 
     @Bean

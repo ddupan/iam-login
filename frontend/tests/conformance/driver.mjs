@@ -13,6 +13,9 @@ const log = (...args) => console.log(new Date().toISOString(), ...args);
 
 const browser = await chromium.launch();
 const context = await browser.newContext({ ignoreHTTPSErrors: true, locale: "zh-CN" });
+// No passkey autofill: with automatic presence the virtual authenticator answers it as soon as the sign-in page
+// loads, racing the steps below. Autofill has its own tests (webauthn.spec.ts); here it would only add flakiness.
+await context.addInitScript(() => { PublicKeyCredential.isConditionalMediationAvailable = async () => false; });
 const page = await context.newPage();
 const cdp = await context.newCDPSession(page);
 await cdp.send("WebAuthn.enable");
@@ -51,10 +54,18 @@ async function drive(id, escaped) {
     if (!here.startsWith(OP)) { log("left OP to", here); return; }
     await fillPlaceholders(id);
     const has = name => page.getByRole("button", { name, exact: true }).isVisible().catch(() => false);
-    if (await page.getByRole("heading", { name: "登录", exact: true }).isVisible().catch(() => false)) {
+    const heading = name => page.getByRole("heading", { name, exact: true }).isVisible().catch(() => false);
+    if (await heading("登录")) {
       await page.getByLabel("用户名", { exact: true }).fill("alice");
+      await page.getByRole("button", { name: "继续", exact: true }).click();
+      // The next screen is /signin again, so waiting for the URL to change below would only time out.
+      await page.getByRole("heading", { name: /^(输入密码|用 Passkey 登录)$/ }).waitFor({ timeout: 10000 }).catch(() => {});
+      continue;
+    } else if (await heading("输入密码")) {
       await page.getByLabel("密码", { exact: true }).fill("fixture-password");
       await page.getByRole("button", { name: "继续", exact: true }).click();
+    } else if (await heading("用 Passkey 登录")) {
+      await page.getByRole("button", { name: "使用 Passkey 登录", exact: true }).click();
     } else if (await has(/^创建 passkey$/i)) {
       await page.getByRole("button", { name: /^创建 passkey$/i }).click();
       await page.getByRole("button", { name: /^用 passkey 验证$/i }).waitFor({ timeout: 10000 }).catch(() => {});

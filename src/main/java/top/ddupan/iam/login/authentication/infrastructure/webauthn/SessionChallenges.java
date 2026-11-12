@@ -21,6 +21,7 @@ import org.springframework.security.web.webauthn.api.PublicKeyCredentialCreation
 import org.springframework.security.web.webauthn.api.PublicKeyCredentialRequestOptions;
 import org.springframework.security.web.webauthn.authentication.PublicKeyCredentialRequestOptionsRepository;
 import org.springframework.security.web.webauthn.registration.PublicKeyCredentialCreationOptionsRepository;
+import top.ddupan.iam.login.authentication.infrastructure.security.DirectoryPrincipal;
 import static top.ddupan.iam.login.persistence.schema.Tables.WEBAUTHN_CHALLENGE;
 
 /**
@@ -48,10 +49,12 @@ public final class SessionChallenges {
         this.db = db;
     }
 
-    private void save(HttpServletRequest request, String purpose, Serializable options) {
+    /** Owner of a passwordless assertion challenge: no account yet, the passkey will say whose it is. */
+    static final String PASSWORDLESS = "-";
+
+    private void save(HttpServletRequest request, String purpose, String owner, Serializable options) {
         // Upstream clears after load; load already consumes atomically. Do not clear a newer challenge.
         if (options == null) return;
-        var owner = policy.current().getName();
         var session = request.getSession();
         var now = clock.instant().atOffset(ZoneOffset.UTC);
         // Expired ceremonies of anyone, and this session's previous one for the same purpose.
@@ -79,12 +82,12 @@ public final class SessionChallenges {
             .where(WEBAUTHN_CHALLENGE.ID.eq(UUID.fromString(id)), WEBAUTHN_CHALLENGE.PURPOSE.eq(purpose))
             .returning(WEBAUTHN_CHALLENGE.OWNER, WEBAUTHN_CHALLENGE.OPTIONS, WEBAUTHN_CHALLENGE.EXPIRES_AT)
             .fetchOne();
-        if (stored == null) return null;
+        if (stored == null || !clock.instant().isBefore(stored.getExpiresAt().toInstant())) return null;
+        // A challenge made for one account is useless to a session that has since become another (or none). Which
+        // factors the session needs is checked again where the result is used (DirectoryRelyingPartyOperations).
         var authentication = SecurityContextHolder.getContext().getAuthentication();
-        if (!clock.instant().isBefore(stored.getExpiresAt().toInstant())
-                || authentication == null || !stored.getOwner().equals(authentication.getName())) return null;
-        var result = policy.password.authorize(() -> authentication, null);
-        if (result == null || !result.isGranted()) return null;
+        if (!PASSWORDLESS.equals(stored.getOwner())
+                && (authentication == null || !stored.getOwner().equals(authentication.getName()))) return null;
         return deserialize(stored.getOptions());
     }
 
@@ -111,7 +114,7 @@ public final class SessionChallenges {
         return new PublicKeyCredentialCreationOptionsRepository() {
             private static final String PURPOSE = "iam.webauthn.registration";
             @Override public void save(HttpServletRequest r, HttpServletResponse s, PublicKeyCredentialCreationOptions o) {
-                SessionChallenges.this.save(r, PURPOSE, o);
+                SessionChallenges.this.save(r, PURPOSE, policy.signedIn().getName(), o);
             }
             @Override public PublicKeyCredentialCreationOptions load(HttpServletRequest r) {
                 return (PublicKeyCredentialCreationOptions) consume(r, PURPOSE);
@@ -123,7 +126,7 @@ public final class SessionChallenges {
         return new PublicKeyCredentialRequestOptionsRepository() {
             private static final String PURPOSE = "iam.webauthn.authentication";
             @Override public void save(HttpServletRequest r, HttpServletResponse s, PublicKeyCredentialRequestOptions o) {
-                SessionChallenges.this.save(r, PURPOSE, o);
+                SessionChallenges.this.save(r, PURPOSE, policy.secondStep().map(DirectoryPrincipal::getName).orElse(PASSWORDLESS), o);
             }
             @Override public PublicKeyCredentialRequestOptions load(HttpServletRequest r) {
                 return (PublicKeyCredentialRequestOptions) consume(r, PURPOSE);

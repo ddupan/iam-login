@@ -81,9 +81,16 @@ class SessionChallengesTests {
         repository.save(request, response, second);
         repository.save(request, response, null);
         assertThat(challenge(repository.load(request))).isEqualTo(challenge(second));
+        // A second step's challenge belongs to its account: not to a session that is no longer it.
         repository.save(request, response, first);
-        identify("alice", issued.minusSeconds(601));
+        SecurityContextHolder.clearContext();
         assertThat(repository.load(request)).isNull();
+        // Without a fresh password the session is signing in afresh (passwordless): the challenge belongs to no one
+        // yet, and the passkey it is answered with will say whose it is.
+        identify("alice", issued.minusSeconds(601));
+        repository.save(request, response, second);
+        SecurityContextHolder.clearContext();
+        assertThat(challenge(repository.load(request))).isEqualTo(challenge(second));
     }
 
     // Requests of one session each load their own copy of it (sessions live in the database), so two

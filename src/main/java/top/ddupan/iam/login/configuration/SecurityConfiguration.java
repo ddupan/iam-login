@@ -52,10 +52,20 @@ class SecurityConfiguration {
             .build();
     }
 
+    /**
+     * Password failures, and look-ups of names that are not active accounts (SignInController.identify): one set of
+     * counters, so probing for names and guessing passwords share the per-address limit.
+     */
+    @Bean
+    @ConditionalOnProperty(prefix = "iam.ad", name = "enabled", havingValue = "true")
+    SignInThrottle signInThrottle(SignInThrottle.Properties properties) {
+        return new SignInThrottle(properties, Clock.systemUTC());
+    }
+
     @Bean
     @Order(3)
     @ConditionalOnProperty(prefix = "iam.ad", name = "enabled", havingValue = "true")
-    SecurityFilterChain browser(HttpSecurity http, AdProperties ad, LdapProperties ldap, SignInThrottle.Properties throttle,
+    SecurityFilterChain browser(HttpSecurity http, AdProperties ad, LdapProperties ldap, SignInThrottle throttle,
             ObjectProvider<WebAuthnBrowserConfigurer> webAuthn) throws Exception {
         var passwordFactor = AuthorizationManagerFactories.<RequestAuthorizationContext>multiFactor()
             .requireFactor(factor -> factor.passwordAuthority().validDuration(Duration.ofMinutes(10)))
@@ -65,8 +75,7 @@ class SecurityConfiguration {
         http.securityMatcher("/", "/signin", "/signin/**", "/assets/**", "/webauthn/**", "/login/webauthn", "/account", "/account/**")
             .redirectToHttps(Customizer.withDefaults())
             .authenticationManager(new ProviderManager(
-                new DirectoryAuthenticationProvider(ActiveDirectory.provider(ad, ldap), ad.domain(),
-                    new SignInThrottle(throttle, Clock.systemUTC()))))
+                new DirectoryAuthenticationProvider(ActiveDirectory.provider(ad, ldap), ad.domain(), throttle)))
             .authorizeHttpRequests(auth -> {
                 if (mfa != null) {
                     auth.requestMatchers("/signin/complete").access(mfa.policy.complete);
@@ -75,13 +84,13 @@ class SecurityConfiguration {
                     // before adding, renaming or removing a factor or revoking an application.
                     auth.requestMatchers("/account", "/account/**").access(mfa.policy.complete);
                     auth.requestMatchers(HttpMethod.POST, "/webauthn/register")
-                        .access(mfa.policy.password);
+                        .access(mfa.policy.enroll);
                     // Like adding a passkey; the page itself asks for the second factor too once one exists.
-                    auth.requestMatchers(HttpMethod.GET, WebAuthnBrowserConfigurer.TOTP_SETUP).access(mfa.policy.password);
+                    auth.requestMatchers(HttpMethod.GET, WebAuthnBrowserConfigurer.TOTP_SETUP).access(mfa.policy.enroll);
                 }
                 // /signin/device decides itself: it saves the request before sending a visitor to sign in.
                 // "/" only redirects to /account, which then asks for whatever sign-in is missing.
-                auth.requestMatchers("/", "/error", "/signin", "/signin/password", "/signin/device", "/assets/**").permitAll()
+                auth.requestMatchers("/", "/error", "/signin", "/signin/identify", "/signin/password", "/signin/device", "/assets/**").permitAll()
                 .requestMatchers("/signin/mfa").access(passwordFactor.authenticated())
                 // The framework's credential deletion (DELETE /webauthn/register/{id}, no last-factor rule) and all
                 // unimplemented routes remain closed; removal goes through /account.

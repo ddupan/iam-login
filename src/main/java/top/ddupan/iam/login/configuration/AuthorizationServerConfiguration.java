@@ -229,8 +229,9 @@ class AuthorizationServerConfiguration {
 
     /**
      * The SSO lifetime is hours, so holding the factors is not enough. The directory is asked on every
-     * authorization: an account disabled or deleted there, or whose password changed after this sign-in, must not
-     * enter applications any more. The answer is "the password factor is missing", so the browser goes through
+     * authorization: an account disabled or deleted there, or whose password changed after this sign-in (by
+     * password or by passkey, whichever came last: a passkey sign-in after the change proves the person anew,
+     * while merging into the session keeps the old password factor), must not enter applications any more. The answer is "the password factor is missing", so the browser goes through
      * the same path as any missing or stale factor (the denied handler for FACTOR_PASSWORD): sign in again (which a disabled account cannot), then the interrupted
      * request resumes. Like refresh (RefreshPolicy), an unreachable directory refuses rather than assumes; a
      * password sign-in could not succeed then either.
@@ -238,6 +239,8 @@ class AuthorizationServerConfiguration {
     record ActiveAccount(AuthorizationManager<Object> factors, UserRepository users) implements AuthorizationManager<Object> {
         /** The DC's clock against ours: a sign-in right after changing the password must not loop. */
         private static final Duration CLOCK_SKEW = Duration.ofMinutes(1);
+        private static final Set<String> SIGN_IN_FACTORS =
+            Set.of(FactorGrantedAuthority.PASSWORD_AUTHORITY, FactorGrantedAuthority.WEBAUTHN_AUTHORITY);
         static final AuthorizationResult SIGN_IN_AGAIN = new FactorAuthorizationDecision(List.of(RequiredFactorError.createMissing(
             RequiredFactor.withAuthority(FactorGrantedAuthority.PASSWORD_AUTHORITY).build())));
 
@@ -246,7 +249,7 @@ class AuthorizationServerConfiguration {
             if (decision == null || !decision.isGranted()) return decision;
             var current = authentication.get();
             return current != null && current.getPrincipal() instanceof DirectoryPrincipal principal
-                && stillValid(principal, passwordSignIn(current)) ? decision : SIGN_IN_AGAIN;
+                && stillValid(principal, lastSignIn(current)) ? decision : SIGN_IN_AGAIN;
         }
 
         private boolean stillValid(DirectoryPrincipal principal, @Nullable Instant signedIn) {
@@ -260,10 +263,11 @@ class AuthorizationServerConfiguration {
             }
         }
 
-        private static @Nullable Instant passwordSignIn(Authentication authentication) {
+        /** The latest password or passkey factor; an authenticator app code never stands alone. */
+        private static @Nullable Instant lastSignIn(Authentication authentication) {
             return authentication.getAuthorities().stream()
-                .filter(a -> a instanceof FactorGrantedAuthority f && FactorGrantedAuthority.PASSWORD_AUTHORITY.equals(f.getAuthority()))
-                .map(a -> ((FactorGrantedAuthority) a).getIssuedAt()).findFirst().orElse(null);
+                .filter(a -> a instanceof FactorGrantedAuthority f && SIGN_IN_FACTORS.contains(f.getAuthority()))
+                .map(a -> ((FactorGrantedAuthority) a).getIssuedAt()).max(Instant::compareTo).orElse(null);
         }
     }
 

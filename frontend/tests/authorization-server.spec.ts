@@ -23,10 +23,12 @@ test("AD + passkey -> in-process authorization server: consent, tokens, userinfo
   test.skip(process.env.IAM_AUTHORIZATION_SERVER_FIXTURE !== "1", "Start authorizationServerBrowserFixture; never runs against production");
   const cdp = await context.newCDPSession(page);
   await cdp.send("WebAuthn.enable");
-  await cdp.send("WebAuthn.addVirtualAuthenticator", { options: {
+  const { authenticatorId } = await cdp.send("WebAuthn.addVirtualAuthenticator", { options: {
     protocol: "ctap2", transport: "internal", hasResidentKey: true,
     hasUserVerification: true, isUserVerified: true, automaticPresenceSimulation: true,
   } });
+  // Simulated presence also answers the sign-in page's passkey autofill by itself, as a person picking it would.
+  const presence = (enabled: boolean) => cdp.send("WebAuthn.setAutomaticPresenceSimulation", { authenticatorId, enabled });
   const discovery = await context.request.get(`${ISSUER}/.well-known/openid-configuration`).then(r => r.json());
   expect(discovery.issuer).toBe(ISSUER);
   const verifier = randomBytes(32).toString("base64url");
@@ -41,6 +43,7 @@ test("AD + passkey -> in-process authorization server: consent, tokens, userinfo
   await page.goto(authorize.toString());
   await expect(page.getByRole("heading", { name: "登录", exact: true })).toBeVisible();
   await page.getByLabel("用户名", { exact: true }).fill("alice");
+  await page.getByRole("button", { name: "继续", exact: true }).click();
   await page.getByLabel("密码", { exact: true }).fill("fixture-password");
   await page.getByRole("button", { name: "继续", exact: true }).click();
   await page.getByRole("button", { name: "创建 Passkey", exact: true }).click();
@@ -88,16 +91,16 @@ test("AD + passkey -> in-process authorization server: consent, tokens, userinfo
   logout.search = new URLSearchParams({ id_token_hint: latest.id_token, post_logout_redirect_uri: "http://localhost:14446/logged-out" }).toString();
   await page.goto(logout.toString());
   await expect.poll(() => new URL(page.url()).origin + new URL(page.url()).pathname).toBe("http://localhost:14446/logged-out");
+  await presence(false);
   await page.goto(authorize.toString());
   await expect(page.getByRole("heading", { name: "登录", exact: true })).toBeVisible();
+  await presence(true);
 
   // Console: a public client of this same server; the client API only accepts its bearer token.
   expect((await context.request.get(`${ISSUER}/api/iam/clients`, { headers: { Authorization: `Bearer ${latest.access_token}` } })).status()).toBe(403);
+  // Alice has a passkey now: the sign-in page offers it in the name field's suggestions (passkey autofill), which
+  // the virtual authenticator's simulated presence picks. The passkey alone signs her in; no name, no password.
   await page.goto(`${ISSUER}/console`);
-  await page.getByLabel("用户名", { exact: true }).fill("alice");
-  await page.getByLabel("密码", { exact: true }).fill("fixture-password");
-  await page.getByRole("button", { name: "继续", exact: true }).click();
-  await page.getByRole("button", { name: "用 Passkey 验证", exact: true }).click();
   await expect(page.getByRole("heading", { name: "OIDC 客户端", level: 1 })).toBeVisible();
   expect(new URL(page.url()).pathname).toBe("/console");
   await expect(page.getByRole("row", { name: /fixture-rp/ })).toBeVisible();
