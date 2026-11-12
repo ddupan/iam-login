@@ -13,7 +13,8 @@ on:
 jobs:
   security-scan:
     # Cloud pool (GKE Autopilot): the scanners are installed on the runner, no Docker or LAN needed.
-    runs-on: [cloud]
+    # The scanners peak around 300 MiB: the small size (0.5 vCPU / 1 GiB) shares a node with other cloud jobs.
+    runs-on: [cloud, small]
     steps:
       - uses: actions/checkout@v7
       - uses: https://git.ddupan.top/panxiao81/ci-actions/security-scan@v1
