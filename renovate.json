@@ -31,6 +31,12 @@
       "description": "The browser images in scripts/conformance and scripts/native-smoke must match @playwright/test; after the conformance rule so it wins.",
       "matchDepNames": ["@playwright/test", "mcr.microsoft.com/playwright"],
       "groupName": "playwright"
+    },
+    {
+      "description": "react-i18next pins i18next as a peer (18 needs >= 27.0.1); updated apart, the react-i18next PR cannot resolve its lockfile. One PR, majors included.",
+      "matchDepNames": ["i18next", "react-i18next"],
+      "groupName": "i18next",
+      "separateMajorMinor": false
     }
   ],
   "customManagers": [
