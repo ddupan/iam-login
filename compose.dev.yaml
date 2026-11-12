@@ -1,7 +1,7 @@
 # Only the development credential database. Supply IAM_DEV_DB_PASSWORD outside Git.
 services:
   postgres:
-    image: postgres:18.6
+    image: postgres:18.7
     environment:
       POSTGRES_DB: iam_login
       POSTGRES_USER: iam_login
