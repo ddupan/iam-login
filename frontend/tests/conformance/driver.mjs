@@ -13,6 +13,9 @@ const log = (...args) => console.log(new Date().toISOString(), ...args);
 
 const browser = await chromium.launch();
 const context = await browser.newContext({ ignoreHTTPSErrors: true, locale: "zh-CN" });
+// No passkey autofill: with automatic presence the virtual authenticator answers it as soon as the sign-in page
+// loads, racing the steps below. Autofill has its own tests (webauthn.spec.ts); here it would only add flakiness.
+await context.addInitScript(() => { PublicKeyCredential.isConditionalMediationAvailable = async () => false; });
 const page = await context.newPage();
 const cdp = await context.newCDPSession(page);
 await cdp.send("WebAuthn.enable");
