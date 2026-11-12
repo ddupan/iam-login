@@ -12,12 +12,11 @@ on:
 
 jobs:
   security-scan:
-    runs-on: [self-hosted, pod]
+    # Cloud pool (GKE Autopilot): the scanners are installed on the runner, no Docker or LAN needed.
+    runs-on: [cloud]
     steps:
       - uses: actions/checkout@v7
-      - uses: https://git.ddupan.top/panxiao81/ci-actions/setup-artifact-keeper@v1
-        with:
-          pypi: 'true'   # semgrep is installed from the PyPI cache
       - uses: https://git.ddupan.top/panxiao81/ci-actions/security-scan@v1
         with:
+          cloud: 'true'   # scanners come from GitHub and PyPI, not the Artifact Keeper caches
           semgrep-config: p/default p/java p/typescript p/react
