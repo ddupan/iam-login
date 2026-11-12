@@ -100,7 +100,9 @@ test("AD + passkey -> in-process authorization server: consent, tokens, userinfo
   expect((await context.request.get(`${ISSUER}/api/iam/clients`, { headers: { Authorization: `Bearer ${latest.access_token}` } })).status()).toBe(403);
   // Alice has a passkey now: the sign-in page offers it in the name field's suggestions (passkey autofill), which
   // the virtual authenticator's simulated presence picks. The passkey alone signs her in; no name, no password.
-  await page.goto(`${ISSUER}/console`);
+  // The autofill navigates on as soon as the sign-in page runs, so waiting for that page's load would abort
+  // (the native binary is fast enough to hit it); the heading below waits for the console instead.
+  await page.goto(`${ISSUER}/console`, { waitUntil: "commit" });
   await expect(page.getByRole("heading", { name: "OIDC 客户端", level: 1 })).toBeVisible();
   expect(new URL(page.url()).pathname).toBe("/console");
   await expect(page.getByRole("row", { name: /fixture-rp/ })).toBeVisible();
