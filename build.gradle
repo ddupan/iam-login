@@ -97,6 +97,12 @@ tasks.named('processAot') {
 // Native tests check behavior, not throughput. Keep the application binary optimized.
 graalvmNative {
 	binaries {
+		// native-image takes 80% of the container as heap by default, and its off-heap use (~1.4 GB) plus the
+		// Gradle daemon then push past CI's 7g (IAM_BUILD_MEMORY in ci.yml): the kernel killed it (exit 137)
+		// twice on 2026-11-12. A fixed heap makes the builder collect sooner instead.
+		main {
+			jvmArgs.add('-Xmx5g')
+		}
 		test {
 			quickBuild = true
 			runtimeArgs.add(providers.systemProperty('user.home').map { "-Duser.home=${it}" })
