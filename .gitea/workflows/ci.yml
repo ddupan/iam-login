@@ -14,7 +14,7 @@ jobs:
   jvm:
     # Each executor Pod is capped at 2 CPU / 4Gi (dynamic-runner LimitRange) and starts empty, so the
     # dependency caches come from the actions cache instead of the runner's disk.
-    runs-on: [self-hosted, pod]
+    runs-on: [self-hosted]
     env:
       IAM_GRADLE_CACHE: /tmp/iam-ci/gradle
       IAM_NPM_CACHE: /tmp/iam-ci/npm
@@ -61,7 +61,7 @@ jobs:
   publish:
     if: github.event_name == 'workflow_dispatch'
     needs: jvm
-    runs-on: [self-hosted, container, large]
+    runs-on: [self-hosted-large]
     env:
       IAM_GRADLE_CACHE: /tmp/iam-ci/gradle
       IAM_NPM_CACHE: /tmp/iam-ci/npm
