@@ -810,7 +810,15 @@ class AuthorizationServerIntegrationTests {
                 .param("grant_type", "urn:ietf:params:oauth:grant-type:device_code")
                 .param("device_code", (String) device.get("device_code")).param("client_id", "device-app"))
             .andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
-        assertThat(tokens).containsKeys("access_token", "refresh_token");
+        assertThat(tokens).containsKeys("access_token", "refresh_token", "id_token");
+        // OIDC clients (kubelogin) need the ID token; the framework's device grant leaves it out (DeviceIdToken).
+        var idToken = claims((String) tokens.get("id_token"));
+        assertThat(idToken.get("aud")).isEqualTo("device-app");
+        assertThat(idToken.get("sub")).isEqualTo(claims((String) tokens.get("access_token")).get("sub"));
+        // The framework's refresh issues a new ID token for openid and requires the stored one.
+        mvc.perform(post("/oauth2/token").with(https()).param("grant_type", "refresh_token")
+                .param("client_id", "device-app").param("refresh_token", (String) tokens.get("refresh_token")))
+            .andExpect(status().isOk()).andExpect(jsonPath("id_token").isString());
 
         mvc.perform(get("/oauth2/device_verification?user_code=BCDF-GHJK").with(https()).session(session))
             .andExpect(redirectedUrl("/signin/device?result=invalid"));
