@@ -45,15 +45,18 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.core.authority.AuthorityUtils;
 import org.springframework.security.core.authority.FactorGrantedAuthority;
+import org.springframework.security.oauth2.core.AuthorizationGrantType;
 import org.springframework.security.oauth2.core.ClientAuthenticationMethod;
 import org.springframework.security.oauth2.core.OAuth2AuthenticationException;
 import org.springframework.security.oauth2.core.OAuth2Error;
 import org.springframework.security.oauth2.core.OAuth2ErrorCodes;
+import org.springframework.security.oauth2.core.OAuth2Token;
 import org.springframework.security.oauth2.core.endpoint.OAuth2ParameterNames;
 import org.springframework.security.oauth2.core.oidc.OidcIdToken;
 import org.springframework.security.oauth2.core.oidc.OidcScopes;
 import org.springframework.security.oauth2.core.oidc.OidcUserInfo;
 import org.springframework.security.oauth2.core.oidc.endpoint.OidcParameterNames;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.JwtEncoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
@@ -63,6 +66,7 @@ import org.springframework.security.oauth2.server.authorization.OAuth2Authorizat
 import org.springframework.security.oauth2.server.authorization.OAuth2AuthorizationConsentService;
 import org.springframework.security.oauth2.server.authorization.OAuth2AuthorizationService;
 import org.springframework.security.oauth2.server.authorization.OAuth2TokenType;
+import org.springframework.security.oauth2.server.authorization.authentication.OAuth2AccessTokenAuthenticationToken;
 import org.springframework.security.oauth2.server.authorization.authentication.OAuth2AuthorizationCodeRequestAuthenticationContext;
 import org.springframework.security.oauth2.server.authorization.authentication.OAuth2AuthorizationCodeRequestAuthenticationException;
 import org.springframework.security.oauth2.server.authorization.authentication.OAuth2AuthorizationCodeRequestAuthenticationProvider;
@@ -74,6 +78,7 @@ import org.springframework.security.oauth2.server.authorization.authentication.O
 import org.springframework.security.oauth2.server.authorization.authentication.OAuth2DeviceAuthorizationConsentAuthenticationToken;
 import org.springframework.security.oauth2.server.authorization.authentication.OAuth2DeviceAuthorizationRequestAuthenticationProvider;
 import org.springframework.security.oauth2.server.authorization.authentication.OAuth2DeviceAuthorizationRequestAuthenticationToken;
+import org.springframework.security.oauth2.server.authorization.authentication.OAuth2DeviceCodeAuthenticationProvider;
 import org.springframework.security.oauth2.server.authorization.authentication.OAuth2DeviceVerificationAuthenticationToken;
 import org.springframework.security.oauth2.server.authorization.authentication.OAuth2RefreshTokenAuthenticationToken;
 import org.springframework.security.oauth2.server.authorization.authentication.OAuth2TokenExchangeAuthenticationProvider;
@@ -81,6 +86,8 @@ import org.springframework.security.oauth2.server.authorization.client.JdbcRegis
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClientRepository;
 import org.springframework.security.oauth2.server.authorization.oidc.authentication.OidcUserInfoAuthenticationContext;
 import org.springframework.security.oauth2.server.authorization.settings.AuthorizationServerSettings;
+import org.springframework.security.oauth2.server.authorization.context.AuthorizationServerContextHolder;
+import org.springframework.security.oauth2.server.authorization.token.DefaultOAuth2TokenContext;
 import org.springframework.security.oauth2.server.authorization.token.DelegatingOAuth2TokenGenerator;
 import org.springframework.security.oauth2.server.authorization.token.JwtEncodingContext;
 import org.springframework.security.oauth2.server.authorization.token.JwtGenerator;
@@ -117,7 +124,8 @@ class AuthorizationServerConfiguration {
     @Bean @Order(2)
     SecurityFilterChain authorizationServer(HttpSecurity http, MfaPolicy mfa,
             Subjects subjects, OAuth2AuthorizationService authorizations, RegisteredClientRepository clients,
-            AuthorizationServerSettings settings, ObjectProvider<UserRepository> users, SpiffeClients.Properties spiffe) throws Exception {
+            AuthorizationServerSettings settings, ObjectProvider<UserRepository> users, SpiffeClients.Properties spiffe,
+            OAuth2TokenGenerator<? extends OAuth2Token> tokens) throws Exception {
         var requiredFactors = new ActiveAccount(mfa.session, users.getIfAvailable(() -> UserRepository.NONE));
         // Registered at the authorization endpoint's position before the endpoint itself (added later, while
         // building); filters of equal order keep insertion order, so this runs first.
@@ -203,6 +211,8 @@ class AuthorizationServerConfiguration {
                         .ifPresent(clientCredentials -> providers.replaceAll(provider ->
                             provider instanceof OAuth2TokenExchangeAuthenticationProvider
                                 ? new SpiffeClients.Exchange(clientCredentials, provider) : provider));
+                    providers.replaceAll(provider -> provider instanceof OAuth2DeviceCodeAuthenticationProvider
+                        ? new DeviceIdToken(provider, authorizations, tokens) : provider);
                 }));
         })
             // Only the user-facing endpoint needs a human with both factors; token, introspection and
@@ -317,7 +327,8 @@ class AuthorizationServerConfiguration {
      * The framework refuses openid in a device authorization request (the device grant issues no ID token), but OIDC
      * clients ask for it there too: Incus requests its configured scopes, openid included. Neither OIDC nor RFC 8628
      * forbids it. The request is validated and issued without openid, then openid is put back among the requested
-     * scopes, so consent shows it and the access token carries it (userinfo needs it). Still no ID token.
+     * scopes, so consent shows it and the access token carries it (userinfo needs it). The ID token comes from
+     * DeviceIdToken at the token endpoint.
      */
     record DeviceOpenIdScope(AuthenticationProvider framework, OAuth2AuthorizationService authorizations) implements AuthenticationProvider {
         private static final OAuth2TokenType DEVICE_CODE = new OAuth2TokenType(OAuth2ParameterNames.DEVICE_CODE);
@@ -341,6 +352,44 @@ class AuthorizationServerConfiguration {
         @Override public boolean supports(Class<?> candidate) {
             return OAuth2DeviceAuthorizationRequestAuthenticationToken.class.isAssignableFrom(candidate);
         }
+    }
+
+    /**
+     * The framework's device grant issues no ID token even when openid was authorized, but OIDC clients need one:
+     * kubelogin fails without it, and the framework's own refresh then asserts an ID token exists for openid. Like
+     * the refresh grant, one is issued whenever the authorized scopes include openid, with the same generator and
+     * claims, and stored with the authorization (userinfo reads its claims). No nonce: RFC 8628 has no parameter for it.
+     */
+    record DeviceIdToken(AuthenticationProvider framework, OAuth2AuthorizationService authorizations,
+            OAuth2TokenGenerator<? extends OAuth2Token> tokens) implements AuthenticationProvider {
+        private static final OAuth2TokenType ID_TOKEN = new OAuth2TokenType(OidcParameterNames.ID_TOKEN);
+
+        @Override public @Nullable Authentication authenticate(Authentication request) throws AuthenticationException {
+            var issued = (OAuth2AccessTokenAuthenticationToken) framework.authenticate(request);
+            if (issued == null || !issued.getAccessToken().getScopes().contains(OidcScopes.OPENID)) return issued;
+            var authorization = authorizations.findByToken(issued.getAccessToken().getTokenValue(), OAuth2TokenType.ACCESS_TOKEN);
+            if (authorization == null) throw new OAuth2AuthenticationException(OAuth2ErrorCodes.SERVER_ERROR);
+            var generated = tokens.generate(DefaultOAuth2TokenContext.builder()
+                .registeredClient(issued.getRegisteredClient())
+                .principal(authorization.getAttribute(Principal.class.getName()))
+                .authorizationServerContext(AuthorizationServerContextHolder.getContext())
+                .authorization(authorization)
+                .authorizedScopes(authorization.getAuthorizedScopes())
+                .authorizationGrantType(AuthorizationGrantType.DEVICE_CODE)
+                .authorizationGrant(request)
+                .tokenType(ID_TOKEN)
+                .build());
+            if (!(generated instanceof Jwt jwt)) throw new OAuth2AuthenticationException(OAuth2ErrorCodes.SERVER_ERROR);
+            var idToken = new OidcIdToken(jwt.getTokenValue(), jwt.getIssuedAt(), jwt.getExpiresAt(), jwt.getClaims());
+            authorizations.save(OAuth2Authorization.from(authorization)
+                .token(idToken, metadata -> metadata.put(OAuth2Authorization.Token.CLAIMS_METADATA_NAME, idToken.getClaims()))
+                .build());
+            var parameters = new HashMap<>(issued.getAdditionalParameters());
+            parameters.put(OidcParameterNames.ID_TOKEN, idToken.getTokenValue());
+            return new OAuth2AccessTokenAuthenticationToken(issued.getRegisteredClient(), (Authentication) issued.getPrincipal(),
+                issued.getAccessToken(), issued.getRefreshToken(), parameters);
+        }
+        @Override public boolean supports(Class<?> candidate) { return framework.supports(candidate); }
     }
 
     /** A client disabled for login gets no device code either (requestPolicy covers the authorization endpoint). */
