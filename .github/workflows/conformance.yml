@@ -36,6 +36,8 @@ jobs:
             /tmp/iam-ci/npm
           key: iam-jvm-${{ hashFiles('build.gradle', 'gradle/wrapper/gradle-wrapper.properties', 'frontend/package-lock.json') }}
           restore-keys: iam-jvm-
+      - name: Maven Central mirror
+        run: install -D -m 644 .github/gradle/central-mirror.init.gradle "$IAM_GRADLE_CACHE/init.d/central-mirror.gradle"
       - uses: actions/cache@v6
         with:
           path: /tmp/iam-ci/conformance

@@ -1,0 +1,20 @@
+// CI only, installed into GRADLE_USER_HOME/init.d by the workflows. GitHub-hosted runners share egress IPs that
+// Maven Central rate-limits (403/429), which failed plugin and dependency resolution at random; Google's mirror of
+// Central does not. Plugins are looked up there first (Boot, GraalVM, jOOQ and Error Prone publish to Central),
+// then on the Plugin Portal.
+def mirror = System.getenv('IAM_MAVEN_MIRROR') ?: 'https://maven-central.storage-download.googleapis.com/maven2/'
+
+beforeSettings { settings ->
+    settings.pluginManagement.repositories {
+        maven { name = 'CentralMirror'; url = mirror }
+        gradlePluginPortal()
+    }
+}
+
+beforeProject { project ->
+    project.repositories.withType(MavenArtifactRepository).configureEach { repo ->
+        if (repo.url.toString().startsWith('https://repo.maven.apache.org/maven2')) {
+            repo.url = mirror
+        }
+    }
+}
