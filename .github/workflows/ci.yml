@@ -92,3 +92,41 @@ jobs:
           name: iam-login-linux-amd64
           path: build/native/nativeCompile/iam-login
           if-no-files-found: error
+
+  # Ships the binary the native job tested: on the homelab ARC runner (runs-on: homelab), because zot
+  # is LAN-only and authorizes by SPIFFE ID. The SVID comes from spire-identity-exchange, and its
+  # SPIRE entry (homelab-infra platform/spire/github-ci.yaml) matches only this repository's ci.yml
+  # on refs/heads/main for push events; a branch or PR run could not get it even on this runner.
+  publish:
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: [jvm, native]
+    runs-on: homelab
+    permissions:
+      contents: read
+      id-token: write   # GitHub OIDC token, one half of the exchange's proof
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v7
+        with:
+          name: iam-login-linux-amd64
+          path: build/native/nativeCompile
+      # Artifacts do not keep file modes.
+      - run: chmod 755 build/native/nativeCompile/iam-login
+      - id: svid
+        uses: ddupan/ci-actions/spiffe-jwt-svid@v1
+        with:
+          audience: zot
+      - name: Log in to zot
+        env:
+          SVID: ${{ steps.svid.outputs.svid }}
+        run: |
+          DOCKER_CONFIG=$(mktemp -d)
+          echo "DOCKER_CONFIG=$DOCKER_CONFIG" >>"$GITHUB_ENV"
+          printf '%s' "$SVID" | DOCKER_CONFIG=$DOCKER_CONFIG docker login zot.lab.ddupan.top --username zot --password-stdin >/dev/null
+      - name: Publish image
+        run: scripts/publish-image
+      - name: Remove registry credentials
+        if: always()
+        run: rm -rf -- "${DOCKER_CONFIG:-/nonexistent}"

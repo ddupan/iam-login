@@ -1,26 +1,13 @@
 #!/usr/bin/env bash
-# Packages the native binary that just passed the browser test and pushes it to zot, so the
-# image that ships is the binary CI tested (no separate release build). Runs in the "publish" job,
-# whose executor Pod has the identity spiffe://ddupan.top/ci/panxiao81/iam-login/publish.
-# The JWT-SVID only travels through a pipe and a throwaway DOCKER_CONFIG.
+# Packages the native binary that passed the browser test (CI's native job, handed over as an
+# artifact) and pushes it to zot, so the image that ships is the binary CI tested (no separate
+# release build). Runs in ci.yml's publish job on the homelab ARC runner, after the workflow has
+# logged in to zot with the JWT-SVID spiffe://ddupan.top/ci/github/ddupan/iam-login/ci.
 set -euo pipefail
 
 repo=zot.lab.ddupan.top/iam/iam-login
 tag=${GITHUB_SHA:?}
-socket=${SPIRE_AGENT_SOCKET:-/run/spire/agent-sockets/spire-agent.sock}
 
 docker build -q -t "$repo:$tag" .
-
-export DOCKER_CONFIG
-DOCKER_CONFIG=$(mktemp -d)
-trap 'rm -rf -- "$DOCKER_CONFIG"' EXIT
-spire-agent api fetch jwt -audience zot -output json -socketPath "$socket" | python3 -c '
-import json, sys
-blocks = json.load(sys.stdin)
-blocks = blocks if isinstance(blocks, list) else [blocks]
-tokens = [s["svid"] for b in blocks if isinstance(b, dict) for s in b.get("svids", []) if isinstance(s, dict) and "svid" in s]
-if len(tokens) != 1: sys.exit(f"expected one JWT-SVID, got {len(tokens)}")
-sys.stdout.write(tokens[0])' | docker login "${repo%%/*}" --username zot --password-stdin >/dev/null
-
 docker push -q "$repo:$tag" >/dev/null
 echo "Published $repo:$tag"
