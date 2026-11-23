@@ -11,6 +11,11 @@ on:
 permissions:
   contents: read
 
+# Only PRs cancel superseded runs: every main run must finish, its binary is what ships.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   IAM_GRADLE_CACHE: /tmp/iam-ci/gradle
   IAM_NPM_CACHE: /tmp/iam-ci/npm
