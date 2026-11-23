@@ -1,10 +1,13 @@
 name: conformance
-# OpenID Foundation conformance suite, run by hand (Actions → conformance → Run workflow): it takes long and pulls
-# a lot. PRs that change the suite itself (its script, images or browser driver) run it automatically, since
-# nothing else exercises them. The suite build (~300 MB of Maven downloads) is cached per scripts/conformance,
+# OpenID Foundation conformance suite, run by hand (Actions → conformance → Run workflow) and weekly: it takes long
+# and pulls a lot, so not on every PR, but the weekly run catches drift no PR here causes (the app's own dependency
+# bumps, runner and browser images). PRs that change the suite itself (its script, images or browser driver) run
+# it automatically, since nothing else exercises them. The suite build (~300 MB of Maven downloads) is cached per scripts/conformance,
 # which pins the suite tag.
 on:
   workflow_dispatch:
+  schedule:
+    - cron: '41 4 * * 2'   # after CodeQL's Monday run, before the week's merges pile up
   pull_request:
     paths:
       - scripts/conformance
@@ -13,6 +16,11 @@ on:
 
 permissions:
   contents: read
+
+# A new push to the same PR supersedes the running suite; scheduled and manual runs on main queue instead.
+concurrency:
+  group: conformance-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   conformance:
