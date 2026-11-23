@@ -1,6 +1,7 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": ["config:recommended"],
+  "constraints": { "java": "25" },
   "packageRules": [
     {
       "description": "Boot pins the jOOQ runtime; the codegen plugin and meta-extensions must match it (build.gradle). Dep names: a Gradle plugin's package name is <id>:<id>.gradle.plugin, which matchPackageNames misses.",
