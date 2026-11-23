@@ -39,7 +39,8 @@ run=("${docker_cmd[@]}" run "${ci_label[@]}" --network host --add-host "$suite_h
 as_me=(--user "$(id -u):$(id -g)" -e HOME=/tmp)
 containers=(iam-conf-mongo iam-conf-suite iam-conf-nginx iam-conf-driver iam-conf-fixture)
 
-mkdir -p -- "$cache" "$out"
+# m2 here too: a bind mount Docker has to create is root-owned, and Maven runs as the caller (as_me).
+mkdir -p -- "$cache/m2" "$out"
 cache=$(cd -- "$cache" && pwd)
 out=$(cd -- "$out" && pwd)
 rm -rf -- "${out:?}"/*
