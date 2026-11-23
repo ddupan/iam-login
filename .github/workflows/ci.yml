@@ -31,6 +31,8 @@ jobs:
             /tmp/iam-ci/npm
           key: iam-jvm-${{ hashFiles('build.gradle', 'gradle/wrapper/gradle-wrapper.properties', 'frontend/package-lock.json') }}
           restore-keys: iam-jvm-
+      - name: Maven Central mirror
+        run: install -D -m 644 .github/gradle/central-mirror.init.gradle "$IAM_GRADLE_CACHE/init.d/central-mirror.gradle"
       - name: JVM tests and boot jar
         env:
           IAM_BUILD_MEMORY: 6g
@@ -68,6 +70,8 @@ jobs:
           restore-keys: |
             iam-native-
             iam-jvm-
+      - name: Maven Central mirror
+        run: install -D -m 644 .github/gradle/central-mirror.init.gradle "$IAM_GRADLE_CACHE/init.d/central-mirror.gradle"
       - name: Native image
         env:
           IAM_BUILD_MEMORY: 10g

@@ -39,6 +39,9 @@ jobs:
           java-version: '25'
       - if: matrix.build-mode == 'manual'
         uses: gradle/actions/setup-gradle@v6
+      - if: matrix.build-mode == 'manual'
+        name: Maven Central mirror
+        run: install -D -m 644 .github/gradle/central-mirror.init.gradle ~/.gradle/init.d/central-mirror.gradle
       - uses: github/codeql-action/init@v4
         with:
           languages: ${{ matrix.language }}

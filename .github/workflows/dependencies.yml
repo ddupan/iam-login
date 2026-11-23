@@ -20,6 +20,8 @@ jobs:
         with:
           distribution: temurin
           java-version: '25'
+      - name: Maven Central mirror
+        run: install -D -m 644 .github/gradle/central-mirror.init.gradle ~/.gradle/init.d/central-mirror.gradle
       - uses: gradle/actions/dependency-submission@v6
 
   review:
