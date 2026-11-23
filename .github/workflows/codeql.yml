@@ -43,9 +43,10 @@ jobs:
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
-      # Main and test sources; jooqCodegen (from the DDL, no database) runs before compileJava.
+      # Main and test sources; jooqCodegen (from the DDL, no database) runs before compileJava. processResources is
+      # skipped: it needs the frontend build, and the test classpath pulls it in though javac does not need it.
       - if: matrix.build-mode == 'manual'
-        run: ./gradlew --no-daemon compileJava compileTestJava
+        run: ./gradlew --no-daemon compileJava compileTestJava -x processResources
       - uses: github/codeql-action/analyze@v4
         with:
           category: /language:${{ matrix.language }}
