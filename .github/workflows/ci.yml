@@ -18,7 +18,7 @@ env:
 
 jobs:
   jvm:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
         with:
@@ -51,7 +51,7 @@ jobs:
           PY
 
   native:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       id-token: write      # provenance attestation (Sigstore)
