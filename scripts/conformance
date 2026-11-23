@@ -20,6 +20,8 @@ out=${IAM_CONFORMANCE_OUT:-$repo_root/build/conformance}
 # Images the suite's own docker-compose-dev.yml / builder-compose.yml use, pinned. The Maven image also runs
 # the server: it is the same JDK the jar was built with, and one image fewer to pull over the flaky WAN.
 maven=maven:3.10.0-eclipse-temurin-21
+# Maven Central rate-limits shared CI egress (HTTP 429 on GitHub-hosted runners); Google's mirror of Central does not.
+maven_mirror=${IAM_MAVEN_MIRROR:-https://maven-central.storage-download.googleapis.com/maven2/}
 mongo=mongo:6.0.28
 nginx=nginx:1.31.8
 python=python:3.15.2-slim
@@ -84,9 +86,13 @@ if [[ ! -f $suite/fapi-test-suite.jar ]]; then
   rm -rf -- "$suite"; mkdir -p -- "$suite"
   retry git -c advice.detachedHead=false clone -q --depth 1 -b "$suite_tag" https://gitlab.com/openid/conformance-suite.git "$suite/src" \
     || { rm -rf -- "$suite/src"; exit 1; }
-  # Maven resumes from the local repository, so a retry only re-fetches what the last attempt missed.
+  cat >"$cache/m2/settings.xml" <<XML
+<settings><mirrors><mirror><id>central-mirror</id><mirrorOf>central</mirrorOf><url>$maven_mirror</url></mirror></mirrors></settings>
+XML
+  # Maven resumes from the local repository, so a retry only re-fetches what the last attempt missed; -U makes it
+  # retry artifacts an earlier attempt recorded as missing instead of trusting that record.
   retry "${run[@]}" --rm "${as_me[@]}" -v "$cache/m2:/m2" -v "$suite/src:/src" -w /src --entrypoint mvn "$maven" \
-    -B -q -Dmaven.repo.local=/m2/repository -DskipTests=true package
+    -B -q -U -s /m2/settings.xml -Dmaven.repo.local=/m2/repository -DskipTests=true package
   retry "${run[@]}" --rm "${as_me[@]}" -v "$suite:/suite" "$python" \
     pip install -q --disable-pip-version-check --target /suite/pydeps -r /suite/src/scripts/requirements.txt
   cp "$suite/src/target/fapi-test-suite.jar" "$suite/"
