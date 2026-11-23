@@ -106,7 +106,7 @@ provider 再抛错。
   HtmlUnit 无法执行 ES module 登录页或 WebAuthn，用 `frontend/tests/conformance/driver.mjs`
   （Playwright）驱动其浏览器步骤，配合 `conformanceFixture`。
 - 一致性测试已自动化：`scripts/conformance`（套件 release-v5.3.1，Basic OP、Config OP、
-  RP-Initiated Logout OP，以及 client_secret_post 的综合计划），由 `.gitea/workflows/conformance.yml` 手动在 `iam-build` 上运行，结果（套件导出、日志）作为 artifact 保留。
+  RP-Initiated Logout OP，以及 client_secret_post 的综合计划），由 `.github/workflows/conformance.yml` 手动在 GitHub 托管 runner 上运行，结果（套件导出、日志）作为 artifact 保留。
   已接受的警告与跳过及其原因见 `frontend/tests/conformance/expected-{failures,skips}.json`，其余任何失败、
   警告、跳过，以及列表中不再出现的条目都会使任务失败。需截图的模块（错误页、`prompt=login` 等）由驱动上传截图，
   结果为 REVIEW，仍需人工查看。

@@ -1,0 +1,31 @@
+name: dependencies
+# Feeds the Gradle dependency graph to GitHub (Dependabot alerts cannot parse build.gradle on their own) and, on
+# PRs, reports newly added vulnerable or disallowed dependencies. Version updates stay with Renovate (renovate.json).
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  submit:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write   # the dependency submission API
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '25'
+      - uses: gradle/actions/dependency-submission@v6
+
+  review:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/dependency-review-action@v5
