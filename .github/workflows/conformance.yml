@@ -1,0 +1,50 @@
+name: conformance
+# OpenID Foundation conformance suite, run by hand (Actions → conformance → Run workflow): it takes long and pulls
+# a lot. PRs that change the suite itself (its script, images or browser driver) run it automatically, since
+# nothing else exercises them. The suite build (~300 MB of Maven downloads) is cached per scripts/conformance,
+# which pins the suite tag.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - scripts/conformance
+      - frontend/tests/conformance/**
+      - .github/workflows/conformance.yml
+
+permissions:
+  contents: read
+
+jobs:
+  conformance:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      IAM_GRADLE_CACHE: /tmp/iam-ci/gradle
+      IAM_NPM_CACHE: /tmp/iam-ci/npm
+      IAM_CONFORMANCE_CACHE: /tmp/iam-ci/conformance
+      IAM_BUILD_CPUS: "4"
+      IAM_BUILD_MEMORY: 4g
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/cache@v6
+        with:
+          path: |
+            /tmp/iam-ci/gradle/caches/modules-2
+            /tmp/iam-ci/gradle/wrapper
+            /tmp/iam-ci/npm
+          key: iam-jvm-${{ hashFiles('build.gradle', 'gradle/wrapper/gradle-wrapper.properties', 'frontend/package-lock.json') }}
+          restore-keys: iam-jvm-
+      - uses: actions/cache@v6
+        with:
+          path: /tmp/iam-ci/conformance
+          key: iam-conformance-${{ hashFiles('scripts/conformance') }}
+      - name: OpenID conformance suite
+        run: scripts/conformance
+      - name: Results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: conformance-results
+          path: build/conformance/

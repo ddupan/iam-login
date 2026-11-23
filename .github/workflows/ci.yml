@@ -1,0 +1,90 @@
+name: ci
+# GitHub-hosted runners (4 CPU / 16 GB for public repos) fit both the JVM checks and the native image (~11 min,
+# ~5.5 GB peak), so both run on every change. On main the tested binary is uploaded with a build-provenance
+# attestation; the homelab packages exactly that binary into the image it ships (no release rebuild).
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  IAM_GRADLE_CACHE: /tmp/iam-ci/gradle
+  IAM_NPM_CACHE: /tmp/iam-ci/npm
+  IAM_BUILD_CPUS: "4"
+
+jobs:
+  jvm:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/cache@v6
+        with:
+          path: |
+            /tmp/iam-ci/gradle/caches/modules-2
+            /tmp/iam-ci/gradle/wrapper
+            /tmp/iam-ci/npm
+          key: iam-jvm-${{ hashFiles('build.gradle', 'gradle/wrapper/gradle-wrapper.properties', 'frontend/package-lock.json') }}
+          restore-keys: iam-jvm-
+      - name: JVM tests and boot jar
+        env:
+          IAM_BUILD_MEMORY: 6g
+        # Test AOT is skipped until its fixture lifecycle issue is fixed (docs/native-validation.md).
+        run: scripts/gradle-in-docker test bootJar -x processTestAot -x compileAotTestJava -x processAotTestResources
+      - name: Failed tests
+        if: failure()
+        run: |
+          python3 - <<'PY'
+          import glob, xml.etree.ElementTree as E
+          for path in glob.glob("build/test-results/test/*.xml"):
+              for case in E.parse(path).getroot().iter("testcase"):
+                  for problem in case:
+                      if problem.tag in ("failure", "error"):
+                          print(f"{case.get('classname')}.{case.get('name')}: {(problem.get('message') or '')[:500]}")
+          PY
+
+  native:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write      # provenance attestation (Sigstore)
+      attestations: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/cache@v6
+        with:
+          path: |
+            /tmp/iam-ci/gradle/caches/modules-2
+            /tmp/iam-ci/gradle/wrapper
+            /tmp/iam-ci/npm
+          key: iam-native-${{ hashFiles('build.gradle', 'gradle/wrapper/gradle-wrapper.properties', 'frontend/package-lock.json') }}
+          restore-keys: |
+            iam-native-
+            iam-jvm-
+      - name: Native image
+        env:
+          IAM_BUILD_MEMORY: 10g
+        run: scripts/gradle-in-docker nativeCompile
+      - name: Native browser test
+        env:
+          IAM_BUILD_MEMORY: 4g
+        run: scripts/native-smoke
+      - name: Attest binary provenance
+        if: github.ref == 'refs/heads/main'
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: build/native/nativeCompile/iam-login
+      - name: Upload binary
+        if: github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v7
+        with:
+          name: iam-login-linux-amd64
+          path: build/native/nativeCompile/iam-login
+          if-no-files-found: error

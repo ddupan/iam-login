@@ -72,9 +72,10 @@ Docker 开发使用 `scripts/gradle-in-docker`，默认持久挂载 Gradle 缓�
 `application-prod.yaml`，AOT 以 `prod` profile 构建；部署同样激活 `prod`，外部配置只提供环境值（地址、issuer、
 RP ID 等）。运行时开关与构建不一致时拒绝启动（`FeatureFlags`）。
 
-发布：在 main 上手动触发 ci workflow（native 耗资源，合并不自动跑），publish job 在 Native 浏览器测试通过后，用 `Dockerfile` 打包**同一个**
-二进制并推到 `zot.lab.ddupan.top/iam/iam-login:<commit>`（`scripts/publish-image`，身份为 executor
-Pod 的 `spiffe://ddupan.top/ci/panxiao81/iam-login/publish`），不再单独为发布编译。
+发布：ci workflow 在 GitHub 托管 runner 上对每个 PR 和 main 都跑 JVM 测试与 Native 编译加浏览器测试；
+main 上通过后上传该二进制（artifact `iam-login-linux-amd64`）并附 build provenance attestation。
+homelab 侧用 `Dockerfile` 把**同一个**二进制打包进 `zot.lab.ddupan.top/iam/iam-login:<commit>`
+（`scripts/publish-image`），不再单独为发布编译；这一步待 homelab 自托管 runner 就绪后接回，期间不发新版。
 部署在 homelab-infra 中按 commit tag 固定。
 JVM、AOT、Native 测试及原生应用 HTTP 检查已通过，实测范围与资源数据见
 [本地验证结果](docs/bootstrap.md#2026-09-25-本地验证结果)。

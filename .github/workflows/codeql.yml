@@ -1,0 +1,52 @@
+name: codeql
+# Advanced setup, because default setup's buildless Java extraction cannot see jOOQ's generated sources and
+# failed to fetch dependency jars from Maven Central (429), leaving ~40% of calls unresolved. Java is built on
+# the runner itself: CodeQL traces javac, which it cannot do inside scripts/gradle-in-docker's container.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '23 3 * * 1'   # new queries find old code without any change here
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  analyze:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: java-kotlin
+            build-mode: manual
+          - language: javascript-typescript
+            build-mode: none
+          - language: python
+            build-mode: none
+          - language: actions
+            build-mode: none
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - if: matrix.build-mode == 'manual'
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '25'
+      - if: matrix.build-mode == 'manual'
+        uses: gradle/actions/setup-gradle@v6
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+      # Main and test sources; jooqCodegen (from the DDL, no database) runs before compileJava. processResources is
+      # skipped: it needs the frontend build, and the test classpath pulls it in though javac does not need it.
+      - if: matrix.build-mode == 'manual'
+        run: ./gradlew --no-daemon compileJava compileTestJava -x processResources
+      - uses: github/codeql-action/analyze@v4
+        with:
+          category: /language:${{ matrix.language }}

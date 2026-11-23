@@ -1,18 +1,17 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": ["config:recommended"],
+  "constraints": { "java": "25" },
   "packageRules": [
     {
       "description": "Boot pins the jOOQ runtime; the codegen plugin and meta-extensions must match it (build.gradle). Dep names: a Gradle plugin's package name is <id>:<id>.gradle.plugin, which matchPackageNames misses.",
       "matchDepNames": ["org.springframework.boot", "org.jooq.jooq-codegen-gradle", "org.jooq:jooq-meta-extensions"],
-      "groupName": "spring-boot",
-      "prBodyNotes": ["影响 AOT/Native：合并后、发布前在 main 上手动运行 ci，确认 native 通过。"]
+      "groupName": "spring-boot"
     },
     {
-      "description": "Native toolchain: only the manually dispatched native job exercises it.",
+      "description": "Native toolchain: exercised by the native job.",
       "matchDepNames": ["org.graalvm.buildtools.native", "ghcr.io/graalvm/native-image-community"],
-      "groupName": "native toolchain",
-      "prBodyNotes": ["只有手动触发的 native job 会用到：合并后、发布前在 main 上手动运行 ci，确认 native 通过。"]
+      "groupName": "native toolchain"
     },
     {
       "description": "The conformance suite's images: one PR, majors included; the PR runs the conformance workflow (paths filter).",
@@ -22,7 +21,7 @@
       "prBodyNotes": ["这些镜像只有 conformance workflow 会用到；本 PR 会自动跑 conformance，合并前确认它通过。"]
     },
     {
-      "description": "Stay on the MongoDB major the suite's own docker-compose uses. mongo 9.0.4 also refuses to start on kernels 6.19-7.0.13 (SERVER-121912), which the iam-build runner (pve1) is on.",
+      "description": "Stay on the MongoDB major the suite's own docker-compose uses. mongo 9.0.4 also refuses to start on kernels 6.19-7.0.13 (SERVER-121912), which the former iam-build runner (pve1) was on.",
       "matchFileNames": ["scripts/conformance"],
       "matchDepNames": ["mongo"],
       "allowedVersions": "<7"
