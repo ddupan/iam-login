@@ -19,13 +19,13 @@ cache=${IAM_CONFORMANCE_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/iam-login/conform
 out=${IAM_CONFORMANCE_OUT:-$repo_root/build/conformance}
 # Images the suite's own docker-compose-dev.yml / builder-compose.yml use, pinned. The Maven image also runs
 # the server: it is the same JDK the jar was built with, and one image fewer to pull over the flaky WAN.
-maven=maven:3.10.0-eclipse-temurin-21
+maven=maven:3.10.2-eclipse-temurin-21
 # Maven Central rate-limits shared CI egress (HTTP 429 on GitHub-hosted runners); Google's mirror of Central does not.
 maven_mirror=${IAM_MAVEN_MIRROR:-https://maven-central.storage-download.googleapis.com/maven2/}
 mongo=mongo:6.0.28
-nginx=nginx:1.31.8
+nginx=nginx:1.31.10
 python=python:3.15.2-slim
-playwright=mcr.microsoft.com/playwright:v1.65.0-noble   # matches @playwright/test in frontend/package.json (one Renovate group)
+playwright=mcr.microsoft.com/playwright:v1.65.1-noble   # matches @playwright/test in frontend/package.json (one Renovate group)
 suite_host=localhost.emobix.co.uk   # the suite's dev base URL; its public DNS points at 127.0.0.1
 docker_cmd=(docker)
 if [[ ${IAM_DOCKER_USE_SUDO:-0} == 1 ]]; then docker_cmd=(sudo -n docker); fi

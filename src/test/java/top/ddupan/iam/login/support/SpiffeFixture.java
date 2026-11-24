@@ -14,6 +14,7 @@ import com.nimbusds.jwt.SignedJWT;
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
@@ -36,7 +37,7 @@ public final class SpiffeFixture implements AutoCloseable {
         try {
             key = new RSAKeyGenerator(2048).keyID("spire-fixture").generate();
             x509Key = new RSAKeyGenerator(2048).keyID("spire-x509").generate();
-            server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+            server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
         } catch (JOSEException ex) {
             throw new IllegalStateException(ex);
         } catch (IOException ex) {

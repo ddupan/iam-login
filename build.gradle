@@ -2,7 +2,7 @@ plugins {
 	id 'java'
 	id 'org.springframework.boot' version '4.2.0'
 	id 'io.spring.dependency-management' version '1.1.7'
-	id 'org.graalvm.buildtools.native' version '1.1.18'
+	id 'org.graalvm.buildtools.native' version '1.1.19'
 	// Same version as the jOOQ runtime Spring Boot manages (3.21.7 with Boot 4.1.1).
 	id 'org.jooq.jooq-codegen-gradle' version '3.21.10'
 	id 'net.ltgt.errorprone' version '5.2.0'
@@ -47,7 +47,7 @@ dependencies {
 	runtimeOnly 'io.micrometer:micrometer-registry-prometheus'
 	annotationProcessor 'org.projectlombok:lombok'
 	annotationProcessor 'org.springframework.boot:spring-boot-configuration-processor'
-	errorprone 'com.google.errorprone:error_prone_core:2.52.0'
+	errorprone 'com.google.errorprone:error_prone_core:2.53.0'
 	testImplementation 'org.springframework.boot:spring-boot-starter-actuator-test'
 	testImplementation 'org.springframework.boot:spring-boot-starter-data-ldap-test'
 	testImplementation 'org.springframework.boot:spring-boot-starter-ldap'
@@ -69,8 +69,11 @@ tasks.named('test') {
 	useJUnitPlatform()
 }
 
-// Static analysis at compile time: Error Prone's ERROR-level checks fail the build (and so CI), warnings are
-// reported. Generated code (jOOQ tables, Spring AOT sources) is not ours to fix.
+// Static analysis at compile time: javac lint and Error Prone warnings fail the build (and so CI) for our own
+// sources. Generated code (jOOQ tables, Spring AOT sources) is not ours to fix. "processing" only reports that
+// no annotation processor claimed the (runtime) annotations.
+tasks.named('compileJava') { options.compilerArgs += ['-Xlint:all,-processing', '-Werror'] }
+tasks.named('compileTestJava') { options.compilerArgs += ['-Xlint:all,-processing', '-Werror'] }
 tasks.withType(JavaCompile).configureEach {
 	options.errorprone {
 		disableWarningsInGeneratedCode = true

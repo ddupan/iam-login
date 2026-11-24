@@ -3,6 +3,7 @@ package top.ddupan.iam.login.configuration;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.Set;
+import javax.crypto.SecretKey;
 import org.jooq.DSLContext;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -10,7 +11,8 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.jdbc.core.JdbcOperations;
-import org.springframework.security.crypto.encrypt.AesBytesEncryptor;
+import org.springframework.security.crypto.encrypt.AesGcmBytesEncryptor;
+import org.springframework.security.crypto.encrypt.BytesEncryptor;
 import org.springframework.security.crypto.keygen.KeyGenerators;
 import org.springframework.security.web.webauthn.api.AuthenticatorSelectionCriteria;
 import org.springframework.security.web.webauthn.api.PublicKeyCredentialRpEntity;
@@ -51,8 +53,12 @@ class WebAuthnConfiguration {
 
     @Bean
     TotpCredentials totpCredentials(DSLContext db, TotpProperties properties) {
-        return new TotpCredentials(db, new AesBytesEncryptor(properties.secretKey(), KeyGenerators.secureRandom(12),
-            AesBytesEncryptor.CipherAlgorithm.GCM));
+        return new TotpCredentials(db, totpEncryptor(properties.secretKey()));
+    }
+
+    /** 12-byte IV: the format AesBytesEncryptor(GCM) wrote the stored secrets in (AesGcm's default is 16). */
+    static BytesEncryptor totpEncryptor(SecretKey key) {
+        return AesGcmBytesEncryptor.withSecretKey(key).ivGenerator(KeyGenerators.secureRandom(12)).build();
     }
 
     @Bean
