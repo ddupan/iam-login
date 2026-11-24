@@ -83,7 +83,7 @@ final class SpiffeClients {
             TrustDomain {
                 if (name == null || !TRUST_DOMAIN.matcher(name).matches()) throw new IllegalArgumentException("Invalid trust domain " + name);
                 // WebPKI flavour (6.1): an https endpoint whose certificate the JVM trusts.
-                if (bundleEndpoint == null || !"https".equals(bundleEndpoint.getScheme()) && !loopback(bundleEndpoint)) {
+                if (bundleEndpoint == null || (!"https".equals(bundleEndpoint.getScheme()) && !loopback(bundleEndpoint))) {
                     throw new IllegalArgumentException("The bundle endpoint of " + name + " must be https");
                 }
             }
@@ -107,6 +107,7 @@ final class SpiffeClients {
 
     /** A request authenticating with a JWT-SVID; verified by {@link Provider}. */
     static final class Assertion extends OAuth2ClientAuthenticationToken {
+        private static final long serialVersionUID = 1L;
         Assertion(String clientId, String assertion) {
             super(clientId, SPIFFE_JWT, assertion, null);
         }
@@ -126,7 +127,7 @@ final class SpiffeClients {
                 var subjects = request.getParameterValues(OAuth2ParameterNames.SUBJECT_TOKEN);
                 var ids = request.getParameterValues(OAuth2ParameterNames.CLIENT_ID);
                 // Malformed exchanges are the framework converter's to reject, with its error.
-                if (subjects == null || subjects.length != 1 || ids != null && ids.length != 1) return null;
+                if (subjects == null || subjects.length != 1 || (ids != null && ids.length != 1)) return null;
                 String clientId = ids != null ? ids[0] : subject(subjects[0]);
                 return clientId == null || clientId.isBlank() ? null : new Assertion(clientId, subjects[0]);
             }
@@ -135,7 +136,7 @@ final class SpiffeClients {
             var assertions = request.getParameterValues(OAuth2ParameterNames.CLIENT_ASSERTION);
             var ids = request.getParameterValues(OAuth2ParameterNames.CLIENT_ID);
             // RFC 6749 2.3: one authentication method per request.
-            if (types.length != 1 || assertions == null || assertions.length != 1 || ids != null && ids.length != 1
+            if (types.length != 1 || assertions == null || assertions.length != 1 || (ids != null && ids.length != 1)
                     || request.getHeader(HttpHeaders.AUTHORIZATION) != null || request.getParameter(OAuth2ParameterNames.CLIENT_SECRET) != null) {
                 throw new OAuth2AuthenticationException(OAuth2ErrorCodes.INVALID_REQUEST);
             }
@@ -218,7 +219,7 @@ final class SpiffeClients {
         private static boolean verified(SignedJWT jwt, List<JWK> candidates) {
             var kid = jwt.getHeader().getKeyID();
             for (var key : candidates) {
-                if (kid != null && !kid.equals(key.getKeyID()) || !(key instanceof AsymmetricJWK asymmetric)) continue;
+                if ((kid != null && !kid.equals(key.getKeyID())) || !(key instanceof AsymmetricJWK asymmetric)) continue;
                 try {
                     if (jwt.verify(new DefaultJWSVerifierFactory().createJWSVerifier(jwt.getHeader(), asymmetric.toPublicKey()))) return true;
                 } catch (JOSEException ex) {
@@ -314,7 +315,10 @@ final class SpiffeClients {
             var now = clock.instant();
             if (cached == null || now.isAfter(cached.fetched().plus(cached.refresh()))) {
                 var fetched = fetch(trustDomain, endpoint, now);
-                if (fetched != null) cache.put(trustDomain, cached = fetched);
+                if (fetched != null) {
+                    cache.put(trustDomain, fetched);
+                    cached = fetched;
+                }
             }
             return cached == null ? List.of() : cached.keys();
         }

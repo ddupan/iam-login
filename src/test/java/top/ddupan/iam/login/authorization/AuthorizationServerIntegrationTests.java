@@ -59,6 +59,7 @@ import org.springframework.web.util.UriComponentsBuilder;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
 import org.yaml.snakeyaml.Yaml;
+import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.json.JsonMapper;
 import top.ddupan.iam.login.authentication.domain.User;
 import top.ddupan.iam.login.authentication.interfaces.web.ErrorPages;
@@ -344,7 +345,7 @@ class AuthorizationServerIntegrationTests {
     @Test void tokensAreSignedByTheFirstKeyAndAllKeysArePublished() throws Exception {
         var jwks = json(mvc.perform(get("/oauth2/jwks").with(https())).andExpect(status().isOk())
             .andReturn().getResponse().getContentAsString());
-        var keys = (List<Map<String, Object>>) jwks.get("keys");
+        @SuppressWarnings("unchecked") var keys = (List<Map<String, Object>>) jwks.get("keys");
         assertThat(keys).hasSize(2).allSatisfy(key -> assertThat(key).doesNotContainKeys("d", "p", "q"));
         var active = thumbprint(Fixtures.ACTIVE_KEY);
         assertThat(keys).extracting(key -> key.get("kid")).containsExactly(active, thumbprint(Fixtures.PREVIOUS_KEY));
@@ -354,7 +355,7 @@ class AuthorizationServerIntegrationTests {
                 .param("grant_type", "authorization_code").param("code", code(session, verifier))
                 .param("redirect_uri", CALLBACK).param("code_verifier", verifier))
             .andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
-        var header = json(new String(Base64.getUrlDecoder().decode(((String) tokens.get("id_token")).split("\\.")[0]), StandardCharsets.UTF_8));
+        var header = json(new String(Base64.getUrlDecoder().decode(((String) tokens.get("id_token")).split("\\.", -1)[0]), StandardCharsets.UTF_8));
         assertThat(header).containsEntry("kid", active);
     }
 
@@ -721,7 +722,7 @@ class AuthorizationServerIntegrationTests {
         var created = json(mvc.perform(post("/api/iam/clients").with(https()).with(admin).contentType(MediaType.APPLICATION_JSON).content(body))
             .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString());
         assertThat(created.get("secret")).isNull();
-        assertThat((Map<String, Object>) created.get("client")).containsEntry("publicClient", true)
+        assertThat(created.get("client")).asInstanceOf(InstanceOfAssertFactories.MAP).containsEntry("publicClient", true)
             .containsEntry("audiences", List.of("https://resource.example"));
         mvc.perform(post("/api/iam/clients").with(https()).with(admin).contentType(MediaType.APPLICATION_JSON)
                 .content(body.replace("public-app", "public-no-pkce").replace("\"pkceRequired\":true", "\"pkceRequired\":false")))
@@ -854,9 +855,9 @@ class AuthorizationServerIntegrationTests {
             .queryParam("code_challenge_method", "S256").encode().build().toUriString();
     }
     private static String verifier() { return UUID.randomUUID() + "-" + UUID.randomUUID(); }
-    private static Map<String, Object> json(String body) { return JsonMapper.builder().build().readValue(body, Map.class); }
+    private static Map<String, Object> json(String body) { return JsonMapper.builder().build().readValue(body, new TypeReference<Map<String, Object>>() { }); }
     private static Map<String, Object> claims(String jwt) {
-        return json(new String(Base64.getUrlDecoder().decode(jwt.split("\\.")[1]), StandardCharsets.UTF_8));
+        return json(new String(Base64.getUrlDecoder().decode(jwt.split("\\.", -1)[1]), StandardCharsets.UTF_8));
     }
     private MockHttpSession login() throws Exception { return password(new MockHttpSession()); }
     private MockHttpSession password(MockHttpSession session) throws Exception {

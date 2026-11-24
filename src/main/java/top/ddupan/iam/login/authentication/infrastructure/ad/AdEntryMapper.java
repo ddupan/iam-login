@@ -20,7 +20,7 @@ public final class AdEntryMapper extends DefaultObjectDirectoryMapper {
         } catch (NamingException ex) {
             throw new UserRepository.AccessFailure();
         } finally {
-            try { ids.close(); } catch (NamingException ignored) { }
+            try { ids.close(); } catch (NamingException ignored) { /* already failed or done; nothing to recover */ }
         }
         return super.mapFromLdapDataEntry(entry, type);
     }

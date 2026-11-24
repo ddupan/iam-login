@@ -419,7 +419,6 @@ class WebAuthnIntegrationTests {
         return id.toBase64UrlString();
     }
 
-    private static final String AUTH_URL = "http://localhost:14444/oauth2/auth?client_id=gitea-fixture&response_type=code";
     private void secondFactor(MockHttpSession session) {
         var context = (SecurityContext) session.getAttribute("SPRING_SECURITY_CONTEXT");
         var previous = context.getAuthentication();

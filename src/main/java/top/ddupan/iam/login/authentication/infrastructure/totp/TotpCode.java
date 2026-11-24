@@ -8,6 +8,7 @@ import org.springframework.security.authentication.AbstractAuthenticationToken;
  * under {@link #PENDING} (base64) until a code confirms it; null when verifying the key already saved.
  */
 public final class TotpCode extends AbstractAuthenticationToken {
+    private static final long serialVersionUID = 1L;
     public static final String PENDING = "iam.totp.pending";
     private final String code;
     private final byte[] enrolling;

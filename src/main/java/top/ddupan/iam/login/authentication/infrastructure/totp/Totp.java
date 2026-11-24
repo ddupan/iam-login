@@ -51,11 +51,11 @@ public final class Totp {
         var out = new StringBuilder();
         int buffer = 0, bits = 0;
         for (var b : bytes) {
-            buffer = buffer << 8 | b & 0xff;
+            buffer = (buffer << 8) | (b & 0xff);
             bits += 8;
-            for (; bits >= 5; bits -= 5) out.append(ALPHABET.charAt(buffer >> bits - 5 & 31));
+            for (; bits >= 5; bits -= 5) out.append(ALPHABET.charAt((buffer >> (bits - 5)) & 31));
         }
-        if (bits > 0) out.append(ALPHABET.charAt(buffer << 5 - bits & 31));
+        if (bits > 0) out.append(ALPHABET.charAt((buffer << (5 - bits)) & 31));
         return out.toString();
     }
 }

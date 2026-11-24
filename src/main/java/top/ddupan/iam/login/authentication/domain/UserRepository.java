@@ -17,6 +17,7 @@ public interface UserRepository {
     Optional<User> findActive(String username);
 
     final class AccessFailure extends RuntimeException {
+        private static final long serialVersionUID = 1L;
         public AccessFailure() { super("User repository is unavailable or returned an invalid user"); }
         public AccessFailure(Throwable cause) { super("User repository is unavailable", cause); }
     }

@@ -31,7 +31,7 @@ public record MachineClient(String id, String name, String spiffeId, Set<String>
         if (spiffeId == null || spiffeId.length() > 2048) return null;
         var match = SPIFFE_ID.matcher(spiffeId);
         if (!match.matches()) return null;
-        for (var segment : match.group(2).split("/")) if (segment.equals(".") || segment.equals("..")) return null;
+        for (var segment : match.group(2).split("/", -1)) if (segment.equals(".") || segment.equals("..")) return null;
         return match.group(1);
     }
 }
