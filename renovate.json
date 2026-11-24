@@ -4,6 +4,12 @@
   "constraints": { "java": "25" },
   "packageRules": [
     {
+      "description": "constraints.java is Renovate's own toolchain hint (major only); do not pin it to a full build version.",
+      "matchFileNames": ["renovate.json"],
+      "matchDepNames": ["java"],
+      "enabled": false
+    },
+    {
       "description": "Boot pins the jOOQ runtime; the codegen plugin and meta-extensions must match it (build.gradle). Dep names: a Gradle plugin's package name is <id>:<id>.gradle.plugin, which matchPackageNames misses.",
       "matchDepNames": ["org.springframework.boot", "org.jooq.jooq-codegen-gradle", "org.jooq:jooq-meta-extensions"],
       "groupName": "spring-boot"
