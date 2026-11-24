@@ -151,7 +151,7 @@ public class SignInController {
 
     /** Both factors done: an authorization request interrupted for login resumes, otherwise the account page. */
     @GetMapping(value = "/signin/complete", produces = MediaType.TEXT_HTML_VALUE)
-    ResponseEntity<String> complete(HttpServletRequest request, HttpServletResponse response) {
+    ResponseEntity<Void> complete(HttpServletRequest request, HttpServletResponse response) {
         var cache = new HttpSessionRequestCache();
         var saved = cache.getRequest(request, response);
         if (saved != null) cache.removeRequest(request, response);
