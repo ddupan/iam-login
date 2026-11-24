@@ -28,6 +28,9 @@ final class SecurityJacksonHints implements RuntimeHintsRegistrar {
         "org.springframework.security.oauth2.core.endpoint.OAuth2AuthorizationResponseType",
         "org.springframework.security.oauth2.core.AuthorizationGrantType",
         "org.springframework.security.authentication.UsernamePasswordAuthenticationToken",
+        // Jackson reads "authenticated" from the base class field after the Boot 4.2 upgrade;
+        // ACCESS_DECLARED_FIELDS on the subclasses does not cover inherited fields.
+        "org.springframework.security.authentication.AbstractAuthenticationToken",
         "org.springframework.security.core.authority.FactorGrantedAuthority",
         "org.springframework.security.core.authority.SimpleGrantedAuthority",
         "org.springframework.security.web.authentication.WebAuthenticationDetails",
