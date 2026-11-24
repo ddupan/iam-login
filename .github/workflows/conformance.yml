@@ -24,7 +24,7 @@ concurrency:
 
 jobs:
   conformance:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 90
     env:
       IAM_GRADLE_CACHE: /tmp/iam-ci/gradle
