@@ -69,8 +69,11 @@ tasks.named('test') {
 	useJUnitPlatform()
 }
 
-// Static analysis at compile time: Error Prone's ERROR-level checks fail the build (and so CI), warnings are
-// reported. Generated code (jOOQ tables, Spring AOT sources) is not ours to fix.
+// Static analysis at compile time: javac lint and Error Prone warnings fail the build (and so CI) for our own
+// sources. Generated code (jOOQ tables, Spring AOT sources) is not ours to fix. "processing" only reports that
+// no annotation processor claimed the (runtime) annotations.
+tasks.named('compileJava') { options.compilerArgs += ['-Xlint:all,-processing', '-Werror'] }
+tasks.named('compileTestJava') { options.compilerArgs += ['-Xlint:all,-processing', '-Werror'] }
 tasks.withType(JavaCompile).configureEach {
 	options.errorprone {
 		disableWarningsInGeneratedCode = true

@@ -1,5 +1,6 @@
 package top.ddupan.iam.login.configuration;
 
+import java.nio.charset.StandardCharsets;
 import java.security.KeyPairGenerator;
 import java.util.Base64;
 import java.util.List;
@@ -14,12 +15,12 @@ class SigningKeysTests {
         assertThatIllegalStateException().isThrownBy(() -> SigningKeys.load(List.of()));
         assertThatIllegalStateException().isThrownBy(() -> SigningKeys.load(null));
         assertThatIllegalStateException().isThrownBy(() -> SigningKeys.load(List.of(new ByteArrayResource(
-            "-----BEGIN RSA PRIVATE KEY-----\nAAAA\n-----END RSA PRIVATE KEY-----\n".getBytes()))));
+            "-----BEGIN RSA PRIVATE KEY-----\nAAAA\n-----END RSA PRIVATE KEY-----\n".getBytes(StandardCharsets.US_ASCII)))));
         var weak = KeyPairGenerator.getInstance("RSA");
         weak.initialize(1024);
         var pem = "-----BEGIN PRIVATE KEY-----\n" + Base64.getMimeEncoder().encodeToString(weak.generateKeyPair().getPrivate().getEncoded())
             + "\n-----END PRIVATE KEY-----\n";
-        assertThatIllegalStateException().isThrownBy(() -> SigningKeys.load(List.of(new ByteArrayResource(pem.getBytes()))))
+        assertThatIllegalStateException().isThrownBy(() -> SigningKeys.load(List.of(new ByteArrayResource(pem.getBytes(StandardCharsets.US_ASCII)))))
             .withMessageContaining("2048");
     }
 

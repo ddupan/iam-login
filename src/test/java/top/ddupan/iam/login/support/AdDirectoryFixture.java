@@ -55,7 +55,7 @@ public final class AdDirectoryFixture implements AutoCloseable {
             var config = new InMemoryDirectoryServerConfig(BASE);
             config.setSchema(null);
             config.setListenerConfigs(InMemoryListenerConfig.createLDAPSConfig("ldaps",
-                InetAddress.getByName("127.0.0.1"), 0, ssl.getServerSocketFactory(), ssl.getSocketFactory()));
+                InetAddress.getLoopbackAddress(), 0, ssl.getServerSocketFactory(), ssl.getSocketFactory()));
             config.addInMemoryOperationInterceptor(new InMemoryOperationInterceptor() {
                 @Override
                 public void processSearchResult(InMemoryInterceptedSearchResult result) {

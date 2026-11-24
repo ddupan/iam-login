@@ -34,6 +34,7 @@ final class PublicClients {
 
     /** A request naming a public client by client_id alone; authenticated by {@link Provider}. */
     static final class ClientIdOnly extends OAuth2ClientAuthenticationToken {
+        private static final long serialVersionUID = 1L;
         ClientIdOnly(String clientId) {
             super(clientId, ClientAuthenticationMethod.NONE, null, null);
         }

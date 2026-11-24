@@ -2,6 +2,7 @@ package top.ddupan.iam.login.support;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.KeyPairGenerator;
@@ -19,7 +20,7 @@ public final class SigningKeyFixture {
             var file = Files.createTempFile("iam-signing-key", ".pem");
             file.toFile().deleteOnExit();
             Files.writeString(file, "-----BEGIN PRIVATE KEY-----\n"
-                + Base64.getMimeEncoder(64, "\n".getBytes()).encodeToString(generator.generateKeyPair().getPrivate().getEncoded())
+                + Base64.getMimeEncoder(64, "\n".getBytes(StandardCharsets.US_ASCII)).encodeToString(generator.generateKeyPair().getPrivate().getEncoded())
                 + "\n-----END PRIVATE KEY-----\n");
             return file;
         } catch (IOException ex) { throw new UncheckedIOException(ex); }

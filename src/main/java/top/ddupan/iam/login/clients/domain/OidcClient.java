@@ -87,8 +87,8 @@ public record OidcClient(String id, String name, List<String> redirectUris, Set<
         if (value == null || value.length() > 2048 || value.contains("*")) throw new IllegalArgumentException("Invalid URI");
         var uri = URI.create(value);
         if (uri.getHost() == null || uri.getUserInfo() != null || uri.getFragment() != null
-                || !("https".equals(uri.getScheme()) || "http".equals(uri.getScheme())
-                    && Set.of("localhost", "127.0.0.1", "[::1]").contains(uri.getHost())))
+                || !("https".equals(uri.getScheme()) || ("http".equals(uri.getScheme())
+                    && Set.of("localhost", "127.0.0.1", "[::1]").contains(uri.getHost()))))
             throw new IllegalArgumentException("HTTPS or loopback callback required");
     }
 }
