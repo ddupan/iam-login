@@ -47,7 +47,7 @@ dependencies {
 	runtimeOnly 'io.micrometer:micrometer-registry-prometheus'
 	annotationProcessor 'org.projectlombok:lombok'
 	annotationProcessor 'org.springframework.boot:spring-boot-configuration-processor'
-	errorprone 'com.google.errorprone:error_prone_core:2.52.0'
+	errorprone 'com.google.errorprone:error_prone_core:2.53.0'
 	testImplementation 'org.springframework.boot:spring-boot-starter-actuator-test'
 	testImplementation 'org.springframework.boot:spring-boot-starter-data-ldap-test'
 	testImplementation 'org.springframework.boot:spring-boot-starter-ldap'
