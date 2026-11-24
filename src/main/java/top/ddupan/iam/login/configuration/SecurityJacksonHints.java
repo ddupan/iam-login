@@ -18,6 +18,11 @@ import top.ddupan.iam.login.authentication.infrastructure.security.DirectoryPrin
  * Reflection the native image needs to read back stored registered clients and authorizations. JSON in
  * those tables names its types ("@class"), resolved by Class.forName at runtime; none of this is visible
  * on the JVM. Spring Security 7.1 does not ship these hints for its Jackson 3 path.
+ * <p>
+ * A hint merged with one registered elsewhere keeps that registration's reachability condition. Since 7.2,
+ * OAuth2AuthorizationRequest, AuthorizationGrantType and OAuth2AuthorizationResponseType arrive conditioned on
+ * the OAuth2 client's OAuth2AuthenticationToken, never reached here; they are repeated unconditionally in
+ * META-INF/native-image/top.ddupan.iam/iam-login-manual/reachability-metadata.json.
  */
 final class SecurityJacksonHints implements RuntimeHintsRegistrar {
     // Type ids written into client settings and authorization attributes.
@@ -28,6 +33,9 @@ final class SecurityJacksonHints implements RuntimeHintsRegistrar {
         "org.springframework.security.oauth2.core.endpoint.OAuth2AuthorizationResponseType",
         "org.springframework.security.oauth2.core.AuthorizationGrantType",
         "org.springframework.security.authentication.UsernamePasswordAuthenticationToken",
+        // Jackson reads "authenticated" from the base class field after the Boot 4.2 upgrade;
+        // ACCESS_DECLARED_FIELDS on the subclasses does not cover inherited fields.
+        "org.springframework.security.authentication.AbstractAuthenticationToken",
         "org.springframework.security.core.authority.FactorGrantedAuthority",
         "org.springframework.security.core.authority.SimpleGrantedAuthority",
         "org.springframework.security.web.authentication.WebAuthenticationDetails",

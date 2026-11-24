@@ -21,6 +21,27 @@
           "parameterTypes": []
         }
       ]
+    },
+    {
+      "type": "org.springframework.security.oauth2.core.AuthorizationGrantType",
+      "allDeclaredFields": true,
+      "allDeclaredConstructors": true,
+      "allDeclaredMethods": true,
+      "allPublicMethods": true
+    },
+    {
+      "type": "org.springframework.security.oauth2.core.endpoint.OAuth2AuthorizationRequest",
+      "allDeclaredFields": true,
+      "allDeclaredConstructors": true,
+      "allDeclaredMethods": true,
+      "allPublicMethods": true
+    },
+    {
+      "type": "org.springframework.security.oauth2.core.endpoint.OAuth2AuthorizationResponseType",
+      "allDeclaredFields": true,
+      "allDeclaredConstructors": true,
+      "allDeclaredMethods": true,
+      "allPublicMethods": true
     }
   ]
 }

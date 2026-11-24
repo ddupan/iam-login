@@ -69,7 +69,6 @@ import org.springframework.security.oauth2.server.authorization.OAuth2TokenType;
 import org.springframework.security.oauth2.server.authorization.authentication.OAuth2AccessTokenAuthenticationToken;
 import org.springframework.security.oauth2.server.authorization.authentication.OAuth2AuthorizationCodeRequestAuthenticationContext;
 import org.springframework.security.oauth2.server.authorization.authentication.OAuth2AuthorizationCodeRequestAuthenticationException;
-import org.springframework.security.oauth2.server.authorization.authentication.OAuth2AuthorizationCodeRequestAuthenticationProvider;
 import org.springframework.security.oauth2.server.authorization.authentication.OAuth2AuthorizationCodeRequestAuthenticationToken;
 import org.springframework.security.oauth2.server.authorization.authentication.OAuth2AuthorizationCodeRequestAuthenticationValidator;
 import org.springframework.security.oauth2.server.authorization.authentication.OAuth2AuthorizationConsentAuthenticationToken;
@@ -180,12 +179,11 @@ class AuthorizationServerConfiguration {
                     .authorizationRequestConverters(converters -> converters.replaceAll(converter ->
                         converter instanceof OAuth2AuthorizationCodeRequestAuthenticationConverter
                             ? new PromptNoneWithoutMfa(converter, requiredFactors) : converter))
+                    // Since Security 7.2 the configurer sets the validator on the provider (and pre-validation
+                    // filter) itself, overwriting one set through authenticationProviders.
+                    .authorizationCodeRequestAuthenticationValidator(new OAuth2AuthorizationCodeRequestAuthenticationValidator()
+                        .andThen(AuthorizationServerConfiguration::requestPolicy))
                     .authenticationProviders(providers -> {
-                        providers.stream().filter(OAuth2AuthorizationCodeRequestAuthenticationProvider.class::isInstance)
-                            .map(OAuth2AuthorizationCodeRequestAuthenticationProvider.class::cast)
-                            .forEach(codeRequests -> codeRequests.setAuthenticationValidator(
-                                new OAuth2AuthorizationCodeRequestAuthenticationValidator()
-                                    .andThen(AuthorizationServerConfiguration::requestPolicy)));
                         providers.addFirst(new MfaGate(OAuth2AuthorizationConsentAuthenticationToken.class, requiredFactors));
                         providers.addFirst(new MfaGate(OAuth2AuthorizationCodeRequestAuthenticationToken.class, requiredFactors));
                     }))
