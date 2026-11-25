@@ -94,6 +94,9 @@ test("AD + passkey -> in-process authorization server: consent, tokens, userinfo
   await presence(false);
   await page.goto(authorize.toString());
   await expect(page.getByRole("heading", { name: "登录", exact: true })).toBeVisible();
+  // Leave first: this page's pending passkey autofill would answer the presence below and sign in to fixture-rp
+  // (landing on its callback), racing the console visit.
+  await page.goto("about:blank");
   await presence(true);
 
   // Console: a public client of this same server; the client API only accepts its bearer token.
